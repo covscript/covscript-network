@@ -35,10 +35,14 @@
 #   include <windows.h>
 #  endif // ((WINAPI_FAMILY & WINAPI_PARTITION_DESKTOP) != 0)
 # endif // defined(WINAPI_FAMILY)
+
 # include <winsock2.h>
 # include <ws2tcpip.h>
+
 # if !defined(ASIO_WINDOWS_APP)
+
 #  include <mswsock.h>
+
 # endif // !defined(ASIO_WINDOWS_APP)
 # if defined(ASIO_WSPIAPI_H_DEFINED)
 #  undef _WSPIAPI_H_
@@ -54,7 +58,9 @@
 #   endif // !defined(ASIO_WINDOWS_APP)
 #  endif // defined(_MSC_VER) || defined(__BORLANDC__)
 # endif // !defined(ASIO_NO_DEFAULT_LINKED_LIBS)
+
 # include "asio/detail/old_win_sdk_compat.hpp"
+
 #else
 # include <sys/ioctl.h>
 # if !defined(__SYMBIAN32__)
@@ -89,33 +95,58 @@
 #include "asio/detail/push_options.hpp"
 
 namespace asio {
-namespace detail {
+	namespace detail {
 
 #if defined(ASIO_WINDOWS_RUNTIME)
-const int max_addr_v4_str_len = 256;
-const int max_addr_v6_str_len = 256;
-typedef unsigned __int32 u_long_type;
-typedef unsigned __int16 u_short_type;
-struct in4_addr_type { u_long_type s_addr; };
-struct in4_mreq_type { in4_addr_type imr_multiaddr, imr_interface; };
-struct in6_addr_type { unsigned char s6_addr[16]; };
-struct in6_mreq_type { in6_addr_type ipv6mr_multiaddr;
-  unsigned long ipv6mr_interface; };
-struct socket_addr_type { int sa_family; };
-struct sockaddr_in4_type { int sin_family;
-  in4_addr_type sin_addr; u_short_type sin_port; };
-struct sockaddr_in6_type { int sin6_family;
-  in6_addr_type sin6_addr; u_short_type sin6_port;
-  u_long_type sin6_flowinfo; u_long_type sin6_scope_id; };
-struct sockaddr_storage_type { int ss_family;
-  unsigned char ss_bytes[128 - sizeof(int)]; };
-struct addrinfo_type { int ai_flags;
-  int ai_family, ai_socktype, ai_protocol;
-  int ai_addrlen; const void* ai_addr;
-  const char* ai_canonname; addrinfo_type* ai_next; };
-struct linger_type { u_short_type l_onoff, l_linger; };
-typedef u_long_type ioctl_arg_type;
-typedef int signed_size_type;
+		const int max_addr_v4_str_len = 256;
+		const int max_addr_v6_str_len = 256;
+		typedef unsigned __int32 u_long_type;
+		typedef unsigned __int16 u_short_type;
+		struct in4_addr_type {
+			u_long_type s_addr;
+		};
+		struct in4_mreq_type {
+			in4_addr_type imr_multiaddr, imr_interface;
+		};
+		struct in6_addr_type {
+			unsigned char s6_addr[16];
+		};
+		struct in6_mreq_type {
+			in6_addr_type ipv6mr_multiaddr;
+			unsigned long ipv6mr_interface;
+		};
+		struct socket_addr_type {
+			int sa_family;
+		};
+		struct sockaddr_in4_type {
+			int sin_family;
+			in4_addr_type sin_addr;
+			u_short_type sin_port;
+		};
+		struct sockaddr_in6_type {
+			int sin6_family;
+			in6_addr_type sin6_addr;
+			u_short_type sin6_port;
+			u_long_type sin6_flowinfo;
+			u_long_type sin6_scope_id;
+		};
+		struct sockaddr_storage_type {
+			int ss_family;
+			unsigned char ss_bytes[128 - sizeof(int)];
+		};
+		struct addrinfo_type {
+			int ai_flags;
+			int ai_family, ai_socktype, ai_protocol;
+			int ai_addrlen;
+			const void* ai_addr;
+			const char* ai_canonname;
+			addrinfo_type* ai_next;
+		};
+		struct linger_type {
+			u_short_type l_onoff, l_linger;
+		};
+		typedef u_long_type ioctl_arg_type;
+		typedef int signed_size_type;
 # define ASIO_OS_DEF(c) ASIO_OS_DEF_##c
 # define ASIO_OS_DEF_AF_UNSPEC 0
 # define ASIO_OS_DEF_AF_INET 2
@@ -173,33 +204,33 @@ typedef int signed_size_type;
 # define ASIO_OS_DEF_AI_ALL 0x100
 # define ASIO_OS_DEF_AI_ADDRCONFIG 0x400
 #elif defined(ASIO_WINDOWS) || defined(__CYGWIN__)
-typedef SOCKET socket_type;
-const SOCKET invalid_socket = INVALID_SOCKET;
-const int socket_error_retval = SOCKET_ERROR;
-const int max_addr_v4_str_len = 256;
-const int max_addr_v6_str_len = 256;
-typedef sockaddr socket_addr_type;
-typedef in_addr in4_addr_type;
-typedef ip_mreq in4_mreq_type;
-typedef sockaddr_in sockaddr_in4_type;
+		typedef SOCKET socket_type;
+		const SOCKET invalid_socket = INVALID_SOCKET;
+		const int socket_error_retval = SOCKET_ERROR;
+		const int max_addr_v4_str_len = 256;
+		const int max_addr_v6_str_len = 256;
+		typedef sockaddr socket_addr_type;
+		typedef in_addr in4_addr_type;
+		typedef ip_mreq in4_mreq_type;
+		typedef sockaddr_in sockaddr_in4_type;
 # if defined(ASIO_HAS_OLD_WIN_SDK)
-typedef in6_addr_emulation in6_addr_type;
-typedef ipv6_mreq_emulation in6_mreq_type;
-typedef sockaddr_in6_emulation sockaddr_in6_type;
-typedef sockaddr_storage_emulation sockaddr_storage_type;
-typedef addrinfo_emulation addrinfo_type;
+		typedef in6_addr_emulation in6_addr_type;
+		typedef ipv6_mreq_emulation in6_mreq_type;
+		typedef sockaddr_in6_emulation sockaddr_in6_type;
+		typedef sockaddr_storage_emulation sockaddr_storage_type;
+		typedef addrinfo_emulation addrinfo_type;
 # else
-typedef in6_addr in6_addr_type;
-typedef ipv6_mreq in6_mreq_type;
-typedef sockaddr_in6 sockaddr_in6_type;
-typedef sockaddr_storage sockaddr_storage_type;
-typedef addrinfo addrinfo_type;
+		typedef in6_addr in6_addr_type;
+		typedef ipv6_mreq in6_mreq_type;
+		typedef sockaddr_in6 sockaddr_in6_type;
+		typedef sockaddr_storage sockaddr_storage_type;
+		typedef addrinfo addrinfo_type;
 # endif
-typedef ::linger linger_type;
-typedef unsigned long ioctl_arg_type;
-typedef u_long u_long_type;
-typedef u_short u_short_type;
-typedef int signed_size_type;
+		typedef ::linger linger_type;
+		typedef unsigned long ioctl_arg_type;
+		typedef u_long u_long_type;
+		typedef u_short u_short_type;
+		typedef int signed_size_type;
 # define ASIO_OS_DEF(c) ASIO_OS_DEF_##c
 # define ASIO_OS_DEF_AF_UNSPEC AF_UNSPEC
 # define ASIO_OS_DEF_AF_INET AF_INET
@@ -273,47 +304,46 @@ typedef int signed_size_type;
 #  define ASIO_OS_DEF_AI_ADDRCONFIG 0
 # endif
 # if defined (_WIN32_WINNT)
-const int max_iov_len = 64;
+		const int max_iov_len = 64;
 # else
-const int max_iov_len = 16;
+		const int max_iov_len = 16;
 # endif
 #else
-typedef int socket_type;
-const int invalid_socket = -1;
-const int socket_error_retval = -1;
-const int max_addr_v4_str_len = INET_ADDRSTRLEN;
+		typedef int socket_type;
+		const int invalid_socket = -1;
+		const int socket_error_retval = -1;
+		const int max_addr_v4_str_len = INET_ADDRSTRLEN;
 #if defined(INET6_ADDRSTRLEN)
-const int max_addr_v6_str_len = INET6_ADDRSTRLEN + 1 + IF_NAMESIZE;
+		const int max_addr_v6_str_len = INET6_ADDRSTRLEN + 1 + IF_NAMESIZE;
 #else // defined(INET6_ADDRSTRLEN)
-const int max_addr_v6_str_len = 256;
+		const int max_addr_v6_str_len = 256;
 #endif // defined(INET6_ADDRSTRLEN)
-typedef sockaddr socket_addr_type;
-typedef in_addr in4_addr_type;
+		typedef sockaddr socket_addr_type;
+		typedef in_addr in4_addr_type;
 # if defined(__hpux)
 // HP-UX doesn't provide ip_mreq when _XOPEN_SOURCE_EXTENDED is defined.
-struct in4_mreq_type
-{
-  struct in_addr imr_multiaddr;
-  struct in_addr imr_interface;
-};
+		struct in4_mreq_type {
+			struct in_addr imr_multiaddr;
+			struct in_addr imr_interface;
+		};
 # else
-typedef ip_mreq in4_mreq_type;
+		typedef ip_mreq in4_mreq_type;
 # endif
-typedef sockaddr_in sockaddr_in4_type;
-typedef in6_addr in6_addr_type;
-typedef ipv6_mreq in6_mreq_type;
-typedef sockaddr_in6 sockaddr_in6_type;
-typedef sockaddr_storage sockaddr_storage_type;
-typedef sockaddr_un sockaddr_un_type;
-typedef addrinfo addrinfo_type;
-typedef ::linger linger_type;
-typedef int ioctl_arg_type;
-typedef uint32_t u_long_type;
-typedef uint16_t u_short_type;
+		typedef sockaddr_in sockaddr_in4_type;
+		typedef in6_addr in6_addr_type;
+		typedef ipv6_mreq in6_mreq_type;
+		typedef sockaddr_in6 sockaddr_in6_type;
+		typedef sockaddr_storage sockaddr_storage_type;
+		typedef sockaddr_un sockaddr_un_type;
+		typedef addrinfo addrinfo_type;
+		typedef ::linger linger_type;
+		typedef int ioctl_arg_type;
+		typedef uint32_t u_long_type;
+		typedef uint16_t u_short_type;
 #if defined(ASIO_HAS_SSIZE_T)
-typedef ssize_t signed_size_type;
+		typedef ssize_t signed_size_type;
 #else // defined(ASIO_HAS_SSIZE_T)
-typedef int signed_size_type;
+		typedef int signed_size_type;
 #endif // defined(ASIO_HAS_SSIZE_T)
 # define ASIO_OS_DEF(c) ASIO_OS_DEF_##c
 # define ASIO_OS_DEF_AF_UNSPEC AF_UNSPEC
@@ -390,17 +420,17 @@ typedef int signed_size_type;
 #  define ASIO_OS_DEF_AI_ADDRCONFIG 0
 # endif
 # if defined(IOV_MAX)
-const int max_iov_len = IOV_MAX;
+		const int max_iov_len = IOV_MAX;
 # else
 // POSIX platforms are not required to define IOV_MAX.
-const int max_iov_len = 16;
+		const int max_iov_len = 16;
 # endif
 #endif
-const int custom_socket_option_level = 0xA5100000;
-const int enable_connection_aborted_option = 1;
-const int always_fail_option = 2;
+		const int custom_socket_option_level = 0xA5100000;
+		const int enable_connection_aborted_option = 1;
+		const int always_fail_option = 2;
 
-} // namespace detail
+	} // namespace detail
 } // namespace asio
 
 #include "asio/detail/pop_options.hpp"

@@ -23,8 +23,10 @@
 # define ASIO_DISABLE_BOOST_THROW_EXCEPTION 1
 # define ASIO_DISABLE_BOOST_WORKAROUND 1
 #else // defined(ASIO_STANDALONE)
+
 # include <boost/config.hpp>
 # include <boost/version.hpp>
+
 # define ASIO_HAS_BOOST_CONFIG 1
 #endif // defined(ASIO_STANDALONE)
 
@@ -524,7 +526,7 @@
    && !WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_DESKTOP)
 #   define ASIO_WINDOWS_APP 1
 #  endif // WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_APP)
-         // && !WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_DESKTOP)
+// && !WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_DESKTOP)
 # endif // defined(_WIN32_WINNT) && (_WIN32_WINNT >= 0x0603)
 #endif // !defined(ASIO_WINDOWS_APP)
 
@@ -537,7 +539,7 @@
     && !WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_DESKTOP)
 #    define ASIO_WINDOWS_RUNTIME 1
 #   endif // WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_APP)
-          // && !WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_DESKTOP)
+// && !WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_DESKTOP)
 #  endif // defined(__cplusplus_winrt)
 # endif // !defined(ASIO_WINDOWS_APP)
 #endif // !defined(ASIO_WINDOWS_RUNTIME)
@@ -677,18 +679,18 @@
 
 // Mac OS X, FreeBSD, NetBSD, OpenBSD: kqueue.
 #if (defined(__MACH__) && defined(__APPLE__)) \
-  || defined(__FreeBSD__) \
-  || defined(__NetBSD__) \
-  || defined(__OpenBSD__)
+ || defined(__FreeBSD__) \
+ || defined(__NetBSD__) \
+ || defined(__OpenBSD__)
 # if !defined(ASIO_HAS_KQUEUE)
 #  if !defined(ASIO_DISABLE_KQUEUE)
 #   define ASIO_HAS_KQUEUE 1
 #  endif // !defined(ASIO_DISABLE_KQUEUE)
 # endif // !defined(ASIO_HAS_KQUEUE)
 #endif // (defined(__MACH__) && defined(__APPLE__))
-       //   || defined(__FreeBSD__)
-       //   || defined(__NetBSD__)
-       //   || defined(__OpenBSD__)
+//   || defined(__FreeBSD__)
+//   || defined(__NetBSD__)
+//   || defined(__OpenBSD__)
 
 // Solaris: /dev/poll.
 #if defined(__sun)
@@ -702,18 +704,18 @@
 // Serial ports.
 #if !defined(ASIO_HAS_SERIAL_PORT)
 # if defined(ASIO_HAS_IOCP) \
-  || !defined(ASIO_WINDOWS) \
-  && !defined(ASIO_WINDOWS_RUNTIME) \
-  && !defined(__CYGWIN__)
+ || !defined(ASIO_WINDOWS) \
+ && !defined(ASIO_WINDOWS_RUNTIME) \
+ && !defined(__CYGWIN__)
 #  if !defined(__SYMBIAN32__)
 #   if !defined(ASIO_DISABLE_SERIAL_PORT)
 #    define ASIO_HAS_SERIAL_PORT 1
 #   endif // !defined(ASIO_DISABLE_SERIAL_PORT)
 #  endif // !defined(__SYMBIAN32__)
 # endif // defined(ASIO_HAS_IOCP)
-        //   || !defined(ASIO_WINDOWS)
-        //   && !defined(ASIO_WINDOWS_RUNTIME)
-        //   && !defined(__CYGWIN__)
+//   || !defined(ASIO_WINDOWS)
+//   && !defined(ASIO_WINDOWS_RUNTIME)
+//   && !defined(__CYGWIN__)
 #endif // !defined(ASIO_HAS_SERIAL_PORT)
 
 // Windows: stream handles.
@@ -758,12 +760,12 @@
 #if !defined(ASIO_HAS_POSIX_STREAM_DESCRIPTOR)
 # if !defined(ASIO_DISABLE_POSIX_STREAM_DESCRIPTOR)
 #  if !defined(ASIO_WINDOWS) \
-  && !defined(ASIO_WINDOWS_RUNTIME) \
-  && !defined(__CYGWIN__)
+ && !defined(ASIO_WINDOWS_RUNTIME) \
+ && !defined(__CYGWIN__)
 #   define ASIO_HAS_POSIX_STREAM_DESCRIPTOR 1
 #  endif // !defined(ASIO_WINDOWS)
-         //   && !defined(ASIO_WINDOWS_RUNTIME)
-         //   && !defined(__CYGWIN__)
+//   && !defined(ASIO_WINDOWS_RUNTIME)
+//   && !defined(__CYGWIN__)
 # endif // !defined(ASIO_DISABLE_POSIX_STREAM_DESCRIPTOR)
 #endif // !defined(ASIO_HAS_POSIX_STREAM_DESCRIPTOR)
 
@@ -771,12 +773,12 @@
 #if !defined(ASIO_HAS_LOCAL_SOCKETS)
 # if !defined(ASIO_DISABLE_LOCAL_SOCKETS)
 #  if !defined(ASIO_WINDOWS) \
-  && !defined(ASIO_WINDOWS_RUNTIME) \
-  && !defined(__CYGWIN__)
+ && !defined(ASIO_WINDOWS_RUNTIME) \
+ && !defined(__CYGWIN__)
 #   define ASIO_HAS_LOCAL_SOCKETS 1
 #  endif // !defined(ASIO_WINDOWS)
-         //   && !defined(ASIO_WINDOWS_RUNTIME)
-         //   && !defined(__CYGWIN__)
+//   && !defined(ASIO_WINDOWS_RUNTIME)
+//   && !defined(__CYGWIN__)
 # endif // !defined(ASIO_DISABLE_LOCAL_SOCKETS)
 #endif // !defined(ASIO_HAS_LOCAL_SOCKETS)
 
@@ -784,12 +786,12 @@
 #if !defined(ASIO_HAS_SIGACTION)
 # if !defined(ASIO_DISABLE_SIGACTION)
 #  if !defined(ASIO_WINDOWS) \
-  && !defined(ASIO_WINDOWS_RUNTIME) \
-  && !defined(__CYGWIN__)
+ && !defined(ASIO_WINDOWS_RUNTIME) \
+ && !defined(__CYGWIN__)
 #   define ASIO_HAS_SIGACTION 1
 #  endif // !defined(ASIO_WINDOWS)
-         //   && !defined(ASIO_WINDOWS_RUNTIME)
-         //   && !defined(__CYGWIN__)
+//   && !defined(ASIO_WINDOWS_RUNTIME)
+//   && !defined(__CYGWIN__)
 # endif // !defined(ASIO_DISABLE_SIGACTION)
 #endif // !defined(ASIO_HAS_SIGACTION)
 
@@ -939,12 +941,12 @@
 #if !defined(ASIO_HAS_SECURE_RTL)
 # if !defined(ASIO_DISABLE_SECURE_RTL)
 #  if defined(ASIO_MSVC) \
-    && (ASIO_MSVC >= 1400) \
-    && !defined(UNDER_CE)
+ && (ASIO_MSVC >= 1400) \
+ && !defined(UNDER_CE)
 #   define ASIO_HAS_SECURE_RTL 1
 #  endif // defined(ASIO_MSVC)
-         // && (ASIO_MSVC >= 1400)
-         // && !defined(UNDER_CE)
+// && (ASIO_MSVC >= 1400)
+// && !defined(UNDER_CE)
 # endif // !defined(ASIO_DISABLE_SECURE_RTL)
 #endif // !defined(ASIO_HAS_SECURE_RTL)
 
@@ -989,10 +991,10 @@
 // Support for POSIX ssize_t typedef.
 #if !defined(ASIO_DISABLE_SSIZE_T)
 # if defined(__linux__) \
-   || (defined(__MACH__) && defined(__APPLE__))
+ || (defined(__MACH__) && defined(__APPLE__))
 #  define ASIO_HAS_SSIZE_T 1
 # endif // defined(__linux__)
-        //   || (defined(__MACH__) && defined(__APPLE__))
+//   || (defined(__MACH__) && defined(__APPLE__))
 #endif // !defined(ASIO_DISABLE_SSIZE_T)
 
 #endif // ASIO_DETAIL_CONFIG_HPP

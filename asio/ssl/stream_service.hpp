@@ -24,15 +24,15 @@
 #include "asio/detail/push_options.hpp"
 
 namespace asio {
-namespace ssl {
+	namespace ssl {
 
 #if defined(ASIO_ENABLE_OLD_SSL)
 
-using asio::ssl::old::stream_service;
+		using asio::ssl::old::stream_service;
 
 #endif // defined(ASIO_ENABLE_OLD_SSL)
 
-} // namespace ssl
+	} // namespace ssl
 } // namespace asio
 
 #include "asio/detail/pop_options.hpp"

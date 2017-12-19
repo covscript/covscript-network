@@ -18,20 +18,20 @@
 #include "asio/detail/config.hpp"
 
 #if defined(ASIO_HAS_WINDOWS_RANDOM_ACCESS_HANDLE) \
-  || defined(GENERATING_DOCUMENTATION)
+ || defined(GENERATING_DOCUMENTATION)
 
 #include "asio/windows/basic_random_access_handle.hpp"
 
 namespace asio {
-namespace windows {
+	namespace windows {
 
 /// Typedef for the typical usage of a random-access handle.
-typedef basic_random_access_handle<> random_access_handle;
+		typedef basic_random_access_handle<> random_access_handle;
 
-} // namespace windows
+	} // namespace windows
 } // namespace asio
 
 #endif // defined(ASIO_HAS_WINDOWS_RANDOM_ACCESS_HANDLE)
-       //   || defined(GENERATING_DOCUMENTATION)
+//   || defined(GENERATING_DOCUMENTATION)
 
 #endif // ASIO_WINDOWS_RANDOM_ACCESS_HANDLE_HPP

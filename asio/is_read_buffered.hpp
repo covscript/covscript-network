@@ -23,34 +23,38 @@
 
 namespace asio {
 
-namespace detail {
+	namespace detail {
 
-template <typename Stream>
-char is_read_buffered_helper(buffered_stream<Stream>* s);
+		template<typename Stream>
+		char is_read_buffered_helper(buffered_stream<Stream> *s);
 
-template <typename Stream>
-char is_read_buffered_helper(buffered_read_stream<Stream>* s);
+		template<typename Stream>
+		char is_read_buffered_helper(buffered_read_stream<Stream> *s);
 
-struct is_read_buffered_big_type { char data[10]; };
-is_read_buffered_big_type is_read_buffered_helper(...);
+		struct is_read_buffered_big_type {
+			char data[10];
+		};
 
-} // namespace detail
+		is_read_buffered_big_type is_read_buffered_helper(...);
+
+	} // namespace detail
 
 /// The is_read_buffered class is a traits class that may be used to determine
 /// whether a stream type supports buffering of read data.
-template <typename Stream>
-class is_read_buffered
-{
-public:
+	template<typename Stream>
+	class is_read_buffered {
+	public:
 #if defined(GENERATING_DOCUMENTATION)
-  /// The value member is true only if the Stream type supports buffering of
-  /// read data.
-  static const bool value;
+		/// The value member is true only if the Stream type supports buffering of
+		/// read data.
+		static const bool value;
 #else
-  ASIO_STATIC_CONSTANT(bool,
-      value = sizeof(detail::is_read_buffered_helper((Stream*)0)) == 1);
+
+		ASIO_STATIC_CONSTANT(bool,
+		                     value = sizeof(detail::is_read_buffered_helper((Stream *) 0)) == 1);
+
 #endif
-};
+	};
 
 } // namespace asio
 

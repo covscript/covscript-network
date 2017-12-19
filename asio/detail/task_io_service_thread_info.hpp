@@ -21,18 +21,18 @@
 #include "asio/detail/push_options.hpp"
 
 namespace asio {
-namespace detail {
+	namespace detail {
 
-class task_io_service;
-class task_io_service_operation;
+		class task_io_service;
 
-struct task_io_service_thread_info : public thread_info_base
-{
-  op_queue<task_io_service_operation> private_op_queue;
-  long private_outstanding_work;
-};
+		class task_io_service_operation;
 
-} // namespace detail
+		struct task_io_service_thread_info : public thread_info_base {
+			op_queue<task_io_service_operation> private_op_queue;
+			long private_outstanding_work;
+		};
+
+	} // namespace detail
 } // namespace asio
 
 #include "asio/detail/pop_options.hpp"

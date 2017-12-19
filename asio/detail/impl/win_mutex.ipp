@@ -26,54 +26,52 @@
 #include "asio/detail/push_options.hpp"
 
 namespace asio {
-namespace detail {
+	namespace detail {
 
-win_mutex::win_mutex()
-{
-  int error = do_init();
-  asio::error_code ec(error,
-      asio::error::get_system_category());
-  asio::detail::throw_error(ec, "mutex");
-}
+		win_mutex::win_mutex()
+		{
+			int error = do_init();
+			asio::error_code ec(error,
+			                    asio::error::get_system_category());
+			asio::detail::throw_error(ec, "mutex");
+		}
 
-int win_mutex::do_init()
-{
+		int win_mutex::do_init()
+		{
 #if defined(__MINGW32__)
-  // Not sure if MinGW supports structured exception handling, so for now
-  // we'll just call the Windows API and hope.
+			// Not sure if MinGW supports structured exception handling, so for now
+			// we'll just call the Windows API and hope.
 # if defined(UNDER_CE)
-  ::InitializeCriticalSection(&crit_section_);
+			::InitializeCriticalSection(&crit_section_);
 # elif defined(ASIO_WINDOWS_APP)
-  ::InitializeCriticalSectionEx(&crit_section_, 0x80000000, 0);
+			::InitializeCriticalSectionEx(&crit_section_, 0x80000000, 0);
 # else
-  if (!::InitializeCriticalSectionAndSpinCount(&crit_section_, 0x80000000))
-    return ::GetLastError();
+			if (!::InitializeCriticalSectionAndSpinCount(&crit_section_, 0x80000000))
+				return ::GetLastError();
 # endif
-  return 0;
+			return 0;
 #else
-  __try
-  {
+			__try {
 # if defined(UNDER_CE)
-    ::InitializeCriticalSection(&crit_section_);
+				::InitializeCriticalSection(&crit_section_);
 # elif defined(ASIO_WINDOWS_APP)
-    if (!::InitializeCriticalSectionEx(&crit_section_, 0, 0))
-	  return ::GetLastError();
+				if (!::InitializeCriticalSectionEx(&crit_section_, 0, 0))
+					return ::GetLastError();
 # else
-    if (!::InitializeCriticalSectionAndSpinCount(&crit_section_, 0x80000000))
-      return ::GetLastError();
+				if (!::InitializeCriticalSectionAndSpinCount(&crit_section_, 0x80000000))
+					return ::GetLastError();
 # endif
-  }
-  __except(GetExceptionCode() == STATUS_NO_MEMORY
-      ? EXCEPTION_EXECUTE_HANDLER : EXCEPTION_CONTINUE_SEARCH)
-  {
-    return ERROR_OUTOFMEMORY;
-  }
+			}
+			__except(GetExceptionCode() == STATUS_NO_MEMORY
+			         ? EXCEPTION_EXECUTE_HANDLER : EXCEPTION_CONTINUE_SEARCH) {
+				return ERROR_OUTOFMEMORY;
+			}
 
-  return 0;
+			return 0;
 #endif
-}
+		}
 
-} // namespace detail
+	} // namespace detail
 } // namespace asio
 
 #include "asio/detail/pop_options.hpp"

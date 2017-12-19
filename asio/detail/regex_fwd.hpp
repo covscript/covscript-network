@@ -22,11 +22,11 @@
 
 namespace boost {
 
-template <class BidiIterator>
-struct sub_match;
+	template <class BidiIterator>
+	struct sub_match;
 
-template <class BidiIterator, class Allocator>
-class match_results;
+	template <class BidiIterator, class Allocator>
+	class match_results;
 
 } // namespace boost
 

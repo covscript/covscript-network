@@ -26,28 +26,29 @@
 #include "asio/detail/push_options.hpp"
 
 namespace asio {
-namespace detail {
+	namespace detail {
 
-DWORD win_tss_ptr_create()
-{
+		DWORD win_tss_ptr_create()
+		{
 #if defined(UNDER_CE)
-  enum { out_of_indexes = 0xFFFFFFFF };
+			enum { out_of_indexes = 0xFFFFFFFF };
 #else
-  enum { out_of_indexes = TLS_OUT_OF_INDEXES };
+			enum {
+				out_of_indexes = TLS_OUT_OF_INDEXES
+			};
 #endif
 
-  DWORD tss_key = ::TlsAlloc();
-  if (tss_key == out_of_indexes)
-  {
-    DWORD last_error = ::GetLastError();
-    asio::error_code ec(last_error,
-        asio::error::get_system_category());
-    asio::detail::throw_error(ec, "tss");
-  }
-  return tss_key;
-}
+			DWORD tss_key = ::TlsAlloc();
+			if (tss_key == out_of_indexes) {
+				DWORD last_error = ::GetLastError();
+				asio::error_code ec(last_error,
+				                    asio::error::get_system_category());
+				asio::detail::throw_error(ec, "tss");
+			}
+			return tss_key;
+		}
 
-} // namespace detail
+	} // namespace detail
 } // namespace asio
 
 #include "asio/detail/pop_options.hpp"

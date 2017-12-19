@@ -20,19 +20,18 @@
 namespace asio {
 
 /// Wait traits suitable for use with the basic_waitable_timer class template.
-template <typename Clock>
-struct wait_traits
-{
-  /// Convert a clock duration into a duration used for waiting.
-  /** 
-   * @returns @c d.
-   */
-  static typename Clock::duration to_wait_duration(
-      const typename Clock::duration& d)
-  {
-    return d;
-  }
-};
+	template<typename Clock>
+	struct wait_traits {
+		/// Convert a clock duration into a duration used for waiting.
+		/**
+		 * @returns @c d.
+		 */
+		static typename Clock::duration to_wait_duration(
+		    const typename Clock::duration &d)
+		{
+			return d;
+		}
+	};
 
 } // namespace asio
 

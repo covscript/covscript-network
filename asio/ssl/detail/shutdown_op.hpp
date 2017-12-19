@@ -18,41 +18,42 @@
 #include "asio/detail/config.hpp"
 
 #if !defined(ASIO_ENABLE_OLD_SSL)
+
 # include "asio/ssl/detail/engine.hpp"
+
 #endif // !defined(ASIO_ENABLE_OLD_SSL)
 
 #include "asio/detail/push_options.hpp"
 
 namespace asio {
-namespace ssl {
-namespace detail {
+	namespace ssl {
+		namespace detail {
 
 #if !defined(ASIO_ENABLE_OLD_SSL)
 
-class shutdown_op
-{
-public:
-  engine::want operator()(engine& eng,
-      asio::error_code& ec,
-      std::size_t& bytes_transferred) const
-  {
-    bytes_transferred = 0;
-    return eng.shutdown(ec);
-  }
+			class shutdown_op {
+			public:
+				engine::want operator()(engine &eng,
+				                        asio::error_code &ec,
+				                        std::size_t &bytes_transferred) const
+				{
+					bytes_transferred = 0;
+					return eng.shutdown(ec);
+				}
 
-  template <typename Handler>
-  void call_handler(Handler& handler,
-      const asio::error_code& ec,
-      const std::size_t&) const
-  {
-    handler(ec);
-  }
-};
+				template<typename Handler>
+				void call_handler(Handler &handler,
+				                  const asio::error_code &ec,
+				                  const std::size_t &) const
+				{
+					handler(ec);
+				}
+			};
 
 #endif // !defined(ASIO_ENABLE_OLD_SSL)
 
-} // namespace detail
-} // namespace ssl
+		} // namespace detail
+	} // namespace ssl
 } // namespace asio
 
 #include "asio/detail/pop_options.hpp"

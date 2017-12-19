@@ -21,43 +21,41 @@
 #include "asio/detail/push_options.hpp"
 
 namespace asio {
-namespace detail {
+	namespace detail {
 
-template <typename TResult>
-class winrt_async_op
-  : public operation
-{
-public:
-  // The error code to be passed to the completion handler.
-  asio::error_code ec_;
+		template<typename TResult>
+		class winrt_async_op
+			: public operation {
+		public:
+			// The error code to be passed to the completion handler.
+			asio::error_code ec_;
 
-  // The result of the operation, to be passed to the completion handler.
-  TResult result_;
+			// The result of the operation, to be passed to the completion handler.
+			TResult result_;
 
-protected:
-  winrt_async_op(func_type complete_func)
-    : operation(complete_func),
-      result_()
-  {
-  }
-};
+		protected:
+			winrt_async_op(func_type complete_func)
+				: operation(complete_func),
+				  result_()
+			{
+			}
+		};
 
-template <>
-class winrt_async_op<void>
-  : public operation
-{
-public:
-  // The error code to be passed to the completion handler.
-  asio::error_code ec_;
+		template<>
+		class winrt_async_op<void>
+			: public operation {
+		public:
+			// The error code to be passed to the completion handler.
+			asio::error_code ec_;
 
-protected:
-  winrt_async_op(func_type complete_func)
-    : operation(complete_func)
-  {
-  }
-};
+		protected:
+			winrt_async_op(func_type complete_func)
+				: operation(complete_func)
+			{
+			}
+		};
 
-} // namespace detail
+	} // namespace detail
 } // namespace asio
 
 #include "asio/detail/pop_options.hpp"

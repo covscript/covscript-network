@@ -26,18 +26,18 @@
 #include "asio/detail/push_options.hpp"
 
 namespace asio {
-namespace detail {
+	namespace detail {
 
-posix_event::posix_event()
-  : state_(0)
-{
-  int error = ::pthread_cond_init(&cond_, 0);
-  asio::error_code ec(error,
-      asio::error::get_system_category());
-  asio::detail::throw_error(ec, "event");
-}
+		posix_event::posix_event()
+			: state_(0)
+		{
+			int error = ::pthread_cond_init(&cond_, 0);
+			asio::error_code ec(error,
+			                    asio::error::get_system_category());
+			asio::detail::throw_error(ec, "event");
+		}
 
-} // namespace detail
+	} // namespace detail
 } // namespace asio
 
 #include "asio/detail/pop_options.hpp"

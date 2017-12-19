@@ -50,7 +50,9 @@
 #endif // !defined(ASIO_DISABLE_HANDLER_TYPE_REQUIREMENTS)
 
 #if defined(ASIO_ENABLE_HANDLER_TYPE_REQUIREMENTS)
+
 # include "asio/handler_type.hpp"
+
 #endif // defined(ASIO_ENABLE_HANDLER_TYPE_REQUIREMENTS)
 
 // Newer gcc, clang need special treatment to suppress unused typedef warnings.
@@ -63,7 +65,7 @@
     || (__clang_major__ > 3)
 #  define ASIO_UNUSED_TYPEDEF __attribute__((__unused__))
 # endif // ((__clang_major__ == 3) && (__clang_minor__ >= 6))
-        //   || (__clang_major__ > 3)
+//   || (__clang_major__ > 3)
 #elif defined(__GNUC__)
 # if ((__GNUC__ == 4) && (__GNUC_MINOR__ >= 8)) || (__GNUC__ > 4)
 #  define ASIO_UNUSED_TYPEDEF __attribute__((__unused__))
@@ -74,41 +76,41 @@
 #endif // !defined(ASIO_UNUSED_TYPEDEF)
 
 namespace asio {
-namespace detail {
+	namespace detail {
 
 #if defined(ASIO_ENABLE_HANDLER_TYPE_REQUIREMENTS)
 
 # if defined(ASIO_ENABLE_HANDLER_TYPE_REQUIREMENTS_ASSERT)
 
-template <typename Handler>
-auto zero_arg_handler_test(Handler h, void*)
-  -> decltype(
-    sizeof(Handler(static_cast<const Handler&>(h))),
-    ((h)()),
-    char(0));
+		template<typename Handler>
+		auto zero_arg_handler_test(Handler h, void *)
+		-> decltype(
+		    sizeof(Handler(static_cast<const Handler &>(h))),
+		    ((h)()),
+		    char(0));
 
-template <typename Handler>
-char (&zero_arg_handler_test(Handler, ...))[2];
+		template<typename Handler>
+		char (&zero_arg_handler_test(Handler, ...))[2];
 
-template <typename Handler, typename Arg1>
-auto one_arg_handler_test(Handler h, Arg1* a1)
-  -> decltype(
-    sizeof(Handler(static_cast<const Handler&>(h))),
-    ((h)(*a1)),
-    char(0));
+		template<typename Handler, typename Arg1>
+		auto one_arg_handler_test(Handler h, Arg1 *a1)
+		-> decltype(
+		    sizeof(Handler(static_cast<const Handler &>(h))),
+		    ((h)(*a1)),
+		    char(0));
 
-template <typename Handler>
-char (&one_arg_handler_test(Handler h, ...))[2];
+		template<typename Handler>
+		char (&one_arg_handler_test(Handler h, ...))[2];
 
-template <typename Handler, typename Arg1, typename Arg2>
-auto two_arg_handler_test(Handler h, Arg1* a1, Arg2* a2)
-  -> decltype(
-    sizeof(Handler(static_cast<const Handler&>(h))),
-    ((h)(*a1, *a2)),
-    char(0));
+		template<typename Handler, typename Arg1, typename Arg2>
+		auto two_arg_handler_test(Handler h, Arg1 *a1, Arg2 *a2)
+		-> decltype(
+		    sizeof(Handler(static_cast<const Handler &>(h))),
+		    ((h)(*a1, *a2)),
+		    char(0));
 
-template <typename Handler>
-char (&two_arg_handler_test(Handler, ...))[2];
+		template<typename Handler>
+		char (&two_arg_handler_test(Handler, ...))[2];
 
 #  define ASIO_HANDLER_TYPE_REQUIREMENTS_ASSERT(expr, msg) \
      static_assert(expr, msg);
@@ -119,18 +121,26 @@ char (&two_arg_handler_test(Handler, ...))[2];
 
 # endif // defined(ASIO_ENABLE_HANDLER_TYPE_REQUIREMENTS_ASSERT)
 
-template <typename T> T& lvref();
-template <typename T> T& lvref(T);
-template <typename T> const T& clvref();
-template <typename T> const T& clvref(T);
-template <typename T> char argbyv(T);
+		template<typename T>
+		T &lvref();
 
-template <int>
-struct handler_type_requirements
-{
-};
+		template<typename T>
+		T &lvref(T);
 
-#define ASIO_COMPLETION_HANDLER_CHECK( \
+		template<typename T>
+		const T &clvref();
+
+		template<typename T>
+		const T &clvref(T);
+
+		template<typename T>
+		char argbyv(T);
+
+		template<int>
+		struct handler_type_requirements {
+		};
+
+#define ASIO_COMPLETION_HANDLER_CHECK(\
     handler_type, handler) \
   \
   typedef ASIO_HANDLER_TYPE(handler_type, \
@@ -152,7 +162,7 @@ struct handler_type_requirements
           asio_true_handler_type>()(), \
         char(0))> ASIO_UNUSED_TYPEDEF
 
-#define ASIO_READ_HANDLER_CHECK( \
+#define ASIO_READ_HANDLER_CHECK(\
     handler_type, handler) \
   \
   typedef ASIO_HANDLER_TYPE(handler_type, \
@@ -180,7 +190,7 @@ struct handler_type_requirements
         char(0))> ASIO_UNUSED_TYPEDEF
 
 
-#define ASIO_WRITE_HANDLER_CHECK( \
+#define ASIO_WRITE_HANDLER_CHECK(\
     handler_type, handler) \
   \
   typedef ASIO_HANDLER_TYPE(handler_type, \
@@ -207,7 +217,7 @@ struct handler_type_requirements
             asio::detail::lvref<const std::size_t>()), \
         char(0))> ASIO_UNUSED_TYPEDEF
 
-#define ASIO_ACCEPT_HANDLER_CHECK( \
+#define ASIO_ACCEPT_HANDLER_CHECK(\
     handler_type, handler) \
   \
   typedef ASIO_HANDLER_TYPE(handler_type, \
@@ -232,7 +242,7 @@ struct handler_type_requirements
             asio::detail::lvref<const asio::error_code>()), \
         char(0))> ASIO_UNUSED_TYPEDEF
 
-#define ASIO_CONNECT_HANDLER_CHECK( \
+#define ASIO_CONNECT_HANDLER_CHECK(\
     handler_type, handler) \
   \
   typedef ASIO_HANDLER_TYPE(handler_type, \
@@ -257,7 +267,7 @@ struct handler_type_requirements
             asio::detail::lvref<const asio::error_code>()), \
         char(0))> ASIO_UNUSED_TYPEDEF
 
-#define ASIO_COMPOSED_CONNECT_HANDLER_CHECK( \
+#define ASIO_COMPOSED_CONNECT_HANDLER_CHECK(\
     handler_type, handler, iter_type) \
   \
   typedef ASIO_HANDLER_TYPE(handler_type, \
@@ -284,7 +294,7 @@ struct handler_type_requirements
             asio::detail::lvref<const iter_type>()), \
         char(0))> ASIO_UNUSED_TYPEDEF
 
-#define ASIO_RESOLVE_HANDLER_CHECK( \
+#define ASIO_RESOLVE_HANDLER_CHECK(\
     handler_type, handler, iter_type) \
   \
   typedef ASIO_HANDLER_TYPE(handler_type, \
@@ -311,7 +321,7 @@ struct handler_type_requirements
             asio::detail::lvref<const iter_type>()), \
         char(0))> ASIO_UNUSED_TYPEDEF
 
-#define ASIO_WAIT_HANDLER_CHECK( \
+#define ASIO_WAIT_HANDLER_CHECK(\
     handler_type, handler) \
   \
   typedef ASIO_HANDLER_TYPE(handler_type, \
@@ -336,7 +346,7 @@ struct handler_type_requirements
             asio::detail::lvref<const asio::error_code>()), \
         char(0))> ASIO_UNUSED_TYPEDEF
 
-#define ASIO_SIGNAL_HANDLER_CHECK( \
+#define ASIO_SIGNAL_HANDLER_CHECK(\
     handler_type, handler) \
   \
   typedef ASIO_HANDLER_TYPE(handler_type, \
@@ -363,7 +373,7 @@ struct handler_type_requirements
             asio::detail::lvref<const int>()), \
         char(0))> ASIO_UNUSED_TYPEDEF
 
-#define ASIO_HANDSHAKE_HANDLER_CHECK( \
+#define ASIO_HANDSHAKE_HANDLER_CHECK(\
     handler_type, handler) \
   \
   typedef ASIO_HANDLER_TYPE(handler_type, \
@@ -388,7 +398,7 @@ struct handler_type_requirements
             asio::detail::lvref<const asio::error_code>()), \
         char(0))> ASIO_UNUSED_TYPEDEF
 
-#define ASIO_BUFFERED_HANDSHAKE_HANDLER_CHECK( \
+#define ASIO_BUFFERED_HANDSHAKE_HANDLER_CHECK(\
     handler_type, handler) \
   \
   typedef ASIO_HANDLER_TYPE(handler_type, \
@@ -415,7 +425,7 @@ struct handler_type_requirements
           asio::detail::lvref<const std::size_t>()), \
         char(0))> ASIO_UNUSED_TYPEDEF
 
-#define ASIO_SHUTDOWN_HANDLER_CHECK( \
+#define ASIO_SHUTDOWN_HANDLER_CHECK(\
     handler_type, handler) \
   \
   typedef ASIO_HANDLER_TYPE(handler_type, \
@@ -492,7 +502,7 @@ struct handler_type_requirements
 
 #endif // !defined(ASIO_ENABLE_HANDLER_TYPE_REQUIREMENTS)
 
-} // namespace detail
+	} // namespace detail
 } // namespace asio
 
 #endif // ASIO_DETAIL_HANDLER_TYPE_REQUIREMENTS_HPP

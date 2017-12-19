@@ -18,11 +18,13 @@
 #include "asio/detail/config.hpp"
 
 #if defined(ASIO_HAS_STD_CHRONO) \
-  || defined(ASIO_HAS_BOOST_CHRONO) \
-  || defined(GENERATING_DOCUMENTATION)
+ || defined(ASIO_HAS_BOOST_CHRONO) \
+ || defined(GENERATING_DOCUMENTATION)
 
 #if defined(ASIO_HAS_STD_CHRONO)
+
 # include <chrono>
+
 #elif defined(ASIO_HAS_BOOST_CHRONO)
 # include <boost/chrono/system_clocks.hpp>
 #endif
@@ -33,31 +35,31 @@ namespace asio {
 
 #if defined(GENERATING_DOCUMENTATION)
 /// Typedef for a timer based on the high resolution clock.
-/**
- * This typedef uses the C++11 @c &lt;chrono&gt; standard library facility, if
- * available. Otherwise, it may use the Boost.Chrono library. To explicitly
- * utilise Boost.Chrono, use the basic_waitable_timer template directly:
- * @code
- * typedef basic_waitable_timer<boost::chrono::high_resolution_clock> timer;
- * @endcode
- */
-typedef basic_waitable_timer<
-    chrono::high_resolution_clock>
-  high_resolution_timer;
+	/**
+	 * This typedef uses the C++11 @c &lt;chrono&gt; standard library facility, if
+	 * available. Otherwise, it may use the Boost.Chrono library. To explicitly
+	 * utilise Boost.Chrono, use the basic_waitable_timer template directly:
+	 * @code
+	 * typedef basic_waitable_timer<boost::chrono::high_resolution_clock> timer;
+	 * @endcode
+	 */
+	typedef basic_waitable_timer<
+	chrono::high_resolution_clock>
+	high_resolution_timer;
 #elif defined(ASIO_HAS_STD_CHRONO)
-typedef basic_waitable_timer<
-    std::chrono::high_resolution_clock>
-  high_resolution_timer;
+	typedef basic_waitable_timer<
+	std::chrono::high_resolution_clock>
+	high_resolution_timer;
 #elif defined(ASIO_HAS_BOOST_CHRONO)
-typedef basic_waitable_timer<
-    boost::chrono::high_resolution_clock>
-  high_resolution_timer;
+	typedef basic_waitable_timer<
+	boost::chrono::high_resolution_clock>
+	high_resolution_timer;
 #endif
 
 } // namespace asio
 
 #endif // defined(ASIO_HAS_STD_CHRONO) 
-       //   || defined(ASIO_HAS_BOOST_CHRONO)
-       //   || defined(GENERATING_DOCUMENTATION)
+//   || defined(ASIO_HAS_BOOST_CHRONO)
+//   || defined(GENERATING_DOCUMENTATION)
 
 #endif // ASIO_HIGH_RESOLUTION_TIMER_HPP

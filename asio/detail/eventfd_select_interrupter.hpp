@@ -23,53 +23,52 @@
 #include "asio/detail/push_options.hpp"
 
 namespace asio {
-namespace detail {
+	namespace detail {
 
-class eventfd_select_interrupter
-{
-public:
-  // Constructor.
-  ASIO_DECL eventfd_select_interrupter();
+		class eventfd_select_interrupter {
+		public:
+			// Constructor.
+			ASIO_DECL eventfd_select_interrupter();
 
-  // Destructor.
-  ASIO_DECL ~eventfd_select_interrupter();
+			// Destructor.
+			ASIO_DECL ~eventfd_select_interrupter();
 
-  // Recreate the interrupter's descriptors. Used after a fork.
-  ASIO_DECL void recreate();
+			// Recreate the interrupter's descriptors. Used after a fork.
+			ASIO_DECL void recreate();
 
-  // Interrupt the select call.
-  ASIO_DECL void interrupt();
+			// Interrupt the select call.
+			ASIO_DECL void interrupt();
 
-  // Reset the select interrupt. Returns true if the call was interrupted.
-  ASIO_DECL bool reset();
+			// Reset the select interrupt. Returns true if the call was interrupted.
+			ASIO_DECL bool reset();
 
-  // Get the read descriptor to be passed to select.
-  int read_descriptor() const
-  {
-    return read_descriptor_;
-  }
+			// Get the read descriptor to be passed to select.
+			int read_descriptor() const
+			{
+				return read_descriptor_;
+			}
 
-private:
-  // Open the descriptors. Throws on error.
-  ASIO_DECL void open_descriptors();
+		private:
+			// Open the descriptors. Throws on error.
+			ASIO_DECL void open_descriptors();
 
-  // Close the descriptors.
-  ASIO_DECL void close_descriptors();
+			// Close the descriptors.
+			ASIO_DECL void close_descriptors();
 
-  // The read end of a connection used to interrupt the select call. This file
-  // descriptor is passed to select such that when it is time to stop, a single
-  // 64bit value will be written on the other end of the connection and this
-  // descriptor will become readable.
-  int read_descriptor_;
+			// The read end of a connection used to interrupt the select call. This file
+			// descriptor is passed to select such that when it is time to stop, a single
+			// 64bit value will be written on the other end of the connection and this
+			// descriptor will become readable.
+			int read_descriptor_;
 
-  // The write end of a connection used to interrupt the select call. A single
-  // 64bit non-zero value may be written to this to wake up the select which is
-  // waiting for the other end to become readable. This descriptor will only
-  // differ from the read descriptor when a pipe is used.
-  int write_descriptor_;
-};
+			// The write end of a connection used to interrupt the select call. A single
+			// 64bit non-zero value may be written to this to wake up the select which is
+			// waiting for the other end to become readable. This descriptor will only
+			// differ from the read descriptor when a pipe is used.
+			int write_descriptor_;
+		};
 
-} // namespace detail
+	} // namespace detail
 } // namespace asio
 
 #include "asio/detail/pop_options.hpp"

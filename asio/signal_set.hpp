@@ -21,7 +21,7 @@
 namespace asio {
 
 /// Typedef for the typical usage of a signal set.
-typedef basic_signal_set<> signal_set;
+	typedef basic_signal_set<> signal_set;
 
 } // namespace asio
 

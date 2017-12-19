@@ -18,7 +18,9 @@
 #include "asio/detail/config.hpp"
 
 #if !defined(ASIO_HAS_THREADS)
+
 # include "asio/detail/null_thread.hpp"
+
 #elif defined(ASIO_WINDOWS)
 # if defined(ASIO_WINDOWS_APP) || defined(UNDER_CE)
 #  include "asio/detail/winapi_thread.hpp"
@@ -34,23 +36,23 @@
 #endif
 
 namespace asio {
-namespace detail {
+	namespace detail {
 
 #if !defined(ASIO_HAS_THREADS)
-typedef null_thread thread;
+		typedef null_thread thread;
 #elif defined(ASIO_WINDOWS)
 # if defined(ASIO_WINDOWS_APP) || defined(UNDER_CE)
-typedef winapi_thread thread;
+		typedef winapi_thread thread;
 # else
-typedef win_thread thread;
+		typedef win_thread thread;
 # endif
 #elif defined(ASIO_HAS_PTHREADS)
-typedef posix_thread thread;
+		typedef posix_thread thread;
 #elif defined(ASIO_HAS_STD_THREAD)
-typedef std_thread thread;
+		typedef std_thread thread;
 #endif
 
-} // namespace detail
+	} // namespace detail
 } // namespace asio
 
 #endif // ASIO_DETAIL_THREAD_HPP

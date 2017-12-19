@@ -1,19 +1,16 @@
 #include "network.hpp"
 #include <iostream>
-using asio::ip::tcp;
-using buffer_type=char[512];
-unsigned short port=1000;
 int main()
 {
-	asio::io_service service;
-	tcp::acceptor a(service,tcp::endpoint(asio::ip::address::from_string("127.0.0.1"),port));
+	using namespace cs_impl;
+	auto acceptor=network::tcp::acceptor(network::tcp::endpoint("127.0.0.1",1000));
+	network::tcp::socket sock;
+	sock.accept(acceptor);
 	while(true) {
-		tcp::socket server(service);
-		a.accept(server);
-		buffer_type buff;
-		server.receive(asio::buffer(buff));
-		std::cout<<buff<<std::endl;
-		server.send(asio::buffer(buff));
+		std::string s;
+		sock.receive(s,512);
+		std::cout<<s<<std::endl;
+		sock.send(s+"[RECEIVED]");
 	}
 	return 0;
 }

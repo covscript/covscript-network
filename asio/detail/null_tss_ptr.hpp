@@ -24,41 +24,40 @@
 #include "asio/detail/push_options.hpp"
 
 namespace asio {
-namespace detail {
+	namespace detail {
 
-template <typename T>
-class null_tss_ptr
-  : private noncopyable
-{
-public:
-  // Constructor.
-  null_tss_ptr()
-    : value_(0)
-  {
-  }
+		template<typename T>
+		class null_tss_ptr
+			: private noncopyable {
+		public:
+			// Constructor.
+			null_tss_ptr()
+				: value_(0)
+			{
+			}
 
-  // Destructor.
-  ~null_tss_ptr()
-  {
-  }
+			// Destructor.
+			~null_tss_ptr()
+			{
+			}
 
-  // Get the value.
-  operator T*() const
-  {
-    return value_;
-  }
+			// Get the value.
+			operator T *() const
+			{
+				return value_;
+			}
 
-  // Set the value.
-  void operator=(T* value)
-  {
-    value_ = value;
-  }
+			// Set the value.
+			void operator=(T *value)
+			{
+				value_ = value;
+			}
 
-private:
-  T* value_;
-};
+		private:
+			T *value_;
+		};
 
-} // namespace detail
+	} // namespace detail
 } // namespace asio
 
 #include "asio/detail/pop_options.hpp"

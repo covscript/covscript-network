@@ -23,15 +23,15 @@
 #include "asio/detail/win_fd_set_adapter.hpp"
 
 namespace asio {
-namespace detail {
+	namespace detail {
 
 #if defined(ASIO_WINDOWS) || defined(__CYGWIN__)
-typedef win_fd_set_adapter fd_set_adapter;
+		typedef win_fd_set_adapter fd_set_adapter;
 #else
-typedef posix_fd_set_adapter fd_set_adapter;
+		typedef posix_fd_set_adapter fd_set_adapter;
 #endif
 
-} // namespace detail
+	} // namespace detail
 } // namespace asio
 
 #endif // !defined(ASIO_WINDOWS_RUNTIME)

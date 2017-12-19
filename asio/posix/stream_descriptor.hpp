@@ -18,20 +18,20 @@
 #include "asio/detail/config.hpp"
 
 #if defined(ASIO_HAS_POSIX_STREAM_DESCRIPTOR) \
-  || defined(GENERATING_DOCUMENTATION)
+ || defined(GENERATING_DOCUMENTATION)
 
 #include "asio/posix/basic_stream_descriptor.hpp"
 
 namespace asio {
-namespace posix {
+	namespace posix {
 
 /// Typedef for the typical usage of a stream-oriented descriptor.
-typedef basic_stream_descriptor<> stream_descriptor;
+		typedef basic_stream_descriptor<> stream_descriptor;
 
-} // namespace posix
+	} // namespace posix
 } // namespace asio
 
 #endif // defined(ASIO_HAS_POSIX_STREAM_DESCRIPTOR)
-       //   || defined(GENERATING_DOCUMENTATION)
+//   || defined(GENERATING_DOCUMENTATION)
 
 #endif // ASIO_POSIX_STREAM_DESCRIPTOR_HPP

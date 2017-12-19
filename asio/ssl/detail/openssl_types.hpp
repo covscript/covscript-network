@@ -18,9 +18,13 @@
 #include "asio/detail/config.hpp"
 #include <openssl/conf.h>
 #include <openssl/ssl.h>
+
 #if !defined(OPENSSL_NO_ENGINE)
+
 # include <openssl/engine.h>
+
 #endif // !defined(OPENSSL_NO_ENGINE)
+
 #include <openssl/dh.h>
 #include <openssl/err.h>
 #include <openssl/rsa.h>

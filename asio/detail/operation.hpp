@@ -18,21 +18,23 @@
 #include "asio/detail/config.hpp"
 
 #if defined(ASIO_HAS_IOCP)
+
 # include "asio/detail/win_iocp_operation.hpp"
+
 #else
 # include "asio/detail/task_io_service_operation.hpp"
 #endif
 
 namespace asio {
-namespace detail {
+	namespace detail {
 
 #if defined(ASIO_HAS_IOCP)
-typedef win_iocp_operation operation;
+		typedef win_iocp_operation operation;
 #else
-typedef task_io_service_operation operation;
+		typedef task_io_service_operation operation;
 #endif
 
-} // namespace detail
+	} // namespace detail
 } // namespace asio
 
 #endif // ASIO_DETAIL_OPERATION_HPP

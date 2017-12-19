@@ -21,7 +21,9 @@
 
 #if !defined(ASIO_DISABLE_SMALL_BLOCK_RECYCLING)
 # if defined(ASIO_HAS_IOCP)
+
 #  include "asio/detail/win_iocp_thread_info.hpp"
+
 # else // defined(ASIO_HAS_IOCP)
 #  include "asio/detail/task_io_service_thread_info.hpp"
 # endif // defined(ASIO_HAS_IOCP)
@@ -32,43 +34,45 @@
 namespace asio {
 
 #if defined(ASIO_HAS_IOCP)
-namespace detail { class win_iocp_io_service; }
+	namespace detail {
+		class win_iocp_io_service;
+	}
 #endif // defined(ASIO_HAS_IOCP)
 
-void* asio_handler_allocate(std::size_t size, ...)
-{
+	void *asio_handler_allocate(std::size_t size, ...)
+	{
 #if !defined(ASIO_DISABLE_SMALL_BLOCK_RECYCLING)
 # if defined(ASIO_HAS_IOCP)
-  typedef detail::win_iocp_io_service io_service_impl;
-  typedef detail::win_iocp_thread_info thread_info;
+		typedef detail::win_iocp_io_service io_service_impl;
+		typedef detail::win_iocp_thread_info thread_info;
 # else // defined(ASIO_HAS_IOCP)
-  typedef detail::task_io_service io_service_impl;
-  typedef detail::task_io_service_thread_info thread_info;
+		typedef detail::task_io_service io_service_impl;
+		typedef detail::task_io_service_thread_info thread_info;
 # endif // defined(ASIO_HAS_IOCP)
-  typedef detail::call_stack<io_service_impl, thread_info> call_stack;
-  return thread_info::allocate(call_stack::top(), size);
+		typedef detail::call_stack<io_service_impl, thread_info> call_stack;
+		return thread_info::allocate(call_stack::top(), size);
 #else // !defined(ASIO_DISABLE_SMALL_BLOCK_RECYCLING)
-  return ::operator new(size);
+		return ::operator new(size);
 #endif // !defined(ASIO_DISABLE_SMALL_BLOCK_RECYCLING)
-}
+	}
 
-void asio_handler_deallocate(void* pointer, std::size_t size, ...)
-{
+	void asio_handler_deallocate(void *pointer, std::size_t size, ...)
+	{
 #if !defined(ASIO_DISABLE_SMALL_BLOCK_RECYCLING)
 # if defined(ASIO_HAS_IOCP)
-  typedef detail::win_iocp_io_service io_service_impl;
-  typedef detail::win_iocp_thread_info thread_info;
+		typedef detail::win_iocp_io_service io_service_impl;
+		typedef detail::win_iocp_thread_info thread_info;
 # else // defined(ASIO_HAS_IOCP)
-  typedef detail::task_io_service io_service_impl;
-  typedef detail::task_io_service_thread_info thread_info;
+		typedef detail::task_io_service io_service_impl;
+		typedef detail::task_io_service_thread_info thread_info;
 # endif // defined(ASIO_HAS_IOCP)
-  typedef detail::call_stack<io_service_impl, thread_info> call_stack;
-  thread_info::deallocate(call_stack::top(), pointer, size);
+		typedef detail::call_stack<io_service_impl, thread_info> call_stack;
+		thread_info::deallocate(call_stack::top(), pointer, size);
 #else // !defined(ASIO_DISABLE_SMALL_BLOCK_RECYCLING)
-  (void)size;
-  ::operator delete(pointer);
+		(void)size;
+		::operator delete(pointer);
 #endif // !defined(ASIO_DISABLE_SMALL_BLOCK_RECYCLING)
-}
+	}
 
 } // namespace asio
 

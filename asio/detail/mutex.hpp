@@ -18,7 +18,9 @@
 #include "asio/detail/config.hpp"
 
 #if !defined(ASIO_HAS_THREADS)
+
 # include "asio/detail/null_mutex.hpp"
+
 #elif defined(ASIO_WINDOWS)
 # include "asio/detail/win_mutex.hpp"
 #elif defined(ASIO_HAS_PTHREADS)
@@ -30,19 +32,19 @@
 #endif
 
 namespace asio {
-namespace detail {
+	namespace detail {
 
 #if !defined(ASIO_HAS_THREADS)
-typedef null_mutex mutex;
+		typedef null_mutex mutex;
 #elif defined(ASIO_WINDOWS)
-typedef win_mutex mutex;
+		typedef win_mutex mutex;
 #elif defined(ASIO_HAS_PTHREADS)
-typedef posix_mutex mutex;
+		typedef posix_mutex mutex;
 #elif defined(ASIO_HAS_STD_MUTEX_AND_CONDVAR)
-typedef std_mutex mutex;
+		typedef std_mutex mutex;
 #endif
 
-} // namespace detail
+	} // namespace detail
 } // namespace asio
 
 #endif // ASIO_DETAIL_MUTEX_HPP

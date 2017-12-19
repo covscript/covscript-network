@@ -35,33 +35,29 @@
 #include "asio/detail/push_options.hpp"
 
 namespace asio {
-namespace detail {
+	namespace detail {
 
-enum
-{
-  sockaddr_storage_maxsize = 128, // Maximum size.
-  sockaddr_storage_alignsize = (sizeof(__int64)), // Desired alignment.
-  sockaddr_storage_pad1size = (sockaddr_storage_alignsize - sizeof(short)),
-  sockaddr_storage_pad2size = (sockaddr_storage_maxsize -
-      (sizeof(short) + sockaddr_storage_pad1size + sockaddr_storage_alignsize))
-};
+		enum {
+			sockaddr_storage_maxsize = 128, // Maximum size.
+			sockaddr_storage_alignsize = (sizeof(__int64)), // Desired alignment.
+			sockaddr_storage_pad1size = (sockaddr_storage_alignsize - sizeof(short)),
+			sockaddr_storage_pad2size = (sockaddr_storage_maxsize -
+			                             (sizeof(short) + sockaddr_storage_pad1size + sockaddr_storage_alignsize))
+		};
 
-struct sockaddr_storage_emulation
-{
-  short ss_family;
-  char __ss_pad1[sockaddr_storage_pad1size];
-  __int64 __ss_align;
-  char __ss_pad2[sockaddr_storage_pad2size];
-};
+		struct sockaddr_storage_emulation {
+			short ss_family;
+			char __ss_pad1[sockaddr_storage_pad1size];
+			__int64 __ss_align;
+			char __ss_pad2[sockaddr_storage_pad2size];
+		};
 
-struct in6_addr_emulation
-{
-  union
-  {
-    u_char Byte[16];
-    u_short Word[8];
-  } u;
-};
+		struct in6_addr_emulation {
+			union {
+				u_char Byte[16];
+				u_short Word[8];
+			} u;
+		};
 
 #if !defined(s6_addr)
 # define _S6_un u
@@ -69,32 +65,29 @@ struct in6_addr_emulation
 # define s6_addr _S6_un._S6_u8
 #endif // !defined(s6_addr)
 
-struct sockaddr_in6_emulation
-{
-  short sin6_family;
-  u_short sin6_port;
-  u_long sin6_flowinfo;
-  in6_addr_emulation sin6_addr;
-  u_long sin6_scope_id;
-};
+		struct sockaddr_in6_emulation {
+			short sin6_family;
+			u_short sin6_port;
+			u_long sin6_flowinfo;
+			in6_addr_emulation sin6_addr;
+			u_long sin6_scope_id;
+		};
 
-struct ipv6_mreq_emulation
-{
-  in6_addr_emulation ipv6mr_multiaddr;
-  unsigned int ipv6mr_interface;
-};
+		struct ipv6_mreq_emulation {
+			in6_addr_emulation ipv6mr_multiaddr;
+			unsigned int ipv6mr_interface;
+		};
 
-struct addrinfo_emulation
-{
-  int ai_flags;
-  int ai_family;
-  int ai_socktype;
-  int ai_protocol;
-  size_t ai_addrlen;
-  char* ai_canonname;
-  sockaddr* ai_addr;
-  addrinfo_emulation* ai_next;
-};
+		struct addrinfo_emulation {
+			int ai_flags;
+			int ai_family;
+			int ai_socktype;
+			int ai_protocol;
+			size_t ai_addrlen;
+			char *ai_canonname;
+			sockaddr *ai_addr;
+			addrinfo_emulation *ai_next;
+		};
 
 #if !defined(AI_PASSIVE)
 # define AI_PASSIVE 0x1
@@ -192,7 +185,7 @@ struct addrinfo_emulation
 # define IPV6_LEAVE_GROUP 13
 #endif
 
-} // namespace detail
+	} // namespace detail
 } // namespace asio
 
 #include "asio/detail/pop_options.hpp"

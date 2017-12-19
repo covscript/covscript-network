@@ -20,13 +20,12 @@
 #include "asio/detail/push_options.hpp"
 
 namespace asio {
-namespace detail {
+	namespace detail {
 
-struct win_iocp_thread_info : public thread_info_base
-{
-};
+		struct win_iocp_thread_info : public thread_info_base {
+		};
 
-} // namespace detail
+	} // namespace detail
 } // namespace asio
 
 #include "asio/detail/pop_options.hpp"

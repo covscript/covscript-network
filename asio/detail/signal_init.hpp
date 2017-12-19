@@ -24,20 +24,19 @@
 #include "asio/detail/push_options.hpp"
 
 namespace asio {
-namespace detail {
+	namespace detail {
 
-template <int Signal = SIGPIPE>
-class signal_init
-{
-public:
-  // Constructor.
-  signal_init()
-  {
-    std::signal(Signal, SIG_IGN);
-  }
-};
+		template <int Signal = SIGPIPE>
+		class signal_init {
+		public:
+			// Constructor.
+			signal_init()
+			{
+				std::signal(Signal, SIG_IGN);
+			}
+		};
 
-} // namespace detail
+	} // namespace detail
 } // namespace asio
 
 #include "asio/detail/pop_options.hpp"

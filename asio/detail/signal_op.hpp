@@ -21,27 +21,26 @@
 #include "asio/detail/push_options.hpp"
 
 namespace asio {
-namespace detail {
+	namespace detail {
 
-class signal_op
-  : public operation
-{
-public:
-  // The error code to be passed to the completion handler.
-  asio::error_code ec_;
+		class signal_op
+			: public operation {
+		public:
+			// The error code to be passed to the completion handler.
+			asio::error_code ec_;
 
-  // The signal number to be passed to the completion handler.
-  int signal_number_;
+			// The signal number to be passed to the completion handler.
+			int signal_number_;
 
-protected:
-  signal_op(func_type func)
-    : operation(func),
-      signal_number_(0)
-  {
-  }
-};
+		protected:
+			signal_op(func_type func)
+				: operation(func),
+				  signal_number_(0)
+			{
+			}
+		};
 
-} // namespace detail
+	} // namespace detail
 } // namespace asio
 
 #include "asio/detail/pop_options.hpp"

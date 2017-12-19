@@ -25,37 +25,36 @@
 #include "asio/detail/push_options.hpp"
 
 namespace asio {
-namespace detail {
+	namespace detail {
 
-class std_thread
-  : private noncopyable
-{
-public:
-  // Constructor.
-  template <typename Function>
-  std_thread(Function f, unsigned int = 0)
-    : thread_(f)
-  {
-  }
+		class std_thread
+			: private noncopyable {
+		public:
+			// Constructor.
+			template<typename Function>
+			std_thread(Function f, unsigned int = 0)
+				: thread_(f)
+			{
+			}
 
-  // Destructor.
-  ~std_thread()
-  {
-    join();
-  }
+			// Destructor.
+			~std_thread()
+			{
+				join();
+			}
 
-  // Wait for the thread to exit.
-  void join()
-  {
-    if (thread_.joinable())
-      thread_.join();
-  }
+			// Wait for the thread to exit.
+			void join()
+			{
+				if (thread_.joinable())
+					thread_.join();
+			}
 
-private:
-  std::thread thread_;
-};
+		private:
+			std::thread thread_;
+		};
 
-} // namespace detail
+	} // namespace detail
 } // namespace asio
 
 #include "asio/detail/pop_options.hpp"

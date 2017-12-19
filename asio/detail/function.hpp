@@ -18,21 +18,23 @@
 #include "asio/detail/config.hpp"
 
 #if defined(ASIO_HAS_STD_FUNCTION)
+
 # include <functional>
+
 #else // defined(ASIO_HAS_STD_FUNCTION)
 # include <boost/function.hpp>
 #endif // defined(ASIO_HAS_STD_FUNCTION)
 
 namespace asio {
-namespace detail {
+	namespace detail {
 
 #if defined(ASIO_HAS_STD_FUNCTION)
-using std::function;
+		using std::function;
 #else // defined(ASIO_HAS_STD_FUNCTION)
-using boost::function;
+		using boost::function;
 #endif // defined(ASIO_HAS_STD_FUNCTION)
 
-} // namespace detail
+	} // namespace detail
 } // namespace asio
 
 #endif // ASIO_DETAIL_FUNCTION_HPP

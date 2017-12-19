@@ -25,118 +25,122 @@
 #include "asio/detail/push_options.hpp"
 
 namespace asio {
-namespace detail {
+	namespace detail {
 
 // Default service implementation for a strand.
-class strand_service
-  : public asio::detail::service_base<strand_service>
-{
-private:
-  // Helper class to re-post the strand on exit.
-  struct on_do_complete_exit;
+		class strand_service
+			: public asio::detail::service_base<strand_service> {
+		private:
+			// Helper class to re-post the strand on exit.
+			struct on_do_complete_exit;
 
-  // Helper class to re-post the strand on exit.
-  struct on_dispatch_exit;
+			// Helper class to re-post the strand on exit.
+			struct on_dispatch_exit;
 
-public:
+		public:
 
-  // The underlying implementation of a strand.
-  class strand_impl
-    : public operation
-  {
-  public:
-    strand_impl();
+			// The underlying implementation of a strand.
+			class strand_impl
+				: public operation {
+			public:
+				strand_impl();
 
-  private:
-    // Only this service will have access to the internal values.
-    friend class strand_service;
-    friend struct on_do_complete_exit;
-    friend struct on_dispatch_exit;
+			private:
+				// Only this service will have access to the internal values.
+				friend class strand_service;
 
-    // Mutex to protect access to internal data.
-    asio::detail::mutex mutex_;
+				friend struct on_do_complete_exit;
+				friend struct on_dispatch_exit;
 
-    // Indicates whether the strand is currently "locked" by a handler. This
-    // means that there is a handler upcall in progress, or that the strand
-    // itself has been scheduled in order to invoke some pending handlers.
-    bool locked_;
+				// Mutex to protect access to internal data.
+				asio::detail::mutex mutex_;
 
-    // The handlers that are waiting on the strand but should not be run until
-    // after the next time the strand is scheduled. This queue must only be
-    // modified while the mutex is locked.
-    op_queue<operation> waiting_queue_;
+				// Indicates whether the strand is currently "locked" by a handler. This
+				// means that there is a handler upcall in progress, or that the strand
+				// itself has been scheduled in order to invoke some pending handlers.
+				bool locked_;
 
-    // The handlers that are ready to be run. Logically speaking, these are the
-    // handlers that hold the strand's lock. The ready queue is only modified
-    // from within the strand and so may be accessed without locking the mutex.
-    op_queue<operation> ready_queue_;
-  };
+				// The handlers that are waiting on the strand but should not be run until
+				// after the next time the strand is scheduled. This queue must only be
+				// modified while the mutex is locked.
+				op_queue<operation> waiting_queue_;
 
-  typedef strand_impl* implementation_type;
+				// The handlers that are ready to be run. Logically speaking, these are the
+				// handlers that hold the strand's lock. The ready queue is only modified
+				// from within the strand and so may be accessed without locking the mutex.
+				op_queue<operation> ready_queue_;
+			};
 
-  // Construct a new strand service for the specified io_service.
-  ASIO_DECL explicit strand_service(asio::io_service& io_service);
+			typedef strand_impl *implementation_type;
 
-  // Destroy all user-defined handler objects owned by the service.
-  ASIO_DECL void shutdown_service();
+			// Construct a new strand service for the specified io_service.
+			ASIO_DECL explicit strand_service(asio::io_service &io_service);
 
-  // Construct a new strand implementation.
-  ASIO_DECL void construct(implementation_type& impl);
+			// Destroy all user-defined handler objects owned by the service.
+			ASIO_DECL void shutdown_service();
 
-  // Request the io_service to invoke the given handler.
-  template <typename Handler>
-  void dispatch(implementation_type& impl, Handler& handler);
+			// Construct a new strand implementation.
+			ASIO_DECL void construct(implementation_type &impl);
 
-  // Request the io_service to invoke the given handler and return immediately.
-  template <typename Handler>
-  void post(implementation_type& impl, Handler& handler);
+			// Request the io_service to invoke the given handler.
+			template<typename Handler>
+			void dispatch(implementation_type &impl, Handler &handler);
 
-  // Determine whether the strand is running in the current thread.
-  ASIO_DECL bool running_in_this_thread(
-      const implementation_type& impl) const;
+			// Request the io_service to invoke the given handler and return immediately.
+			template<typename Handler>
+			void post(implementation_type &impl, Handler &handler);
 
-private:
-  // Helper function to dispatch a handler. Returns true if the handler should
-  // be dispatched immediately.
-  ASIO_DECL bool do_dispatch(implementation_type& impl, operation* op);
+			// Determine whether the strand is running in the current thread.
+			ASIO_DECL bool running_in_this_thread(
+			    const implementation_type &impl) const;
 
-  // Helper fiunction to post a handler.
-  ASIO_DECL void do_post(implementation_type& impl,
-      operation* op, bool is_continuation);
+		private:
+			// Helper function to dispatch a handler. Returns true if the handler should
+			// be dispatched immediately.
+			ASIO_DECL bool do_dispatch(implementation_type &impl, operation *op);
 
-  ASIO_DECL static void do_complete(io_service_impl* owner,
-      operation* base, const asio::error_code& ec,
-      std::size_t bytes_transferred);
+			// Helper fiunction to post a handler.
+			ASIO_DECL void do_post(implementation_type &impl,
+			                       operation *op, bool is_continuation);
 
-  // The io_service implementation used to post completions.
-  io_service_impl& io_service_;
+			ASIO_DECL static void do_complete(io_service_impl *owner,
+			                                  operation *base, const asio::error_code &ec,
+			                                  std::size_t bytes_transferred);
 
-  // Mutex to protect access to the array of implementations.
-  asio::detail::mutex mutex_;
+			// The io_service implementation used to post completions.
+			io_service_impl &io_service_;
 
-  // Number of implementations shared between all strand objects.
+			// Mutex to protect access to the array of implementations.
+			asio::detail::mutex mutex_;
+
+			// Number of implementations shared between all strand objects.
 #if defined(ASIO_STRAND_IMPLEMENTATIONS)
-  enum { num_implementations = ASIO_STRAND_IMPLEMENTATIONS };
+			enum { num_implementations = ASIO_STRAND_IMPLEMENTATIONS };
 #else // defined(ASIO_STRAND_IMPLEMENTATIONS)
-  enum { num_implementations = 193 };
+			enum {
+				num_implementations = 193
+			};
 #endif // defined(ASIO_STRAND_IMPLEMENTATIONS)
 
-  // Pool of implementations.
-  scoped_ptr<strand_impl> implementations_[num_implementations];
+			// Pool of implementations.
+			scoped_ptr<strand_impl> implementations_[num_implementations];
 
-  // Extra value used when hashing to prevent recycled memory locations from
-  // getting the same strand implementation.
-  std::size_t salt_;
-};
+			// Extra value used when hashing to prevent recycled memory locations from
+			// getting the same strand implementation.
+			std::size_t salt_;
+		};
 
-} // namespace detail
+	} // namespace detail
 } // namespace asio
 
 #include "asio/detail/pop_options.hpp"
 
 #include "asio/detail/impl/strand_service.hpp"
+
 #if defined(ASIO_HEADER_ONLY)
+
 # include "asio/detail/impl/strand_service.ipp"
+
 #endif // defined(ASIO_HEADER_ONLY)
 
 #endif // ASIO_DETAIL_STRAND_SERVICE_HPP

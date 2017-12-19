@@ -17,8 +17,8 @@
 
 namespace asio {
 
-template <typename Stream>
-class buffered_read_stream;
+	template<typename Stream>
+	class buffered_read_stream;
 
 } // namespace asio
 

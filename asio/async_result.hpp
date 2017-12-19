@@ -23,58 +23,55 @@
 namespace asio {
 
 /// An interface for customising the behaviour of an initiating function.
-/**
- * This template may be specialised for user-defined handler types.
- */
-template <typename Handler>
-class async_result
-{
-public:
-  /// The return type of the initiating function.
-  typedef void type;
+	/**
+	 * This template may be specialised for user-defined handler types.
+	 */
+	template<typename Handler>
+	class async_result {
+	public:
+		/// The return type of the initiating function.
+		typedef void type;
 
-  /// Construct an async result from a given handler.
-  /**
-   * When using a specalised async_result, the constructor has an opportunity
-   * to initialise some state associated with the handler, which is then
-   * returned from the initiating function.
-   */
-  explicit async_result(Handler&)
-  {
-  }
+		/// Construct an async result from a given handler.
+		/**
+		 * When using a specalised async_result, the constructor has an opportunity
+		 * to initialise some state associated with the handler, which is then
+		 * returned from the initiating function.
+		 */
+		explicit async_result(Handler &)
+		{
+		}
 
-  /// Obtain the value to be returned from the initiating function.
-  type get()
-  {
-  }
-};
+		/// Obtain the value to be returned from the initiating function.
+		type get()
+		{
+		}
+	};
 
-namespace detail {
+	namespace detail {
 
 // Helper template to deduce the true type of a handler, capture a local copy
 // of the handler, and then create an async_result for the handler.
-template <typename Handler, typename Signature>
-struct async_result_init
-{
-  explicit async_result_init(ASIO_MOVE_ARG(Handler) orig_handler)
-    : handler(ASIO_MOVE_CAST(Handler)(orig_handler)),
-      result(handler)
-  {
-  }
+		template<typename Handler, typename Signature>
+		struct async_result_init {
+			explicit async_result_init(ASIO_MOVE_ARG(Handler)orig_handler)
+				: handler(ASIO_MOVE_CAST(Handler)(orig_handler)),
+				  result(handler)
+			{
+			}
 
-  typename handler_type<Handler, Signature>::type handler;
-  async_result<typename handler_type<Handler, Signature>::type> result;
-};
+			typename handler_type<Handler, Signature>::type handler;
+			async_result<typename handler_type<Handler, Signature>::type> result;
+		};
 
-template <typename Handler, typename Signature>
-struct async_result_type_helper
-{
-  typedef typename async_result<
-      typename handler_type<Handler, Signature>::type
-    >::type type;
-};
+		template<typename Handler, typename Signature>
+		struct async_result_type_helper {
+			typedef typename async_result<
+			typename handler_type<Handler, Signature>::type
+			>::type type;
+		};
 
-} // namespace detail
+	} // namespace detail
 } // namespace asio
 
 #include "asio/detail/pop_options.hpp"

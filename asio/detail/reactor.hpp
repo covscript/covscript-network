@@ -26,7 +26,9 @@
 #elif defined(ASIO_WINDOWS_RUNTIME)
 # include "asio/detail/null_reactor.hpp"
 #else
+
 # include "asio/detail/select_reactor.hpp"
+
 #endif
 
 #endif // ASIO_DETAIL_REACTOR_HPP

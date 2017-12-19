@@ -26,44 +26,44 @@
 #include "asio/detail/push_options.hpp"
 
 namespace asio {
-namespace detail {
+	namespace detail {
 
-class std_event;
+		class std_event;
 
-class std_mutex
-  : private noncopyable
-{
-public:
-  typedef asio::detail::scoped_lock<std_mutex> scoped_lock;
+		class std_mutex
+			: private noncopyable {
+		public:
+			typedef asio::detail::scoped_lock<std_mutex> scoped_lock;
 
-  // Constructor.
-  std_mutex()
-  {
-  }
+			// Constructor.
+			std_mutex()
+			{
+			}
 
-  // Destructor.
-  ~std_mutex()
-  {
-  }
+			// Destructor.
+			~std_mutex()
+			{
+			}
 
-  // Lock the mutex.
-  void lock()
-  {
-    mutex_.lock();
-  }
+			// Lock the mutex.
+			void lock()
+			{
+				mutex_.lock();
+			}
 
-  // Unlock the mutex.
-  void unlock()
-  {
-    mutex_.unlock();
-  }
+			// Unlock the mutex.
+			void unlock()
+			{
+				mutex_.unlock();
+			}
 
-private:
-  friend class std_event;
-  std::mutex mutex_;
-};
+		private:
+			friend class std_event;
 
-} // namespace detail
+			std::mutex mutex_;
+		};
+
+	} // namespace detail
 } // namespace asio
 
 #include "asio/detail/pop_options.hpp"

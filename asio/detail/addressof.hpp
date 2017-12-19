@@ -18,21 +18,23 @@
 #include "asio/detail/config.hpp"
 
 #if defined(ASIO_HAS_STD_ADDRESSOF)
+
 # include <memory>
+
 #else // defined(ASIO_HAS_STD_ADDRESSOF)
 # include <boost/utility/addressof.hpp>
 #endif // defined(ASIO_HAS_STD_ADDRESSOF)
 
 namespace asio {
-namespace detail {
+	namespace detail {
 
 #if defined(ASIO_HAS_STD_ADDRESSOF)
-using std::addressof;
+		using std::addressof;
 #else // defined(ASIO_HAS_STD_ADDRESSOF)
-using boost::addressof;
+		using boost::addressof;
 #endif // defined(ASIO_HAS_STD_ADDRESSOF)
 
-} // namespace detail
+	} // namespace detail
 } // namespace asio
 
 #endif // ASIO_DETAIL_ADDRESSOF_HPP

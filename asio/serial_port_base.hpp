@@ -19,7 +19,7 @@
 #include "asio/detail/config.hpp"
 
 #if defined(ASIO_HAS_SERIAL_PORT) \
-  || defined(GENERATING_DOCUMENTATION)
+ || defined(GENERATING_DOCUMENTATION)
 
 #if !defined(ASIO_WINDOWS) && !defined(__CYGWIN__)
 # include <termios.h>
@@ -42,113 +42,136 @@ namespace asio {
 
 /// The serial_port_base class is used as a base for the basic_serial_port class
 /// template so that we have a common place to define the serial port options.
-class serial_port_base
-{
-public:
-  /// Serial port option to permit changing the baud rate.
-  /**
-   * Implements changing the baud rate for a given serial port.
-   */
-  class baud_rate
-  {
-  public:
-    explicit baud_rate(unsigned int rate = 0);
-    unsigned int value() const;
-    ASIO_DECL asio::error_code store(
-        ASIO_OPTION_STORAGE& storage,
-        asio::error_code& ec) const;
-    ASIO_DECL asio::error_code load(
-        const ASIO_OPTION_STORAGE& storage,
-        asio::error_code& ec);
-  private:
-    unsigned int value_;
-  };
+	class serial_port_base {
+	public:
+		/// Serial port option to permit changing the baud rate.
+		/**
+		 * Implements changing the baud rate for a given serial port.
+		 */
+		class baud_rate {
+		public:
+			explicit baud_rate(unsigned int rate = 0);
 
-  /// Serial port option to permit changing the flow control.
-  /**
-   * Implements changing the flow control for a given serial port.
-   */
-  class flow_control
-  {
-  public:
-    enum type { none, software, hardware };
-    ASIO_DECL explicit flow_control(type t = none);
-    type value() const;
-    ASIO_DECL asio::error_code store(
-        ASIO_OPTION_STORAGE& storage,
-        asio::error_code& ec) const;
-    ASIO_DECL asio::error_code load(
-        const ASIO_OPTION_STORAGE& storage,
-        asio::error_code& ec);
-  private:
-    type value_;
-  };
+			unsigned int value() const;
 
-  /// Serial port option to permit changing the parity.
-  /**
-   * Implements changing the parity for a given serial port.
-   */
-  class parity
-  {
-  public:
-    enum type { none, odd, even };
-    ASIO_DECL explicit parity(type t = none);
-    type value() const;
-    ASIO_DECL asio::error_code store(
-        ASIO_OPTION_STORAGE& storage,
-        asio::error_code& ec) const;
-    ASIO_DECL asio::error_code load(
-        const ASIO_OPTION_STORAGE& storage,
-        asio::error_code& ec);
-  private:
-    type value_;
-  };
+			ASIO_DECL asio::error_code store(
+			    ASIO_OPTION_STORAGE &storage,
+			    asio::error_code &ec) const;
 
-  /// Serial port option to permit changing the number of stop bits.
-  /**
-   * Implements changing the number of stop bits for a given serial port.
-   */
-  class stop_bits
-  {
-  public:
-    enum type { one, onepointfive, two };
-    ASIO_DECL explicit stop_bits(type t = one);
-    type value() const;
-    ASIO_DECL asio::error_code store(
-        ASIO_OPTION_STORAGE& storage,
-        asio::error_code& ec) const;
-    ASIO_DECL asio::error_code load(
-        const ASIO_OPTION_STORAGE& storage,
-        asio::error_code& ec);
-  private:
-    type value_;
-  };
+			ASIO_DECL asio::error_code load(
+			    const ASIO_OPTION_STORAGE &storage,
+			    asio::error_code &ec);
 
-  /// Serial port option to permit changing the character size.
-  /**
-   * Implements changing the character size for a given serial port.
-   */
-  class character_size
-  {
-  public:
-    ASIO_DECL explicit character_size(unsigned int t = 8);
-    unsigned int value() const;
-    ASIO_DECL asio::error_code store(
-        ASIO_OPTION_STORAGE& storage,
-        asio::error_code& ec) const;
-    ASIO_DECL asio::error_code load(
-        const ASIO_OPTION_STORAGE& storage,
-        asio::error_code& ec);
-  private:
-    unsigned int value_;
-  };
+		private:
+			unsigned int value_;
+		};
 
-protected:
-  /// Protected destructor to prevent deletion through this type.
-  ~serial_port_base()
-  {
-  }
-};
+		/// Serial port option to permit changing the flow control.
+		/**
+		 * Implements changing the flow control for a given serial port.
+		 */
+		class flow_control {
+		public:
+			enum type {
+				none, software, hardware
+			};
+
+			ASIO_DECL explicit flow_control(type t = none);
+
+			type value() const;
+
+			ASIO_DECL asio::error_code store(
+			    ASIO_OPTION_STORAGE &storage,
+			    asio::error_code &ec) const;
+
+			ASIO_DECL asio::error_code load(
+			    const ASIO_OPTION_STORAGE &storage,
+			    asio::error_code &ec);
+
+		private:
+			type value_;
+		};
+
+		/// Serial port option to permit changing the parity.
+		/**
+		 * Implements changing the parity for a given serial port.
+		 */
+		class parity {
+		public:
+			enum type {
+				none, odd, even
+			};
+
+			ASIO_DECL explicit parity(type t = none);
+
+			type value() const;
+
+			ASIO_DECL asio::error_code store(
+			    ASIO_OPTION_STORAGE &storage,
+			    asio::error_code &ec) const;
+
+			ASIO_DECL asio::error_code load(
+			    const ASIO_OPTION_STORAGE &storage,
+			    asio::error_code &ec);
+
+		private:
+			type value_;
+		};
+
+		/// Serial port option to permit changing the number of stop bits.
+		/**
+		 * Implements changing the number of stop bits for a given serial port.
+		 */
+		class stop_bits {
+		public:
+			enum type {
+				one, onepointfive, two
+			};
+
+			ASIO_DECL explicit stop_bits(type t = one);
+
+			type value() const;
+
+			ASIO_DECL asio::error_code store(
+			    ASIO_OPTION_STORAGE &storage,
+			    asio::error_code &ec) const;
+
+			ASIO_DECL asio::error_code load(
+			    const ASIO_OPTION_STORAGE &storage,
+			    asio::error_code &ec);
+
+		private:
+			type value_;
+		};
+
+		/// Serial port option to permit changing the character size.
+		/**
+		 * Implements changing the character size for a given serial port.
+		 */
+		class character_size {
+		public:
+			ASIO_DECL explicit character_size(unsigned int t = 8);
+
+			unsigned int value() const;
+
+			ASIO_DECL asio::error_code store(
+			    ASIO_OPTION_STORAGE &storage,
+			    asio::error_code &ec) const;
+
+			ASIO_DECL asio::error_code load(
+			    const ASIO_OPTION_STORAGE &storage,
+			    asio::error_code &ec);
+
+		private:
+			unsigned int value_;
+		};
+
+	protected:
+		/// Protected destructor to prevent deletion through this type.
+		~serial_port_base()
+		{
+		}
+	};
 
 } // namespace asio
 
@@ -157,11 +180,14 @@ protected:
 #undef ASIO_OPTION_STORAGE
 
 #include "asio/impl/serial_port_base.hpp"
+
 #if defined(ASIO_HEADER_ONLY)
+
 # include "asio/impl/serial_port_base.ipp"
+
 #endif // defined(ASIO_HEADER_ONLY)
 
 #endif // defined(ASIO_HAS_SERIAL_PORT)
-       //   || defined(GENERATING_DOCUMENTATION)
+//   || defined(GENERATING_DOCUMENTATION)
 
 #endif // ASIO_SERIAL_PORT_BASE_HPP

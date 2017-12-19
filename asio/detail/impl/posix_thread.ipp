@@ -26,45 +26,44 @@
 #include "asio/detail/push_options.hpp"
 
 namespace asio {
-namespace detail {
+	namespace detail {
 
-posix_thread::~posix_thread()
-{
-  if (!joined_)
-    ::pthread_detach(thread_);
-}
+		posix_thread::~posix_thread()
+		{
+			if (!joined_)
+				::pthread_detach(thread_);
+		}
 
-void posix_thread::join()
-{
-  if (!joined_)
-  {
-    ::pthread_join(thread_, 0);
-    joined_ = true;
-  }
-}
+		void posix_thread::join()
+		{
+			if (!joined_) {
+				::pthread_join(thread_, 0);
+				joined_ = true;
+			}
+		}
 
-void posix_thread::start_thread(func_base* arg)
-{
-  int error = ::pthread_create(&thread_, 0,
-        asio_detail_posix_thread_function, arg);
-  if (error != 0)
-  {
-    delete arg;
-    asio::error_code ec(error,
-        asio::error::get_system_category());
-    asio::detail::throw_error(ec, "thread");
-  }
-}
+		void posix_thread::start_thread(func_base* arg)
+		{
+			int error = ::pthread_create(&thread_, 0,
+			                             asio_detail_posix_thread_function, arg);
+			if (error != 0) {
+				delete arg;
+				asio::error_code ec(error,
+				                    asio::error::get_system_category());
+				asio::detail::throw_error(ec, "thread");
+			}
+		}
 
-void* asio_detail_posix_thread_function(void* arg)
-{
-  posix_thread::auto_func_base_ptr func = {
-      static_cast<posix_thread::func_base*>(arg) };
-  func.ptr->run();
-  return 0;
-}
+		void* asio_detail_posix_thread_function(void* arg)
+		{
+			posix_thread::auto_func_base_ptr func = {
+				static_cast<posix_thread::func_base*>(arg)
+			};
+			func.ptr->run();
+			return 0;
+		}
 
-} // namespace detail
+	} // namespace detail
 } // namespace asio
 
 #include "asio/detail/pop_options.hpp"

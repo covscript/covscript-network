@@ -19,7 +19,7 @@
 // Digital Mars C++
 
 #elif defined(__INTEL_COMPILER) || defined(__ICL) \
-  || defined(__ICC) || defined(__ECC)
+ || defined(__ICC) || defined(__ECC)
 
 // Intel C++
 

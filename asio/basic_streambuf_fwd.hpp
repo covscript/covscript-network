@@ -23,8 +23,8 @@
 
 namespace asio {
 
-template <typename Allocator = std::allocator<char> >
-class basic_streambuf;
+	template<typename Allocator = std::allocator<char> >
+	class basic_streambuf;
 
 } // namespace asio
 

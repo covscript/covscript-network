@@ -21,39 +21,38 @@
 #include "asio/detail/push_options.hpp"
 
 namespace asio {
-namespace detail {
+	namespace detail {
 
-class reactor_op
-  : public operation
-{
-public:
-  // The error code to be passed to the completion handler.
-  asio::error_code ec_;
+		class reactor_op
+			: public operation {
+		public:
+			// The error code to be passed to the completion handler.
+			asio::error_code ec_;
 
-  // The number of bytes transferred, to be passed to the completion handler.
-  std::size_t bytes_transferred_;
+			// The number of bytes transferred, to be passed to the completion handler.
+			std::size_t bytes_transferred_;
 
-  // Perform the operation. Returns true if it is finished.
-  bool perform()
-  {
-    return perform_func_(this);
-  }
+			// Perform the operation. Returns true if it is finished.
+			bool perform()
+			{
+				return perform_func_(this);
+			}
 
-protected:
-  typedef bool (*perform_func_type)(reactor_op*);
+		protected:
+			typedef bool (*perform_func_type)(reactor_op *);
 
-  reactor_op(perform_func_type perform_func, func_type complete_func)
-    : operation(complete_func),
-      bytes_transferred_(0),
-      perform_func_(perform_func)
-  {
-  }
+			reactor_op(perform_func_type perform_func, func_type complete_func)
+				: operation(complete_func),
+				  bytes_transferred_(0),
+				  perform_func_(perform_func)
+			{
+			}
 
-private:
-  perform_func_type perform_func_;
-};
+		private:
+			perform_func_type perform_func_;
+		};
 
-} // namespace detail
+	} // namespace detail
 } // namespace asio
 
 #include "asio/detail/pop_options.hpp"

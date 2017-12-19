@@ -31,56 +31,54 @@
 #include "asio/detail/push_options.hpp"
 
 namespace asio {
-namespace detail {
+	namespace detail {
 
-template <typename Handler>
-class winrt_socket_connect_op :
-  public winrt_async_op<void>
-{
-public:
-  ASIO_DEFINE_HANDLER_PTR(winrt_socket_connect_op);
+		template <typename Handler>
+		class winrt_socket_connect_op :
+			public winrt_async_op<void> {
+		public:
+			ASIO_DEFINE_HANDLER_PTR(winrt_socket_connect_op);
 
-  winrt_socket_connect_op(Handler& handler)
-    : winrt_async_op<void>(&winrt_socket_connect_op::do_complete),
-      handler_(ASIO_MOVE_CAST(Handler)(handler))
-  {
-  }
+			winrt_socket_connect_op(Handler& handler)
+				: winrt_async_op<void>(&winrt_socket_connect_op::do_complete),
+				  handler_(ASIO_MOVE_CAST(Handler)(handler))
+			{
+			}
 
-  static void do_complete(io_service_impl* owner, operation* base,
-      const asio::error_code&, std::size_t)
-  {
-    // Take ownership of the operation object.
-    winrt_socket_connect_op* o(static_cast<winrt_socket_connect_op*>(base));
-    ptr p = { asio::detail::addressof(o->handler_), o, o };
+			static void do_complete(io_service_impl* owner, operation* base,
+			                        const asio::error_code&, std::size_t)
+			{
+				// Take ownership of the operation object.
+				winrt_socket_connect_op* o(static_cast<winrt_socket_connect_op*>(base));
+				ptr p = { asio::detail::addressof(o->handler_), o, o };
 
-    ASIO_HANDLER_COMPLETION((o));
+				ASIO_HANDLER_COMPLETION((o));
 
-    // Make a copy of the handler so that the memory can be deallocated before
-    // the upcall is made. Even if we're not about to make an upcall, a
-    // sub-object of the handler may be the true owner of the memory associated
-    // with the handler. Consequently, a local copy of the handler is required
-    // to ensure that any owning sub-object remains valid until after we have
-    // deallocated the memory here.
-    detail::binder1<Handler, asio::error_code>
-      handler(o->handler_, o->ec_);
-    p.h = asio::detail::addressof(handler.handler_);
-    p.reset();
+				// Make a copy of the handler so that the memory can be deallocated before
+				// the upcall is made. Even if we're not about to make an upcall, a
+				// sub-object of the handler may be the true owner of the memory associated
+				// with the handler. Consequently, a local copy of the handler is required
+				// to ensure that any owning sub-object remains valid until after we have
+				// deallocated the memory here.
+				detail::binder1<Handler, asio::error_code>
+				handler(o->handler_, o->ec_);
+				p.h = asio::detail::addressof(handler.handler_);
+				p.reset();
 
-    // Make the upcall if required.
-    if (owner)
-    {
-      fenced_block b(fenced_block::half);
-      ASIO_HANDLER_INVOCATION_BEGIN((handler.arg1_, handler.arg2_));
-      asio_handler_invoke_helpers::invoke(handler, handler.handler_);
-      ASIO_HANDLER_INVOCATION_END;
-    }
-  }
+				// Make the upcall if required.
+				if (owner) {
+					fenced_block b(fenced_block::half);
+					ASIO_HANDLER_INVOCATION_BEGIN((handler.arg1_, handler.arg2_));
+					asio_handler_invoke_helpers::invoke(handler, handler.handler_);
+					ASIO_HANDLER_INVOCATION_END;
+				}
+			}
 
-private:
-  Handler handler_;
-};
+		private:
+			Handler handler_;
+		};
 
-} // namespace detail
+	} // namespace detail
 } // namespace asio
 
 #include "asio/detail/pop_options.hpp"

@@ -24,61 +24,60 @@
 #include "asio/detail/push_options.hpp"
 
 namespace asio {
-namespace detail {
+	namespace detail {
 
-class null_event
-  : private noncopyable
-{
-public:
-  // Constructor.
-  null_event()
-  {
-  }
+		class null_event
+			: private noncopyable {
+		public:
+			// Constructor.
+			null_event()
+			{
+			}
 
-  // Destructor.
-  ~null_event()
-  {
-  }
+			// Destructor.
+			~null_event()
+			{
+			}
 
-  // Signal the event. (Retained for backward compatibility.)
-  template <typename Lock>
-  void signal(Lock&)
-  {
-  }
+			// Signal the event. (Retained for backward compatibility.)
+			template<typename Lock>
+			void signal(Lock &)
+			{
+			}
 
-  // Signal all waiters.
-  template <typename Lock>
-  void signal_all(Lock&)
-  {
-  }
+			// Signal all waiters.
+			template<typename Lock>
+			void signal_all(Lock &)
+			{
+			}
 
-  // Unlock the mutex and signal one waiter.
-  template <typename Lock>
-  void unlock_and_signal_one(Lock&)
-  {
-  }
+			// Unlock the mutex and signal one waiter.
+			template<typename Lock>
+			void unlock_and_signal_one(Lock &)
+			{
+			}
 
-  // If there's a waiter, unlock the mutex and signal it.
-  template <typename Lock>
-  bool maybe_unlock_and_signal_one(Lock&)
-  {
-    return false;
-  }
+			// If there's a waiter, unlock the mutex and signal it.
+			template<typename Lock>
+			bool maybe_unlock_and_signal_one(Lock &)
+			{
+				return false;
+			}
 
-  // Reset the event.
-  template <typename Lock>
-  void clear(Lock&)
-  {
-  }
+			// Reset the event.
+			template<typename Lock>
+			void clear(Lock &)
+			{
+			}
 
-  // Wait for the event to become signalled.
-  template <typename Lock>
-  void wait(Lock&)
-  {
-  }
-};
+			// Wait for the event to become signalled.
+			template<typename Lock>
+			void wait(Lock &)
+			{
+			}
+		};
 
-} // namespace detail
+	} // namespace detail
 } // namespace asio
 
 #include "asio/detail/pop_options.hpp"

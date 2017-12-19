@@ -21,23 +21,22 @@
 #include "asio/detail/push_options.hpp"
 
 namespace asio {
-namespace detail {
+	namespace detail {
 
-class wait_op
-  : public operation
-{
-public:
-  // The error code to be passed to the completion handler.
-  asio::error_code ec_;
+		class wait_op
+			: public operation {
+		public:
+			// The error code to be passed to the completion handler.
+			asio::error_code ec_;
 
-protected:
-  wait_op(func_type func)
-    : operation(func)
-  {
-  }
-};
+		protected:
+			wait_op(func_type func)
+				: operation(func)
+			{
+			}
+		};
 
-} // namespace detail
+	} // namespace detail
 } // namespace asio
 
 #include "asio/detail/pop_options.hpp"

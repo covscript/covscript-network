@@ -27,27 +27,27 @@
 // asio_handler_alloc_helpers namespace is defined here for that purpose.
 namespace asio_handler_alloc_helpers {
 
-template <typename Handler>
-inline void* allocate(std::size_t s, Handler& h)
-{
+	template<typename Handler>
+	inline void *allocate(std::size_t s, Handler &h)
+	{
 #if !defined(ASIO_HAS_HANDLER_HOOKS)
-  return ::operator new(s);
+		return ::operator new(s);
 #else
-  using asio::asio_handler_allocate;
-  return asio_handler_allocate(s, asio::detail::addressof(h));
+		using asio::asio_handler_allocate;
+		return asio_handler_allocate(s, asio::detail::addressof(h));
 #endif
-}
+	}
 
-template <typename Handler>
-inline void deallocate(void* p, std::size_t s, Handler& h)
-{
+	template<typename Handler>
+	inline void deallocate(void *p, std::size_t s, Handler &h)
+	{
 #if !defined(ASIO_HAS_HANDLER_HOOKS)
-  ::operator delete(p);
+		::operator delete(p);
 #else
-  using asio::asio_handler_deallocate;
-  asio_handler_deallocate(p, s, asio::detail::addressof(h));
+		using asio::asio_handler_deallocate;
+		asio_handler_deallocate(p, s, asio::detail::addressof(h));
 #endif
-}
+	}
 
 } // namespace asio_handler_alloc_helpers
 

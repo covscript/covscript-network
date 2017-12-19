@@ -18,7 +18,9 @@
 #include "asio/detail/config.hpp"
 
 #if defined(ASIO_HAS_STD_TYPE_TRAITS)
+
 # include <type_traits>
+
 #else // defined(ASIO_HAS_TYPE_TRAITS)
 # include <boost/type_traits/add_const.hpp>
 # include <boost/type_traits/is_const.hpp>
@@ -33,24 +35,24 @@
 namespace asio {
 
 #if defined(ASIO_HAS_STD_TYPE_TRAITS)
-using std::add_const;
-using std::enable_if;
-using std::is_const;
-using std::is_convertible;
-using std::is_function;
-using std::is_same;
-using std::remove_pointer;
-using std::remove_reference;
+	using std::add_const;
+	using std::enable_if;
+	using std::is_const;
+	using std::is_convertible;
+	using std::is_function;
+	using std::is_same;
+	using std::remove_pointer;
+	using std::remove_reference;
 #else // defined(ASIO_HAS_STD_TYPE_TRAITS)
-using boost::add_const;
-template <bool Condition, typename Type = void>
-struct enable_if : boost::enable_if_c<Condition, Type> {};
-using boost::is_const;
-using boost::is_convertible;
-using boost::is_function;
-using boost::is_same;
-using boost::remove_pointer;
-using boost::remove_reference;
+	using boost::add_const;
+	template <bool Condition, typename Type = void>
+	struct enable_if : boost::enable_if_c<Condition, Type> {};
+	using boost::is_const;
+	using boost::is_convertible;
+	using boost::is_function;
+	using boost::is_same;
+	using boost::remove_pointer;
+	using boost::remove_reference;
 #endif // defined(ASIO_HAS_STD_TYPE_TRAITS)
 
 } // namespace asio

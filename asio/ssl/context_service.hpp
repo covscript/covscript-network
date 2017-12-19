@@ -16,7 +16,7 @@
 #endif // defined(_MSC_VER) && (_MSC_VER >= 1200)
 
 #include "asio/detail/config.hpp"
-  
+
 #if defined(ASIO_ENABLE_OLD_SSL)
 # include "asio/ssl/old/context_service.hpp"
 #endif // defined(ASIO_ENABLE_OLD_SSL)
@@ -24,15 +24,15 @@
 #include "asio/detail/push_options.hpp"
 
 namespace asio {
-namespace ssl {
+	namespace ssl {
 
 #if defined(ASIO_ENABLE_OLD_SSL)
 
-using asio::ssl::old::context_service;
+		using asio::ssl::old::context_service;
 
 #endif // defined(ASIO_ENABLE_OLD_SSL)
 
-} // namespace ssl
+	} // namespace ssl
 } // namespace asio
 
 #include "asio/detail/pop_options.hpp"

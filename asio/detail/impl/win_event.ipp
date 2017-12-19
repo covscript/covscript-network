@@ -26,46 +26,44 @@
 #include "asio/detail/push_options.hpp"
 
 namespace asio {
-namespace detail {
+	namespace detail {
 
-win_event::win_event()
-  : state_(0)
-{
+		win_event::win_event()
+			: state_(0)
+		{
 #if defined(ASIO_WINDOWS_APP)
-  events_[0] = ::CreateEventExW(0, 0, CREATE_EVENT_MANUAL_RESET, 0);
+			events_[0] = ::CreateEventExW(0, 0, CREATE_EVENT_MANUAL_RESET, 0);
 #else // defined(ASIO_WINDOWS_APP)
-  events_[0] = ::CreateEventW(0, true, false, 0);
+			events_[0] = ::CreateEventW(0, true, false, 0);
 #endif // defined(ASIO_WINDOWS_APP)
-  if (!events_[0])
-  {
-    DWORD last_error = ::GetLastError();
-    asio::error_code ec(last_error,
-        asio::error::get_system_category());
-    asio::detail::throw_error(ec, "event");
-  }
+			if (!events_[0]) {
+				DWORD last_error = ::GetLastError();
+				asio::error_code ec(last_error,
+				                    asio::error::get_system_category());
+				asio::detail::throw_error(ec, "event");
+			}
 
 #if defined(ASIO_WINDOWS_APP)
-  events_[1] = ::CreateEventExW(0, 0, 0, 0);
+			events_[1] = ::CreateEventExW(0, 0, 0, 0);
 #else // defined(ASIO_WINDOWS_APP)
-  events_[1] = ::CreateEventW(0, false, false, 0);
+			events_[1] = ::CreateEventW(0, false, false, 0);
 #endif // defined(ASIO_WINDOWS_APP)
-  if (!events_[1])
-  {
-    DWORD last_error = ::GetLastError();
-    ::CloseHandle(events_[0]);
-    asio::error_code ec(last_error,
-        asio::error::get_system_category());
-    asio::detail::throw_error(ec, "event");
-  }
-}
+			if (!events_[1]) {
+				DWORD last_error = ::GetLastError();
+				::CloseHandle(events_[0]);
+				asio::error_code ec(last_error,
+				                    asio::error::get_system_category());
+				asio::detail::throw_error(ec, "event");
+			}
+		}
 
-win_event::~win_event()
-{
-  ::CloseHandle(events_[0]);
-  ::CloseHandle(events_[1]);
-}
+		win_event::~win_event()
+		{
+			::CloseHandle(events_[0]);
+			::CloseHandle(events_[1]);
+		}
 
-} // namespace detail
+	} // namespace detail
 } // namespace asio
 
 #include "asio/detail/pop_options.hpp"
