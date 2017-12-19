@@ -1,17 +1,17 @@
 #include "network.hpp"
 #include <iostream>
 using asio::ip::tcp;
+using buffer_type=char[512];
 unsigned short port=1000;
 int main()
 {
 	asio::io_service service;
-	tcp::resolver resolver(service);
 	tcp::socket client(service);
-	asio::connect(client,resolver.resolve(tcp::endpoint(asio::ip::address_v4::from_string("127.0.0.1"),port)));
-	char buff[64];
+	client.connect(tcp::endpoint(asio::ip::address::from_string("127.0.0.1"),port));
+	buffer_type buff;
 	std::cin>>buff;
-	client.write_some(asio::buffer(buff));
-	client.read_some(asio::buffer(buff));
+	client.send(asio::buffer(buff));
+	client.receive(asio::buffer(buff));
 	std::cout<<buff<<std::endl;
 	return 0;
 }
