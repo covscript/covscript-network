@@ -8,8 +8,7 @@ int main()
 	while(true) {
 		std::string s;
 		std::getline(std::cin,s);
-		if(!s.empty())
-		{
+		if(!s.empty()) {
 			sock.send(s);
 			sock.receive(s,512);
 			std::cout<<s<<std::endl;
