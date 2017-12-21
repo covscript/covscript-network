@@ -14,6 +14,7 @@ namespace cs_impl {
 		static asio::io_service cs_net_service;
 		namespace tcp {
 			using asio::ip::tcp;
+			static tcp::resolver resolver(cs_net_service);
 
 			tcp::acceptor acceptor(const tcp::endpoint &ep)
 			{
@@ -45,6 +46,11 @@ namespace cs_impl {
 				void accept(tcp::acceptor &a)
 				{
 					a.accept(sock);
+				}
+
+				void resolve(const std::string &host, const std::string &service)
+				{
+					asio::connect(sock, resolver.resolve({host, service}));
 				}
 
 				bool is_open()

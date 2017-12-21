@@ -78,6 +78,16 @@ namespace network_cs_ext {
 				}
 			}
 
+			void resolve(socket_t &sock, const string &host, const string &service)
+			{
+				try {
+					sock->resolve(host, service);
+				}
+				catch (const std::exception &e) {
+					throw lang_error(e.what());
+				}
+			}
+
 			void close(socket_t &sock)
 			{
 				try {
@@ -139,6 +149,7 @@ namespace network_cs_ext {
 		tcp::tcp_ext.add_var("endpoint", var::make_protect<callable>(cni(tcp::endpoint), true));
 		tcp::socket::socket_ext.add_var("connect", var::make_protect<callable>(cni(tcp::socket::connect)));
 		tcp::socket::socket_ext.add_var("accept", var::make_protect<callable>(cni(tcp::socket::accept)));
+		tcp::socket::socket_ext.add_var("resolve", var::make_protect<callable>(cni(tcp::socket::resolve)));
 		tcp::socket::socket_ext.add_var("close", var::make_protect<callable>(cni(tcp::socket::close)));
 		tcp::socket::socket_ext.add_var("is_open", var::make_protect<callable>(cni(tcp::socket::is_open)));
 		tcp::socket::socket_ext.add_var("receive", var::make_protect<callable>(cni(tcp::socket::receive)));
