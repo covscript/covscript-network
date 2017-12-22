@@ -28,6 +28,12 @@ namespace network_cs_ext {
 	using namespace cs;
 	static extension network_ext;
 	static extension_t network_ext_shared = make_shared_extension(network_ext);
+
+	string host_name()
+	{
+		return asio::ip::host_name();
+	}
+
 	namespace tcp {
 		static extension tcp_ext;
 		static extension_t tcp_ext_shared = make_shared_extension(tcp_ext);
@@ -37,8 +43,12 @@ namespace network_cs_ext {
 
 		var acceptor(const endpoint_t &ep)
 		{
-			return var::make<acceptor_t>(
-			           std::make_shared<asio::ip::tcp::acceptor>(cs_impl::network::tcp::acceptor(ep)));
+			try {
+				return var::make<acceptor_t>(std::make_shared<asio::ip::tcp::acceptor>(cs_impl::network::tcp::acceptor(ep)));
+			}
+			catch (const std::exception &e) {
+				throw lang_error(e.what());
+			}
 		}
 
 		var endpoint(const string &host, number port)
@@ -47,6 +57,16 @@ namespace network_cs_ext {
 				throw lang_error("Port number can not under zero.");
 			else
 				return var::make<endpoint_t>(cs_impl::network::tcp::endpoint(host, static_cast<unsigned short>(port)));
+		}
+
+		var resolve(const string &host, const string &service)
+		{
+			try {
+				return var::make<endpoint_t>(cs_impl::network::tcp::resolve(host, service));
+			}
+			catch (const std::exception &e) {
+				throw lang_error(e.what());
+			}
 		}
 
 		namespace socket {
@@ -72,16 +92,6 @@ namespace network_cs_ext {
 			{
 				try {
 					sock->accept(*a);
-				}
-				catch (const std::exception &e) {
-					throw lang_error(e.what());
-				}
-			}
-
-			void resolve(socket_t &sock, const string &host, const string &service)
-			{
-				try {
-					sock->resolve(host, service);
 				}
 				catch (const std::exception &e) {
 					throw lang_error(e.what());
@@ -143,13 +153,14 @@ namespace network_cs_ext {
 	{
 		string_cs_ext::init();
 		network_ext.add_var("tcp", var::make_protect<extension_t>(tcp::tcp_ext_shared));
+		network_ext.add_var("host_name", var::make_protect<callable>(cni(host_name), true));
 		tcp::tcp_ext.add_var("socket", var::make_constant<type>(tcp::socket::socket, typeid(tcp::socket_t).hash_code(),
 		                     tcp::socket::socket_ext_shared));
 		tcp::tcp_ext.add_var("acceptor", var::make_protect<callable>(cni(tcp::acceptor), true));
 		tcp::tcp_ext.add_var("endpoint", var::make_protect<callable>(cni(tcp::endpoint), true));
+		tcp::tcp_ext.add_var("resolve", var::make_protect<callable>(cni(tcp::resolve), true));
 		tcp::socket::socket_ext.add_var("connect", var::make_protect<callable>(cni(tcp::socket::connect)));
 		tcp::socket::socket_ext.add_var("accept", var::make_protect<callable>(cni(tcp::socket::accept)));
-		tcp::socket::socket_ext.add_var("resolve", var::make_protect<callable>(cni(tcp::socket::resolve)));
 		tcp::socket::socket_ext.add_var("close", var::make_protect<callable>(cni(tcp::socket::close)));
 		tcp::socket::socket_ext.add_var("is_open", var::make_protect<callable>(cni(tcp::socket::is_open)));
 		tcp::socket::socket_ext.add_var("receive", var::make_protect<callable>(cni(tcp::socket::receive)));

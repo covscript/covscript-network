@@ -26,6 +26,11 @@ namespace cs_impl {
 				return std::move(tcp::endpoint(asio::ip::address::from_string(address), port));
 			}
 
+			tcp::endpoint resolve(const std::string &host, const std::string &service)
+			{
+				return *resolver.resolve({host, service});
+			}
+
 			class socket final {
 				tcp::socket sock;
 			public:
@@ -46,11 +51,6 @@ namespace cs_impl {
 				void accept(tcp::acceptor &a)
 				{
 					a.accept(sock);
-				}
-
-				void resolve(const std::string &host, const std::string &service)
-				{
-					asio::connect(sock, resolver.resolve({host, service}));
 				}
 
 				bool is_open()
