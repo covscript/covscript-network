@@ -44,7 +44,8 @@ namespace network_cs_ext {
 		var acceptor(const endpoint_t &ep)
 		{
 			try {
-				return var::make<acceptor_t>(std::make_shared<asio::ip::tcp::acceptor>(cs_impl::network::tcp::acceptor(ep)));
+				return var::make<acceptor_t>(
+				           std::make_shared<asio::ip::tcp::acceptor>(cs_impl::network::tcp::acceptor(ep)));
 			}
 			catch (const std::exception &e) {
 				throw lang_error(e.what());

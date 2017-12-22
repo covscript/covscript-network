@@ -123,7 +123,7 @@ namespace cs_impl {
 					return sock.is_open();
 				}
 
-				void receive_from(std::string &str, std::size_t maximum, udp::endpoint& ep)
+				void receive_from(std::string &str, std::size_t maximum, udp::endpoint &ep)
 				{
 					char *buff = new char[maximum + 1];
 					buff[sock.receive_from(asio::buffer(buff, maximum), ep)] = '\0';
