@@ -60,6 +60,22 @@ namespace network_cs_ext {
 				return var::make<endpoint_t>(cs_impl::network::tcp::endpoint(host, static_cast<unsigned short>(port)));
 		}
 
+		var endpoint_v4(number port)
+		{
+			if (port < 0)
+				throw lang_error("Port number can not under zero.");
+			else
+				return var::make<endpoint_t>(asio::ip::tcp::v4(), static_cast<unsigned short>(port));
+		}
+
+		var endpoint_v6(number port)
+		{
+			if (port < 0)
+				throw lang_error("Port number can not under zero.");
+			else
+				return var::make<endpoint_t>(asio::ip::tcp::v6(), static_cast<unsigned short>(port));
+		}
+
 		var resolve(const string &host, const string &service)
 		{
 			try {
@@ -114,13 +130,13 @@ namespace network_cs_ext {
 				return sock->is_open();
 			}
 
-			void receive(socket_t &sock, string &str, number max)
+			string receive(socket_t &sock, number max)
 			{
 				if (max <= 0)
 					throw lang_error("Buffer size must above zero.");
 				else {
 					try {
-						sock->receive(str, static_cast<std::size_t>(max));
+						return sock->receive(static_cast<std::size_t>(max));
 					}
 					catch (const std::exception &e) {
 						throw lang_error(e.what());
@@ -164,6 +180,22 @@ namespace network_cs_ext {
 				return var::make<endpoint_t>(cs_impl::network::udp::endpoint(host, static_cast<unsigned short>(port)));
 		}
 
+		var endpoint_v4(number port)
+		{
+			if (port < 0)
+				throw lang_error("Port number can not under zero.");
+			else
+				return var::make<endpoint_t>(asio::ip::udp::v4(), static_cast<unsigned short>(port));
+		}
+
+		var endpoint_v6(number port)
+		{
+			if (port < 0)
+				throw lang_error("Port number can not under zero.");
+			else
+				return var::make<endpoint_t>(asio::ip::udp::v6(), static_cast<unsigned short>(port));
+		}
+
 		var resolve(const string &host, const string &service)
 		{
 			try {
@@ -183,10 +215,10 @@ namespace network_cs_ext {
 				return var::make<socket_t>(std::make_shared<cs_impl::network::udp::socket>());
 			}
 
-			void open(socket_t &sock)
+			void open_v4(socket_t &sock)
 			{
 				try {
-					sock->open();
+					sock->open_v4();
 				}
 				catch (const std::exception &e) {
 					throw lang_error(e.what());
@@ -228,13 +260,13 @@ namespace network_cs_ext {
 				return sock->is_open();
 			}
 
-			void receive_from(socket_t &sock, string &str, number max, endpoint_t &ep)
+			string receive_from(socket_t &sock, number max, endpoint_t &ep)
 			{
 				if (max <= 0)
 					throw lang_error("Buffer size must above zero.");
 				else {
 					try {
-						sock->receive_from(str, static_cast<std::size_t>(max), ep);
+						return sock->receive_from(static_cast<std::size_t>(max), ep);
 					}
 					catch (const std::exception &e) {
 						throw lang_error(e.what());
@@ -264,6 +296,8 @@ namespace network_cs_ext {
 		                     tcp::socket::socket_ext_shared));
 		tcp::tcp_ext.add_var("acceptor", var::make_protect<callable>(cni(tcp::acceptor), true));
 		tcp::tcp_ext.add_var("endpoint", var::make_protect<callable>(cni(tcp::endpoint), true));
+		tcp::tcp_ext.add_var("endpoint_v4", var::make_protect<callable>(cni(tcp::endpoint_v4), true));
+		tcp::tcp_ext.add_var("endpoint_v6", var::make_protect<callable>(cni(tcp::endpoint_v6), true));
 		tcp::tcp_ext.add_var("resolve", var::make_protect<callable>(cni(tcp::resolve), true));
 		tcp::socket::socket_ext.add_var("connect", var::make_protect<callable>(cni(tcp::socket::connect)));
 		tcp::socket::socket_ext.add_var("accept", var::make_protect<callable>(cni(tcp::socket::accept)));
@@ -276,8 +310,10 @@ namespace network_cs_ext {
 		udp::udp_ext.add_var("socket", var::make_constant<type>(udp::socket::socket, typeid(udp::socket_t).hash_code(),
 		                     udp::socket::socket_ext_shared));
 		udp::udp_ext.add_var("endpoint", var::make_protect<callable>(cni(udp::endpoint), true));
+		udp::udp_ext.add_var("endpoint_v4", var::make_protect<callable>(cni(udp::endpoint_v4), true));
+		udp::udp_ext.add_var("endpoint_v6", var::make_protect<callable>(cni(udp::endpoint_v6), true));
 		udp::udp_ext.add_var("resolve", var::make_protect<callable>(cni(udp::resolve), true));
-		udp::socket::socket_ext.add_var("open", var::make_protect<callable>(cni(udp::socket::open)));
+		udp::socket::socket_ext.add_var("open_v4", var::make_protect<callable>(cni(udp::socket::open_v4)));
 		udp::socket::socket_ext.add_var("open_v6", var::make_protect<callable>(cni(udp::socket::open_v6)));
 		udp::socket::socket_ext.add_var("bind", var::make_protect<callable>(cni(udp::socket::bind)));
 		udp::socket::socket_ext.add_var("close", var::make_protect<callable>(cni(udp::socket::close)));

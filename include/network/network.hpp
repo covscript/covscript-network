@@ -12,6 +12,32 @@
 namespace cs_impl {
 	namespace network {
 		static asio::io_service cs_net_service;
+
+		template<typename char_t=char>
+		class buffer final {
+			char_t *buff = nullptr;
+		public:
+			buffer() = delete;
+
+			buffer(const buffer &) = delete;
+
+			buffer(buffer &b) noexcept
+			{
+				std::swap(this->buff, b.buff);
+			}
+
+			buffer(std::size_t size) : buff(new char_t[size]) {}
+
+			~buffer()
+			{
+				delete[] buff;
+			}
+
+			char_t *get() const
+			{
+				return buff;
+			}
+		};
 		namespace tcp {
 			using asio::ip::tcp;
 			static tcp::resolver resolver(cs_net_service);
@@ -58,12 +84,12 @@ namespace cs_impl {
 					return sock.is_open();
 				}
 
-				void receive(std::string &str, std::size_t maximum)
+				std::string receive(std::size_t maximum)
 				{
-					char *buff = new char[maximum + 1];
+					buffer<> buff_guard(maximum + 1);
+					char *buff = buff_guard.get();
 					buff[sock.receive(asio::buffer(buff, maximum))] = '\0';
-					str = buff;
-					delete[] buff;
+					return buff;
 				}
 
 				void send(const std::string &s)
@@ -98,7 +124,7 @@ namespace cs_impl {
 
 				socket(const socket &) = delete;
 
-				void open()
+				void open_v4()
 				{
 					sock.open(udp::v4());
 				}
@@ -123,12 +149,12 @@ namespace cs_impl {
 					return sock.is_open();
 				}
 
-				void receive_from(std::string &str, std::size_t maximum, udp::endpoint &ep)
+				std::string receive_from(std::size_t maximum, udp::endpoint &ep)
 				{
-					char *buff = new char[maximum + 1];
+					buffer<> buff_guard(maximum + 1);
+					char *buff = buff_guard.get();
 					buff[sock.receive_from(asio::buffer(buff, maximum), ep)] = '\0';
-					str = buff;
-					delete[] buff;
+					return buff;
 				}
 
 				void send_to(const std::string &s, const udp::endpoint &ep)
