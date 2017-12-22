@@ -77,5 +77,65 @@ namespace cs_impl {
 				}
 			};
 		}
+		namespace udp {
+			using asio::ip::udp;
+			static udp::resolver resolver(cs_net_service);
+
+			udp::endpoint endpoint(const std::string &address, unsigned short port)
+			{
+				return std::move(udp::endpoint(asio::ip::address::from_string(address), port));
+			}
+
+			udp::endpoint resolve(const std::string &host, const std::string &service)
+			{
+				return *resolver.resolve({host, service});
+			}
+
+			class socket final {
+				udp::socket sock;
+			public:
+				socket() : sock(cs_net_service) {}
+
+				socket(const socket &) = delete;
+
+				void open()
+				{
+					sock.open(udp::v4());
+				}
+
+				void open_v6()
+				{
+					sock.open(udp::v6());
+				}
+
+				void bind(const udp::endpoint &ep)
+				{
+					sock.bind(ep);
+				}
+
+				void close()
+				{
+					sock.close();
+				}
+
+				bool is_open()
+				{
+					return sock.is_open();
+				}
+
+				void receive_from(std::string &str, std::size_t maximum, udp::endpoint& ep)
+				{
+					char *buff = new char[maximum + 1];
+					buff[sock.receive_from(asio::buffer(buff, maximum), ep)] = '\0';
+					str = buff;
+					delete[] buff;
+				}
+
+				void send_to(const std::string &s, const udp::endpoint &ep)
+				{
+					sock.send_to(asio::buffer(s), ep);
+				}
+			};
+		}
 	}
 }

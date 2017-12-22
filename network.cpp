@@ -149,10 +149,115 @@ namespace network_cs_ext {
 		}
 	}
 
+	namespace udp {
+		static extension udp_ext;
+		static extension_t udp_ext_shared = make_shared_extension(udp_ext);
+		using socket_t=std::shared_ptr<cs_impl::network::udp::socket>;
+		using endpoint_t=asio::ip::udp::endpoint;
+
+		var endpoint(const string &host, number port)
+		{
+			if (port < 0)
+				throw lang_error("Port number can not under zero.");
+			else
+				return var::make<endpoint_t>(cs_impl::network::udp::endpoint(host, static_cast<unsigned short>(port)));
+		}
+
+		var resolve(const string &host, const string &service)
+		{
+			try {
+				return var::make<endpoint_t>(cs_impl::network::udp::resolve(host, service));
+			}
+			catch (const std::exception &e) {
+				throw lang_error(e.what());
+			}
+		}
+
+		namespace socket {
+			static extension socket_ext;
+			static extension_t socket_ext_shared = make_shared_extension(socket_ext);
+
+			var socket()
+			{
+				return var::make<socket_t>(std::make_shared<cs_impl::network::udp::socket>());
+			}
+
+			void open(socket_t &sock)
+			{
+				try {
+					sock->open();
+				}
+				catch (const std::exception &e) {
+					throw lang_error(e.what());
+				}
+			}
+
+			void open_v6(socket_t &sock)
+			{
+				try {
+					sock->open_v6();
+				}
+				catch (const std::exception &e) {
+					throw lang_error(e.what());
+				}
+			}
+
+			void bind(socket_t &sock, const endpoint_t &ep)
+			{
+				try {
+					sock->bind(ep);
+				}
+				catch (const std::exception &e) {
+					throw lang_error(e.what());
+				}
+			}
+
+			void close(socket_t &sock)
+			{
+				try {
+					sock->close();
+				}
+				catch (const std::exception &e) {
+					throw lang_error(e.what());
+				}
+			}
+
+			bool is_open(socket_t &sock)
+			{
+				return sock->is_open();
+			}
+
+			void receive_from(socket_t &sock, string &str, number max, endpoint_t &ep)
+			{
+				if (max <= 0)
+					throw lang_error("Buffer size must above zero.");
+				else {
+					try {
+						sock->receive_from(str, static_cast<std::size_t>(max), ep);
+					}
+					catch (const std::exception &e) {
+						throw lang_error(e.what());
+					}
+				}
+			}
+
+			void send_to(socket_t &sock, const string &str, const endpoint_t &ep)
+			{
+				try {
+					sock->send_to(str, ep);
+				}
+				catch (const std::exception &e) {
+					throw lang_error(e.what());
+				}
+			}
+		}
+	}
+
 	void init()
 	{
 		string_cs_ext::init();
 		network_ext.add_var("tcp", var::make_protect<extension_t>(tcp::tcp_ext_shared));
+		network_ext.add_var("udp", var::make_protect<extension_t>(udp::udp_ext_shared));
 		network_ext.add_var("host_name", var::make_protect<callable>(cni(host_name), true));
 		tcp::tcp_ext.add_var("socket", var::make_constant<type>(tcp::socket::socket, typeid(tcp::socket_t).hash_code(),
 		                     tcp::socket::socket_ext_shared));
@@ -167,6 +272,17 @@ namespace network_cs_ext {
 		tcp::socket::socket_ext.add_var("send", var::make_protect<callable>(cni(tcp::socket::send)));
 		tcp::socket::socket_ext.add_var("remote_endpoint",
 		                                var::make_protect<callable>(cni(tcp::socket::remote_endpoint)));
+		udp::udp_ext.add_var("socket", var::make_constant<type>(udp::socket::socket, typeid(udp::socket_t).hash_code(),
+		                     udp::socket::socket_ext_shared));
+		udp::udp_ext.add_var("endpoint", var::make_protect<callable>(cni(udp::endpoint), true));
+		udp::udp_ext.add_var("resolve", var::make_protect<callable>(cni(udp::resolve), true));
+		udp::socket::socket_ext.add_var("open", var::make_protect<callable>(cni(udp::socket::open)));
+		udp::socket::socket_ext.add_var("open_v6", var::make_protect<callable>(cni(udp::socket::open_v6)));
+		udp::socket::socket_ext.add_var("bind", var::make_protect<callable>(cni(udp::socket::bind)));
+		udp::socket::socket_ext.add_var("close", var::make_protect<callable>(cni(udp::socket::close)));
+		udp::socket::socket_ext.add_var("is_open", var::make_protect<callable>(cni(udp::socket::is_open)));
+		udp::socket::socket_ext.add_var("receive_from", var::make_protect<callable>(cni(udp::socket::receive_from)));
+		udp::socket::socket_ext.add_var("send_to", var::make_protect<callable>(cni(udp::socket::send_to)));
 	}
 }
 namespace cs_impl {
@@ -174,6 +290,12 @@ namespace cs_impl {
 	cs::extension_t &get_ext<network_cs_ext::tcp::socket_t>()
 	{
 		return network_cs_ext::tcp::socket::socket_ext_shared;
+	}
+
+	template<>
+	cs::extension_t &get_ext<network_cs_ext::udp::socket_t>()
+	{
+		return network_cs_ext::udp::socket::socket_ext_shared;
 	}
 
 	template<>
@@ -192,6 +314,18 @@ namespace cs_impl {
 	constexpr const char *get_name_of_type<network_cs_ext::tcp::endpoint_t>()
 	{
 		return "cs::network::tcp::endpoint";
+	}
+
+	template<>
+	constexpr const char *get_name_of_type<network_cs_ext::udp::socket_t>()
+	{
+		return "cs::network::udp::socket";
+	}
+
+	template<>
+	constexpr const char *get_name_of_type<network_cs_ext::udp::endpoint_t>()
+	{
+		return "cs::network::udp::endpoint";
 	}
 }
 
