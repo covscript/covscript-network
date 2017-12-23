@@ -87,13 +87,13 @@ namespace cs_impl {
 				std::string receive(std::size_t maximum)
 				{
 					buffer<> buff(maximum);
-					std::size_t actually = sock.receive(asio::buffer(buff.get(), maximum));
+					std::size_t actually = sock.read_some(asio::buffer(buff.get(), maximum));
 					return std::string(buff.get(), actually);
 				}
 
 				void send(const std::string &s)
 				{
-					sock.send(asio::buffer(s));
+					sock.write_some(asio::buffer(s));
 				}
 
 				tcp::endpoint remote_endpoint()
