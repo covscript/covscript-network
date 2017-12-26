@@ -1,5 +1,24 @@
 #pragma once
-
+/*
+* Covariant Script Network
+*
+* This program is free software: you can redistribute it and/or modify
+* it under the terms of the GNU Affero General Public License as published
+* by the Free Software Foundation, either version 3 of the License, or
+* (at your option) any later version.
+*
+* This program is distributed in the hope that it will be useful,
+* but WITHOUT ANY WARRANTY; without even the implied warranty of
+* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+* GNU Affero General Public License for more details.
+*
+* You should have received a copy of the GNU Affero General Public License
+* along with this program.  If not, see <http://www.gnu.org/licenses/>.
+*
+* Copyright (C) 2018 Michael Lee(李登淳)
+* Email: mikecovlee@163.com
+* Github: https://github.com/mikecovlee
+*/
 #define ASIO_STANDALONE
 
 #if defined(__WIN32__) || defined(WIN32)
@@ -152,7 +171,7 @@ namespace cs_impl {
 				{
 					buffer<> buff(maximum);
 					std::size_t actually = sock.receive_from(asio::buffer(buff.get(), maximum), ep);
-					return std::string(buff.get(),actually);
+					return std::string(buff.get(), actually);
 				}
 
 				void send_to(const std::string &s, const udp::endpoint &ep)
