@@ -22,6 +22,7 @@
 #include <covscript/cni.hpp>
 #include <covscript/extension.hpp>
 #include <covscript/extensions/char.hpp>
+#include <covscript/extensions/array.hpp>
 #include <covscript/extensions/string.hpp>
 #include <covscript/extensions/exception.hpp>
 #include <memory>
@@ -291,6 +292,7 @@ namespace network_cs_ext {
 	void init()
 	{
 		char_cs_ext::init();
+		array_cs_ext::init();
 		string_cs_ext::init();
 		except_cs_ext::init();
 		network_ext.add_var("tcp", var::make_protect<extension_t>(tcp::tcp_ext_shared));
