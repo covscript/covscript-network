@@ -2,7 +2,7 @@
 // detail/array_fwd.hpp
 // ~~~~~~~~~~~~~~~~~~~~
 //
-// Copyright (c) 2003-2016 Christopher M. Kohlhoff (chris at kohlhoff dot com)
+// Copyright (c) 2003-2018 Christopher M. Kohlhoff (chris at kohlhoff dot com)
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -19,8 +19,8 @@
 
 namespace boost {
 
-	template<class T, std::size_t N>
-	class array;
+template<class T, std::size_t N>
+class array;
 
 } // namespace boost
 
@@ -28,9 +28,7 @@ namespace boost {
 // include the array header. Fortunately, it's fairly lightweight and doesn't
 // add significantly to the compile time.
 #if defined(ASIO_HAS_STD_ARRAY)
-
 # include <array>
-
 #endif // defined(ASIO_HAS_STD_ARRAY)
 
 #endif // ASIO_DETAIL_ARRAY_FWD_HPP

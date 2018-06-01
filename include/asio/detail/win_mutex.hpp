@@ -2,7 +2,7 @@
 // detail/win_mutex.hpp
 // ~~~~~~~~~~~~~~~~~~~~
 //
-// Copyright (c) 2003-2016 Christopher M. Kohlhoff (chris at kohlhoff dot com)
+// Copyright (c) 2003-2018 Christopher M. Kohlhoff (chris at kohlhoff dot com)
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -26,52 +26,51 @@
 #include "asio/detail/push_options.hpp"
 
 namespace asio {
-	namespace detail {
+namespace detail {
 
-		class win_mutex
-			: private noncopyable {
-		public:
-			typedef asio::detail::scoped_lock<win_mutex> scoped_lock;
+class win_mutex
+  : private noncopyable
+{
+public:
+  typedef asio::detail::scoped_lock<win_mutex> scoped_lock;
 
-			// Constructor.
-			ASIO_DECL win_mutex();
+  // Constructor.
+  ASIO_DECL win_mutex();
 
-			// Destructor.
-			~win_mutex()
-			{
-				::DeleteCriticalSection(&crit_section_);
-			}
+  // Destructor.
+  ~win_mutex()
+  {
+    ::DeleteCriticalSection(&crit_section_);
+  }
 
-			// Lock the mutex.
-			void lock()
-			{
-				::EnterCriticalSection(&crit_section_);
-			}
+  // Lock the mutex.
+  void lock()
+  {
+    ::EnterCriticalSection(&crit_section_);
+  }
 
-			// Unlock the mutex.
-			void unlock()
-			{
-				::LeaveCriticalSection(&crit_section_);
-			}
+  // Unlock the mutex.
+  void unlock()
+  {
+    ::LeaveCriticalSection(&crit_section_);
+  }
 
-		private:
-			// Initialisation must be performed in a separate function to the constructor
-			// since the compiler does not support the use of structured exceptions and
-			// C++ exceptions in the same function.
-			ASIO_DECL int do_init();
+private:
+  // Initialisation must be performed in a separate function to the constructor
+  // since the compiler does not support the use of structured exceptions and
+  // C++ exceptions in the same function.
+  ASIO_DECL int do_init();
 
-			::CRITICAL_SECTION crit_section_;
-		};
+  ::CRITICAL_SECTION crit_section_;
+};
 
-	} // namespace detail
+} // namespace detail
 } // namespace asio
 
 #include "asio/detail/pop_options.hpp"
 
 #if defined(ASIO_HEADER_ONLY)
-
 # include "asio/detail/impl/win_mutex.ipp"
-
 #endif // defined(ASIO_HEADER_ONLY)
 
 #endif // defined(ASIO_WINDOWS)

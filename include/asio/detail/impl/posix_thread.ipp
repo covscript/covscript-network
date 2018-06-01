@@ -2,7 +2,7 @@
 // detail/impl/posix_thread.ipp
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 //
-// Copyright (c) 2003-2016 Christopher M. Kohlhoff (chris at kohlhoff dot com)
+// Copyright (c) 2003-2018 Christopher M. Kohlhoff (chris at kohlhoff dot com)
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -26,44 +26,55 @@
 #include "asio/detail/push_options.hpp"
 
 namespace asio {
-	namespace detail {
+namespace detail {
 
-		posix_thread::~posix_thread()
-		{
-			if (!joined_)
-				::pthread_detach(thread_);
-		}
+posix_thread::~posix_thread()
+{
+  if (!joined_)
+    ::pthread_detach(thread_);
+}
 
-		void posix_thread::join()
-		{
-			if (!joined_) {
-				::pthread_join(thread_, 0);
-				joined_ = true;
-			}
-		}
+void posix_thread::join()
+{
+  if (!joined_)
+  {
+    ::pthread_join(thread_, 0);
+    joined_ = true;
+  }
+}
 
-		void posix_thread::start_thread(func_base* arg)
-		{
-			int error = ::pthread_create(&thread_, 0,
-			                             asio_detail_posix_thread_function, arg);
-			if (error != 0) {
-				delete arg;
-				asio::error_code ec(error,
-				                    asio::error::get_system_category());
-				asio::detail::throw_error(ec, "thread");
-			}
-		}
+std::size_t posix_thread::hardware_concurrency()
+{
+#if defined(_SC_NPROCESSORS_ONLN)
+  long result = sysconf(_SC_NPROCESSORS_ONLN);
+  if (result > 0)
+    return result;
+#endif // defined(_SC_NPROCESSORS_ONLN)
+  return 0;
+}
 
-		void* asio_detail_posix_thread_function(void* arg)
-		{
-			posix_thread::auto_func_base_ptr func = {
-				static_cast<posix_thread::func_base*>(arg)
-			};
-			func.ptr->run();
-			return 0;
-		}
+void posix_thread::start_thread(func_base* arg)
+{
+  int error = ::pthread_create(&thread_, 0,
+        asio_detail_posix_thread_function, arg);
+  if (error != 0)
+  {
+    delete arg;
+    asio::error_code ec(error,
+        asio::error::get_system_category());
+    asio::detail::throw_error(ec, "thread");
+  }
+}
 
-	} // namespace detail
+void* asio_detail_posix_thread_function(void* arg)
+{
+  posix_thread::auto_func_base_ptr func = {
+      static_cast<posix_thread::func_base*>(arg) };
+  func.ptr->run();
+  return 0;
+}
+
+} // namespace detail
 } // namespace asio
 
 #include "asio/detail/pop_options.hpp"

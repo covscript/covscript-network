@@ -2,7 +2,7 @@
 // ssl/detail/password_callback.hpp
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 //
-// Copyright (c) 2003-2016 Christopher M. Kohlhoff (chris at kohlhoff dot com)
+// Copyright (c) 2003-2018 Christopher M. Kohlhoff (chris at kohlhoff dot com)
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -17,54 +17,48 @@
 
 #include "asio/detail/config.hpp"
 
-#if !defined(ASIO_ENABLE_OLD_SSL)
-
-# include <cstddef>
-# include <string>
-# include "asio/ssl/context_base.hpp"
-
-#endif // !defined(ASIO_ENABLE_OLD_SSL)
+#include <cstddef>
+#include <string>
+#include "asio/ssl/context_base.hpp"
 
 #include "asio/detail/push_options.hpp"
 
 namespace asio {
-	namespace ssl {
-		namespace detail {
+namespace ssl {
+namespace detail {
 
-#if !defined(ASIO_ENABLE_OLD_SSL)
+class password_callback_base
+{
+public:
+  virtual ~password_callback_base()
+  {
+  }
 
-			class password_callback_base {
-			public:
-				virtual ~password_callback_base()
-				{
-				}
+  virtual std::string call(std::size_t size,
+      context_base::password_purpose purpose) = 0;
+};
 
-				virtual std::string call(std::size_t size,
-				                         context_base::password_purpose purpose) = 0;
-			};
+template <typename PasswordCallback>
+class password_callback : public password_callback_base
+{
+public:
+  explicit password_callback(PasswordCallback callback)
+    : callback_(callback)
+  {
+  }
 
-			template<typename PasswordCallback>
-			class password_callback : public password_callback_base {
-			public:
-				explicit password_callback(PasswordCallback callback)
-					: callback_(callback)
-				{
-				}
+  virtual std::string call(std::size_t size,
+      context_base::password_purpose purpose)
+  {
+    return callback_(size, purpose);
+  }
 
-				virtual std::string call(std::size_t size,
-				                         context_base::password_purpose purpose)
-				{
-					return callback_(size, purpose);
-				}
+private:
+  PasswordCallback callback_;
+};
 
-			private:
-				PasswordCallback callback_;
-			};
-
-#endif // !defined(ASIO_ENABLE_OLD_SSL)
-
-		} // namespace detail
-	} // namespace ssl
+} // namespace detail
+} // namespace ssl
 } // namespace asio
 
 #include "asio/detail/pop_options.hpp"

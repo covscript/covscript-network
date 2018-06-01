@@ -2,7 +2,7 @@
 // detail/null_thread.hpp
 // ~~~~~~~~~~~~~~~~~~~~~~
 //
-// Copyright (c) 2003-2016 Christopher M. Kohlhoff (chris at kohlhoff dot com)
+// Copyright (c) 2003-2018 Christopher M. Kohlhoff (chris at kohlhoff dot com)
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -26,31 +26,38 @@
 #include "asio/detail/push_options.hpp"
 
 namespace asio {
-	namespace detail {
+namespace detail {
 
-		class null_thread
-			: private noncopyable {
-		public:
-			// Constructor.
-			template<typename Function>
-			null_thread(Function, unsigned int = 0)
-			{
-				asio::detail::throw_error(
-				    asio::error::operation_not_supported, "thread");
-			}
+class null_thread
+  : private noncopyable
+{
+public:
+  // Constructor.
+  template <typename Function>
+  null_thread(Function, unsigned int = 0)
+  {
+    asio::detail::throw_error(
+        asio::error::operation_not_supported, "thread");
+  }
 
-			// Destructor.
-			~null_thread()
-			{
-			}
+  // Destructor.
+  ~null_thread()
+  {
+  }
 
-			// Wait for the thread to exit.
-			void join()
-			{
-			}
-		};
+  // Wait for the thread to exit.
+  void join()
+  {
+  }
 
-	} // namespace detail
+  // Get number of CPUs.
+  static std::size_t hardware_concurrency()
+  {
+    return 1;
+  }
+};
+
+} // namespace detail
 } // namespace asio
 
 #include "asio/detail/pop_options.hpp"

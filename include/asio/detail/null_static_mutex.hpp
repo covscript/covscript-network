@@ -2,7 +2,7 @@
 // detail/null_static_mutex.hpp
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 //
-// Copyright (c) 2003-2016 Christopher M. Kohlhoff (chris at kohlhoff dot com)
+// Copyright (c) 2003-2018 Christopher M. Kohlhoff (chris at kohlhoff dot com)
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -24,32 +24,33 @@
 #include "asio/detail/push_options.hpp"
 
 namespace asio {
-	namespace detail {
+namespace detail {
 
-		struct null_static_mutex {
-			typedef asio::detail::scoped_lock<null_static_mutex> scoped_lock;
+struct null_static_mutex
+{
+  typedef asio::detail::scoped_lock<null_static_mutex> scoped_lock;
 
-			// Initialise the mutex.
-			void init()
-			{
-			}
+  // Initialise the mutex.
+  void init()
+  {
+  }
 
-			// Lock the mutex.
-			void lock()
-			{
-			}
+  // Lock the mutex.
+  void lock()
+  {
+  }
 
-			// Unlock the mutex.
-			void unlock()
-			{
-			}
+  // Unlock the mutex.
+  void unlock()
+  {
+  }
 
-			int unused_;
-		};
+  int unused_;
+};
 
 #define ASIO_NULL_STATIC_MUTEX_INIT { 0 }
 
-	} // namespace detail
+} // namespace detail
 } // namespace asio
 
 #include "asio/detail/pop_options.hpp"

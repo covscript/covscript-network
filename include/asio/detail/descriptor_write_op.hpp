@@ -2,7 +2,7 @@
 // detail/descriptor_write_op.hpp
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 //
-// Copyright (c) 2003-2016 Christopher M. Kohlhoff (chris at kohlhoff dot com)
+// Copyright (c) 2003-2018 Christopher M. Kohlhoff (chris at kohlhoff dot com)
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -19,94 +19,106 @@
 
 #if !defined(ASIO_WINDOWS) && !defined(__CYGWIN__)
 
-#include "asio/detail/addressof.hpp"
 #include "asio/detail/bind_handler.hpp"
 #include "asio/detail/buffer_sequence_adapter.hpp"
 #include "asio/detail/descriptor_ops.hpp"
 #include "asio/detail/fenced_block.hpp"
+#include "asio/detail/handler_work.hpp"
+#include "asio/detail/memory.hpp"
 #include "asio/detail/reactor_op.hpp"
 
 #include "asio/detail/push_options.hpp"
 
 namespace asio {
-	namespace detail {
+namespace detail {
 
-		template <typename ConstBufferSequence>
-		class descriptor_write_op_base : public reactor_op {
-		public:
-			descriptor_write_op_base(int descriptor,
-			                         const ConstBufferSequence& buffers, func_type complete_func)
-				: reactor_op(&descriptor_write_op_base::do_perform, complete_func),
-				  descriptor_(descriptor),
-				  buffers_(buffers)
-			{
-			}
+template <typename ConstBufferSequence>
+class descriptor_write_op_base : public reactor_op
+{
+public:
+  descriptor_write_op_base(int descriptor,
+      const ConstBufferSequence& buffers, func_type complete_func)
+    : reactor_op(&descriptor_write_op_base::do_perform, complete_func),
+      descriptor_(descriptor),
+      buffers_(buffers)
+  {
+  }
 
-			static bool do_perform(reactor_op* base)
-			{
-				descriptor_write_op_base* o(static_cast<descriptor_write_op_base*>(base));
+  static status do_perform(reactor_op* base)
+  {
+    descriptor_write_op_base* o(static_cast<descriptor_write_op_base*>(base));
 
-				buffer_sequence_adapter<asio::const_buffer,
-				                        ConstBufferSequence> bufs(o->buffers_);
+    buffer_sequence_adapter<asio::const_buffer,
+        ConstBufferSequence> bufs(o->buffers_);
 
-				return descriptor_ops::non_blocking_write(o->descriptor_,
-				        bufs.buffers(), bufs.count(), o->ec_, o->bytes_transferred_);
-			}
+    status result = descriptor_ops::non_blocking_write(o->descriptor_,
+        bufs.buffers(), bufs.count(), o->ec_, o->bytes_transferred_)
+      ? done : not_done;
 
-		private:
-			int descriptor_;
-			ConstBufferSequence buffers_;
-		};
+    ASIO_HANDLER_REACTOR_OPERATION((*o, "non_blocking_write",
+          o->ec_, o->bytes_transferred_));
 
-		template <typename ConstBufferSequence, typename Handler>
-		class descriptor_write_op
-			: public descriptor_write_op_base<ConstBufferSequence> {
-		public:
-			ASIO_DEFINE_HANDLER_PTR(descriptor_write_op);
+    return result;
+  }
 
-			descriptor_write_op(int descriptor,
-			                    const ConstBufferSequence& buffers, Handler& handler)
-				: descriptor_write_op_base<ConstBufferSequence>(
-				      descriptor, buffers, &descriptor_write_op::do_complete),
-				  handler_(ASIO_MOVE_CAST(Handler)(handler))
-			{
-			}
+private:
+  int descriptor_;
+  ConstBufferSequence buffers_;
+};
 
-			static void do_complete(io_service_impl* owner, operation* base,
-			                        const asio::error_code& /*ec*/,
-			                        std::size_t /*bytes_transferred*/)
-			{
-				// Take ownership of the handler object.
-				descriptor_write_op* o(static_cast<descriptor_write_op*>(base));
-				ptr p = { asio::detail::addressof(o->handler_), o, o };
+template <typename ConstBufferSequence, typename Handler>
+class descriptor_write_op
+  : public descriptor_write_op_base<ConstBufferSequence>
+{
+public:
+  ASIO_DEFINE_HANDLER_PTR(descriptor_write_op);
 
-				ASIO_HANDLER_COMPLETION((o));
+  descriptor_write_op(int descriptor,
+      const ConstBufferSequence& buffers, Handler& handler)
+    : descriptor_write_op_base<ConstBufferSequence>(
+        descriptor, buffers, &descriptor_write_op::do_complete),
+      handler_(ASIO_MOVE_CAST(Handler)(handler))
+  {
+    handler_work<Handler>::start(handler_);
+  }
 
-				// Make a copy of the handler so that the memory can be deallocated before
-				// the upcall is made. Even if we're not about to make an upcall, a
-				// sub-object of the handler may be the true owner of the memory associated
-				// with the handler. Consequently, a local copy of the handler is required
-				// to ensure that any owning sub-object remains valid until after we have
-				// deallocated the memory here.
-				detail::binder2<Handler, asio::error_code, std::size_t>
-				handler(o->handler_, o->ec_, o->bytes_transferred_);
-				p.h = asio::detail::addressof(handler.handler_);
-				p.reset();
+  static void do_complete(void* owner, operation* base,
+      const asio::error_code& /*ec*/,
+      std::size_t /*bytes_transferred*/)
+  {
+    // Take ownership of the handler object.
+    descriptor_write_op* o(static_cast<descriptor_write_op*>(base));
+    ptr p = { asio::detail::addressof(o->handler_), o, o };
+    handler_work<Handler> w(o->handler_);
 
-				// Make the upcall if required.
-				if (owner) {
-					fenced_block b(fenced_block::half);
-					ASIO_HANDLER_INVOCATION_BEGIN((handler.arg1_, handler.arg2_));
-					asio_handler_invoke_helpers::invoke(handler, handler.handler_);
-					ASIO_HANDLER_INVOCATION_END;
-				}
-			}
+    ASIO_HANDLER_COMPLETION((*o));
 
-		private:
-			Handler handler_;
-		};
+    // Make a copy of the handler so that the memory can be deallocated before
+    // the upcall is made. Even if we're not about to make an upcall, a
+    // sub-object of the handler may be the true owner of the memory associated
+    // with the handler. Consequently, a local copy of the handler is required
+    // to ensure that any owning sub-object remains valid until after we have
+    // deallocated the memory here.
+    detail::binder2<Handler, asio::error_code, std::size_t>
+      handler(o->handler_, o->ec_, o->bytes_transferred_);
+    p.h = asio::detail::addressof(handler.handler_);
+    p.reset();
 
-	} // namespace detail
+    // Make the upcall if required.
+    if (owner)
+    {
+      fenced_block b(fenced_block::half);
+      ASIO_HANDLER_INVOCATION_BEGIN((handler.arg1_, handler.arg2_));
+      w.complete(handler, handler.handler_);
+      ASIO_HANDLER_INVOCATION_END;
+    }
+  }
+
+private:
+  Handler handler_;
+};
+
+} // namespace detail
 } // namespace asio
 
 #include "asio/detail/pop_options.hpp"

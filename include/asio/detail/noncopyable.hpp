@@ -2,7 +2,7 @@
 // detail/noncopyable.hpp
 // ~~~~~~~~~~~~~~~~~~~~~~
 //
-// Copyright (c) 2003-2016 Christopher M. Kohlhoff (chris at kohlhoff dot com)
+// Copyright (c) 2003-2018 Christopher M. Kohlhoff (chris at kohlhoff dot com)
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -20,23 +20,21 @@
 #include "asio/detail/push_options.hpp"
 
 namespace asio {
-	namespace detail {
+namespace detail {
 
-		class noncopyable {
-		protected:
-			noncopyable() {}
+class noncopyable
+{
+protected:
+  noncopyable() {}
+  ~noncopyable() {}
+private:
+  noncopyable(const noncopyable&);
+  const noncopyable& operator=(const noncopyable&);
+};
 
-			~noncopyable() {}
+} // namespace detail
 
-		private:
-			noncopyable(const noncopyable &);
-
-			const noncopyable &operator=(const noncopyable &);
-		};
-
-	} // namespace detail
-
-	using asio::detail::noncopyable;
+using asio::detail::noncopyable;
 
 } // namespace asio
 

@@ -2,7 +2,7 @@
 // detail/keyword_tss_ptr.hpp
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~
 //
-// Copyright (c) 2003-2016 Christopher M. Kohlhoff (chris at kohlhoff dot com)
+// Copyright (c) 2003-2018 Christopher M. Kohlhoff (chris at kohlhoff dot com)
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -24,42 +24,43 @@
 #include "asio/detail/push_options.hpp"
 
 namespace asio {
-	namespace detail {
+namespace detail {
 
-		template <typename T>
-		class keyword_tss_ptr
-			: private noncopyable {
-		public:
-			// Constructor.
-			keyword_tss_ptr()
-			{
-			}
+template <typename T>
+class keyword_tss_ptr
+  : private noncopyable
+{
+public:
+  // Constructor.
+  keyword_tss_ptr()
+  {
+  }
 
-			// Destructor.
-			~keyword_tss_ptr()
-			{
-			}
+  // Destructor.
+  ~keyword_tss_ptr()
+  {
+  }
 
-			// Get the value.
-			operator T*() const
-			{
-				return value_;
-			}
+  // Get the value.
+  operator T*() const
+  {
+    return value_;
+  }
 
-			// Set the value.
-			void operator=(T* value)
-			{
-				value_ = value;
-			}
+  // Set the value.
+  void operator=(T* value)
+  {
+    value_ = value;
+  }
 
-		private:
-			static ASIO_THREAD_KEYWORD T* value_;
-		};
+private:
+  static ASIO_THREAD_KEYWORD T* value_;
+};
 
-		template <typename T>
-		ASIO_THREAD_KEYWORD T* keyword_tss_ptr<T>::value_;
+template <typename T>
+ASIO_THREAD_KEYWORD T* keyword_tss_ptr<T>::value_;
 
-	} // namespace detail
+} // namespace detail
 } // namespace asio
 
 #include "asio/detail/pop_options.hpp"

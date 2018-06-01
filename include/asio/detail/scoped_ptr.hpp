@@ -2,7 +2,7 @@
 // detail/scoped_ptr.hpp
 // ~~~~~~~~~~~~~~~~~~~~~
 //
-// Copyright (c) 2003-2016 Christopher M. Kohlhoff (chris at kohlhoff dot com)
+// Copyright (c) 2003-2018 Christopher M. Kohlhoff (chris at kohlhoff dot com)
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -20,58 +20,66 @@
 #include "asio/detail/push_options.hpp"
 
 namespace asio {
-	namespace detail {
+namespace detail {
 
-		template<typename T>
-		class scoped_ptr {
-		public:
-			// Constructor.
-			explicit scoped_ptr(T *p = 0)
-				: p_(p)
-			{
-			}
+template <typename T>
+class scoped_ptr
+{
+public:
+  // Constructor.
+  explicit scoped_ptr(T* p = 0)
+    : p_(p)
+  {
+  }
 
-			// Destructor.
-			~scoped_ptr()
-			{
-				delete p_;
-			}
+  // Destructor.
+  ~scoped_ptr()
+  {
+    delete p_;
+  }
 
-			// Access.
-			T *get()
-			{
-				return p_;
-			}
+  // Access.
+  T* get()
+  {
+    return p_;
+  }
 
-			// Access.
-			T *operator->()
-			{
-				return p_;
-			}
+  // Access.
+  T* operator->()
+  {
+    return p_;
+  }
 
-			// Dereference.
-			T &operator*()
-			{
-				return *p_;
-			}
+  // Dereference.
+  T& operator*()
+  {
+    return *p_;
+  }
 
-			// Reset pointer.
-			void reset(T *p = 0)
-			{
-				delete p_;
-				p_ = p;
-			}
+  // Reset pointer.
+  void reset(T* p = 0)
+  {
+    delete p_;
+    p_ = p;
+  }
 
-		private:
-			// Disallow copying and assignment.
-			scoped_ptr(const scoped_ptr &);
+  // Release ownership of the pointer.
+  T* release()
+  {
+    T* tmp = p_;
+    p_ = 0;
+    return tmp;
+  }
 
-			scoped_ptr &operator=(const scoped_ptr &);
+private:
+  // Disallow copying and assignment.
+  scoped_ptr(const scoped_ptr&);
+  scoped_ptr& operator=(const scoped_ptr&);
 
-			T *p_;
-		};
+  T* p_;
+};
 
-	} // namespace detail
+} // namespace detail
 } // namespace asio
 
 #include "asio/detail/pop_options.hpp"

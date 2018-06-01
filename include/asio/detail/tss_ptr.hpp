@@ -2,7 +2,7 @@
 // detail/tss_ptr.hpp
 // ~~~~~~~~~~~~~~~~~~
 //
-// Copyright (c) 2003-2016 Christopher M. Kohlhoff (chris at kohlhoff dot com)
+// Copyright (c) 2003-2018 Christopher M. Kohlhoff (chris at kohlhoff dot com)
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -18,9 +18,7 @@
 #include "asio/detail/config.hpp"
 
 #if !defined(ASIO_HAS_THREADS)
-
 # include "asio/detail/null_tss_ptr.hpp"
-
 #elif defined(ASIO_HAS_THREAD_KEYWORD_EXTENSION)
 # include "asio/detail/keyword_tss_ptr.hpp"
 #elif defined(ASIO_WINDOWS)
@@ -34,36 +32,36 @@
 #include "asio/detail/push_options.hpp"
 
 namespace asio {
-	namespace detail {
+namespace detail {
 
-		template<typename T>
-		class tss_ptr
+template <typename T>
+class tss_ptr
 #if !defined(ASIO_HAS_THREADS)
-			: public null_tss_ptr<T>
+  : public null_tss_ptr<T>
 #elif defined(ASIO_HAS_THREAD_KEYWORD_EXTENSION)
-			: public keyword_tss_ptr<T>
+  : public keyword_tss_ptr<T>
 #elif defined(ASIO_WINDOWS)
-			: public win_tss_ptr<T>
+  : public win_tss_ptr<T>
 #elif defined(ASIO_HAS_PTHREADS)
-			: public posix_tss_ptr<T>
+  : public posix_tss_ptr<T>
 #endif
-		{
-		public:
-			void operator=(T *value)
-			{
+{
+public:
+  void operator=(T* value)
+  {
 #if !defined(ASIO_HAS_THREADS)
-				null_tss_ptr<T>::operator=(value);
+    null_tss_ptr<T>::operator=(value);
 #elif defined(ASIO_HAS_THREAD_KEYWORD_EXTENSION)
-				keyword_tss_ptr<T>::operator=(value);
+    keyword_tss_ptr<T>::operator=(value);
 #elif defined(ASIO_WINDOWS)
-				win_tss_ptr<T>::operator=(value);
+    win_tss_ptr<T>::operator=(value);
 #elif defined(ASIO_HAS_PTHREADS)
-				posix_tss_ptr<T>::operator=(value);
+    posix_tss_ptr<T>::operator=(value);
 #endif
-			}
-		};
+  }
+};
 
-	} // namespace detail
+} // namespace detail
 } // namespace asio
 
 #include "asio/detail/pop_options.hpp"

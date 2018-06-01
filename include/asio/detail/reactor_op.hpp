@@ -2,7 +2,7 @@
 // detail/reactor_op.hpp
 // ~~~~~~~~~~~~~~~~~~~~~
 //
-// Copyright (c) 2003-2016 Christopher M. Kohlhoff (chris at kohlhoff dot com)
+// Copyright (c) 2003-2018 Christopher M. Kohlhoff (chris at kohlhoff dot com)
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -21,38 +21,43 @@
 #include "asio/detail/push_options.hpp"
 
 namespace asio {
-	namespace detail {
+namespace detail {
 
-		class reactor_op
-			: public operation {
-		public:
-			// The error code to be passed to the completion handler.
-			asio::error_code ec_;
+class reactor_op
+  : public operation
+{
+public:
+  // The error code to be passed to the completion handler.
+  asio::error_code ec_;
 
-			// The number of bytes transferred, to be passed to the completion handler.
-			std::size_t bytes_transferred_;
+  // The number of bytes transferred, to be passed to the completion handler.
+  std::size_t bytes_transferred_;
 
-			// Perform the operation. Returns true if it is finished.
-			bool perform()
-			{
-				return perform_func_(this);
-			}
+  // Status returned by perform function. May be used to decide whether it is
+  // worth performing more operations on the descriptor immediately.
+  enum status { not_done, done, done_and_exhausted };
 
-		protected:
-			typedef bool (*perform_func_type)(reactor_op *);
+  // Perform the operation. Returns true if it is finished.
+  status perform()
+  {
+    return perform_func_(this);
+  }
 
-			reactor_op(perform_func_type perform_func, func_type complete_func)
-				: operation(complete_func),
-				  bytes_transferred_(0),
-				  perform_func_(perform_func)
-			{
-			}
+protected:
+  typedef status (*perform_func_type)(reactor_op*);
 
-		private:
-			perform_func_type perform_func_;
-		};
+  reactor_op(perform_func_type perform_func, func_type complete_func)
+    : operation(complete_func),
+      bytes_transferred_(0),
+      perform_func_(perform_func)
+  {
+  }
 
-	} // namespace detail
+private:
+  perform_func_type perform_func_;
+};
+
+} // namespace detail
 } // namespace asio
 
 #include "asio/detail/pop_options.hpp"
