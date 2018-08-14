@@ -25,7 +25,7 @@
 namespace network_cs_ext {
 	using namespace cs;
 	static extension network_ext;
-	static extension_t network_ext_shared = make_shared_extension(network_ext);
+	static extension_t network_ext_shared = make_shared_namespace(network_ext);
 
 	string host_name()
 	{
@@ -34,7 +34,7 @@ namespace network_cs_ext {
 
 	namespace tcp {
 		static extension tcp_ext;
-		static extension_t tcp_ext_shared = make_shared_extension(tcp_ext);
+		static extension_t tcp_ext_shared = make_shared_namespace(tcp_ext);
 		using socket_t=std::shared_ptr<cs_impl::network::tcp::socket>;
 		using acceptor_t=std::shared_ptr<asio::ip::tcp::acceptor>;
 		using endpoint_t=asio::ip::tcp::endpoint;
@@ -86,7 +86,7 @@ namespace network_cs_ext {
 
 		namespace socket {
 			static extension socket_ext;
-			static extension_t socket_ext_shared = make_shared_extension(socket_ext);
+			static extension_t socket_ext_shared = make_shared_namespace(socket_ext);
 
 			var socket()
 			{
@@ -166,7 +166,7 @@ namespace network_cs_ext {
 
 	namespace udp {
 		static extension udp_ext;
-		static extension_t udp_ext_shared = make_shared_extension(udp_ext);
+		static extension_t udp_ext_shared = make_shared_namespace(udp_ext);
 		using socket_t=std::shared_ptr<cs_impl::network::udp::socket>;
 		using endpoint_t=asio::ip::udp::endpoint;
 
@@ -206,7 +206,7 @@ namespace network_cs_ext {
 
 		namespace socket {
 			static extension socket_ext;
-			static extension_t socket_ext_shared = make_shared_extension(socket_ext);
+			static extension_t socket_ext_shared = make_shared_namespace(socket_ext);
 
 			var socket()
 			{
