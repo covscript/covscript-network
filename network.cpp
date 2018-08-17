@@ -289,7 +289,7 @@ namespace network_cs_ext {
 		network_ext.add_var("tcp", var::make_protect<extension_t>(tcp::tcp_ext_shared));
 		network_ext.add_var("udp", var::make_protect<extension_t>(udp::udp_ext_shared));
 		network_ext.add_var("host_name", var::make_protect<callable>(cni(host_name), true));
-		tcp::tcp_ext.add_var("socket", var::make_constant<type>(tcp::socket::socket, typeid(tcp::socket_t),
+		tcp::tcp_ext.add_var("socket", var::make_constant<type>(tcp::socket::socket, type_id(typeid(tcp::socket_t)),
 		                     tcp::socket::socket_ext_shared));
 		tcp::tcp_ext.add_var("acceptor", var::make_protect<callable>(cni(tcp::acceptor), true));
 		tcp::tcp_ext.add_var("endpoint", var::make_protect<callable>(cni(tcp::endpoint), true));
@@ -304,7 +304,7 @@ namespace network_cs_ext {
 		tcp::socket::socket_ext.add_var("send", var::make_protect<callable>(cni(tcp::socket::send)));
 		tcp::socket::socket_ext.add_var("remote_endpoint",
 		                                var::make_protect<callable>(cni(tcp::socket::remote_endpoint)));
-		udp::udp_ext.add_var("socket", var::make_constant<type>(udp::socket::socket, typeid(udp::socket_t),
+		udp::udp_ext.add_var("socket", var::make_constant<type>(udp::socket::socket, type_id(typeid(udp::socket_t)),
 		                     udp::socket::socket_ext_shared));
 		udp::udp_ext.add_var("endpoint", var::make_protect<callable>(cni(udp::endpoint), true));
 		udp::udp_ext.add_var("endpoint_v4", var::make_protect<callable>(cni(udp::endpoint_v4), true));
