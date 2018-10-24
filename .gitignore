@@ -37,3 +37,6 @@
 #Build Files
 /cmake-build-debug
 /build
+
+#CovScript Headers
+/include/covscript/

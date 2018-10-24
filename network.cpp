@@ -162,6 +162,22 @@ namespace network_cs_ext {
 				}
 			}
 		}
+
+		namespace ep
+		{
+			static extension ep_ext;
+			static extension_t ep_ext_shared = make_shared_namespace(ep_ext);
+
+			string address(const endpoint_t& ep)
+			{
+				return ep.address().to_string();
+			}
+
+			number port(const endpoint_t& ep)
+			{
+				return ep.port();
+			}
+		}
 	}
 
 	namespace udp {
@@ -282,41 +298,64 @@ namespace network_cs_ext {
 				}
 			}
 		}
+
+		namespace ep
+		{
+			static extension ep_ext;
+			static extension_t ep_ext_shared = make_shared_namespace(ep_ext);
+
+			string address(const endpoint_t& ep)
+			{
+				return ep.address().to_string();
+			}
+
+			number port(const endpoint_t& ep)
+			{
+				return ep.port();
+			}
+		}
 	}
 
 	void init()
 	{
 		network_ext.add_var("tcp", var::make_protect<extension_t>(tcp::tcp_ext_shared));
 		network_ext.add_var("udp", var::make_protect<extension_t>(udp::udp_ext_shared));
-		network_ext.add_var("host_name", var::make_protect<callable>(cni(host_name), true));
-		tcp::tcp_ext.add_var("socket", var::make_constant<type>(tcp::socket::socket, type_id(typeid(tcp::socket_t)),
-		                     tcp::socket::socket_ext_shared));
-		tcp::tcp_ext.add_var("acceptor", var::make_protect<callable>(cni(tcp::acceptor), true));
-		tcp::tcp_ext.add_var("endpoint", var::make_protect<callable>(cni(tcp::endpoint), true));
-		tcp::tcp_ext.add_var("endpoint_v4", var::make_protect<callable>(cni(tcp::endpoint_v4), true));
-		tcp::tcp_ext.add_var("endpoint_v6", var::make_protect<callable>(cni(tcp::endpoint_v6), true));
-		tcp::tcp_ext.add_var("resolve", var::make_protect<callable>(cni(tcp::resolve), true));
-		tcp::socket::socket_ext.add_var("connect", var::make_protect<callable>(cni(tcp::socket::connect)));
-		tcp::socket::socket_ext.add_var("accept", var::make_protect<callable>(cni(tcp::socket::accept)));
-		tcp::socket::socket_ext.add_var("close", var::make_protect<callable>(cni(tcp::socket::close)));
-		tcp::socket::socket_ext.add_var("is_open", var::make_protect<callable>(cni(tcp::socket::is_open)));
-		tcp::socket::socket_ext.add_var("receive", var::make_protect<callable>(cni(tcp::socket::receive)));
-		tcp::socket::socket_ext.add_var("send", var::make_protect<callable>(cni(tcp::socket::send)));
-		tcp::socket::socket_ext.add_var("remote_endpoint",
-		                                var::make_protect<callable>(cni(tcp::socket::remote_endpoint)));
-		udp::udp_ext.add_var("socket", var::make_constant<type>(udp::socket::socket, type_id(typeid(udp::socket_t)),
-		                     udp::socket::socket_ext_shared));
-		udp::udp_ext.add_var("endpoint", var::make_protect<callable>(cni(udp::endpoint), true));
-		udp::udp_ext.add_var("endpoint_v4", var::make_protect<callable>(cni(udp::endpoint_v4), true));
-		udp::udp_ext.add_var("endpoint_v6", var::make_protect<callable>(cni(udp::endpoint_v6), true));
-		udp::udp_ext.add_var("resolve", var::make_protect<callable>(cni(udp::resolve), true));
-		udp::socket::socket_ext.add_var("open_v4", var::make_protect<callable>(cni(udp::socket::open_v4)));
-		udp::socket::socket_ext.add_var("open_v6", var::make_protect<callable>(cni(udp::socket::open_v6)));
-		udp::socket::socket_ext.add_var("bind", var::make_protect<callable>(cni(udp::socket::bind)));
-		udp::socket::socket_ext.add_var("close", var::make_protect<callable>(cni(udp::socket::close)));
-		udp::socket::socket_ext.add_var("is_open", var::make_protect<callable>(cni(udp::socket::is_open)));
-		udp::socket::socket_ext.add_var("receive_from", var::make_protect<callable>(cni(udp::socket::receive_from)));
-		udp::socket::socket_ext.add_var("send_to", var::make_protect<callable>(cni(udp::socket::send_to)));
+		network_ext.add_var("host_name", make_cni(host_name, true));
+		tcp::tcp_ext
+		.add_var("socket", var::make_constant<type>(tcp::socket::socket, type_id(typeid(tcp::socket_t)), tcp::socket::socket_ext_shared))
+		.add_var("acceptor", make_cni(tcp::acceptor, true))
+		.add_var("endpoint", make_cni(tcp::endpoint, true))
+		.add_var("endpoint_v4", make_cni(tcp::endpoint_v4, true))
+		.add_var("endpoint_v6", make_cni(tcp::endpoint_v6, true))
+		.add_var("resolve", make_cni(tcp::resolve, true));
+		tcp::socket::socket_ext
+		.add_var("connect", make_cni(tcp::socket::connect))
+		.add_var("accept", make_cni(tcp::socket::accept))
+		.add_var("close", make_cni(tcp::socket::close))
+		.add_var("is_open", make_cni(tcp::socket::is_open))
+		.add_var("receive", make_cni(tcp::socket::receive))
+		.add_var("send", make_cni(tcp::socket::send))
+		.add_var("remote_endpoint", make_cni(tcp::socket::remote_endpoint));
+		tcp::ep::ep_ext
+		.add_var("address", make_cni(tcp::ep::address, true))
+		.add_var("port", make_cni(tcp::ep::port, true));
+		udp::udp_ext
+		.add_var("socket", var::make_constant<type>(udp::socket::socket, type_id(typeid(udp::socket_t)), udp::socket::socket_ext_shared))
+		.add_var("endpoint", make_cni(udp::endpoint, true))
+		.add_var("endpoint_v4", make_cni(udp::endpoint_v4, true))
+		.add_var("endpoint_v6", make_cni(udp::endpoint_v6, true))
+		.add_var("resolve", make_cni(udp::resolve, true));
+		udp::socket::socket_ext
+		.add_var("open_v4", make_cni(udp::socket::open_v4))
+		.add_var("open_v6", make_cni(udp::socket::open_v6))
+		.add_var("bind", make_cni(udp::socket::bind))
+		.add_var("close", make_cni(udp::socket::close))
+		.add_var("is_open", make_cni(udp::socket::is_open))
+		.add_var("receive_from", make_cni(udp::socket::receive_from))
+		.add_var("send_to", make_cni(udp::socket::send_to));
+		udp::ep::ep_ext
+		.add_var("address", make_cni(udp::ep::address, true))
+		.add_var("port", make_cni(udp::ep::port, true));
 	}
 }
 namespace cs_impl {
