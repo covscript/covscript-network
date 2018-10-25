@@ -163,8 +163,7 @@ namespace network_cs_ext {
 			}
 		}
 
-		namespace ep
-		{
+		namespace ep {
 			static extension ep_ext;
 			static extension_t ep_ext_shared = make_shared_namespace(ep_ext);
 
@@ -299,8 +298,7 @@ namespace network_cs_ext {
 			}
 		}
 
-		namespace ep
-		{
+		namespace ep {
 			static extension ep_ext;
 			static extension_t ep_ext_shared = make_shared_namespace(ep_ext);
 
@@ -366,9 +364,21 @@ namespace cs_impl {
 	}
 
 	template<>
+	cs::extension_t &get_ext<network_cs_ext::tcp::endpoint_t>()
+	{
+		return network_cs_ext::tcp::ep::ep_ext_shared;
+	}
+
+	template<>
 	cs::extension_t &get_ext<network_cs_ext::udp::socket_t>()
 	{
 		return network_cs_ext::udp::socket::socket_ext_shared;
+	}
+
+	template<>
+	cs::extension_t &get_ext<network_cs_ext::udp::endpoint_t>()
+	{
+		return network_cs_ext::udp::ep::ep_ext_shared;
 	}
 
 	template<>
