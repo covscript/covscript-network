@@ -18,14 +18,11 @@
 * Github: https://github.com/mikecovlee
 */
 #include <network/network.hpp>
-#include <covscript/cni.hpp>
 #include <covscript/extension.hpp>
 #include <memory>
 
 namespace network_cs_ext {
 	using namespace cs;
-	static extension network_ext;
-	static extension_t network_ext_shared = make_shared_namespace(network_ext);
 
 	string host_name()
 	{
@@ -33,8 +30,7 @@ namespace network_cs_ext {
 	}
 
 	namespace tcp {
-		static extension tcp_ext;
-		static extension_t tcp_ext_shared = make_shared_namespace(tcp_ext);
+		static namespace_t tcp_ext = make_shared_namespace<name_space>();
 		using socket_t=std::shared_ptr<cs_impl::network::tcp::socket>;
 		using acceptor_t=std::shared_ptr<asio::ip::tcp::acceptor>;
 		using endpoint_t=asio::ip::tcp::endpoint;
@@ -85,8 +81,7 @@ namespace network_cs_ext {
 		}
 
 		namespace socket {
-			static extension socket_ext;
-			static extension_t socket_ext_shared = make_shared_namespace(socket_ext);
+			static namespace_t socket_ext = make_shared_namespace<name_space>();
 
 			var socket()
 			{
@@ -164,8 +159,7 @@ namespace network_cs_ext {
 		}
 
 		namespace ep {
-			static extension ep_ext;
-			static extension_t ep_ext_shared = make_shared_namespace(ep_ext);
+			static namespace_t ep_ext = make_shared_namespace<name_space>();
 
 			string address(const endpoint_t& ep)
 			{
@@ -180,8 +174,7 @@ namespace network_cs_ext {
 	}
 
 	namespace udp {
-		static extension udp_ext;
-		static extension_t udp_ext_shared = make_shared_namespace(udp_ext);
+		static namespace_t udp_ext=make_shared_namespace<name_space>();
 		using socket_t=std::shared_ptr<cs_impl::network::udp::socket>;
 		using endpoint_t=asio::ip::udp::endpoint;
 
@@ -220,8 +213,7 @@ namespace network_cs_ext {
 		}
 
 		namespace socket {
-			static extension socket_ext;
-			static extension_t socket_ext_shared = make_shared_namespace(socket_ext);
+			static namespace_t socket_ext=make_shared_namespace<name_space>();
 
 			var socket()
 			{
@@ -299,8 +291,7 @@ namespace network_cs_ext {
 		}
 
 		namespace ep {
-			static extension ep_ext;
-			static extension_t ep_ext_shared = make_shared_namespace(ep_ext);
+			static namespace_t ep_ext=make_shared_namespace<name_space>();
 
 			string address(const endpoint_t& ep)
 			{
@@ -314,19 +305,20 @@ namespace network_cs_ext {
 		}
 	}
 
-	void init()
+	void init(name_space& network_ext)
 	{
-		network_ext.add_var("tcp", var::make_protect<extension_t>(tcp::tcp_ext_shared));
-		network_ext.add_var("udp", var::make_protect<extension_t>(udp::udp_ext_shared));
-		network_ext.add_var("host_name", make_cni(host_name, true));
-		tcp::tcp_ext
-		.add_var("socket", var::make_constant<type>(tcp::socket::socket, type_id(typeid(tcp::socket_t)), tcp::socket::socket_ext_shared))
+		network_ext
+		.add_var("tcp", make_namespace(tcp::tcp_ext))
+		.add_var("udp", make_namespace(udp::udp_ext))
+		.add_var("host_name", make_cni(host_name, true));
+		(*tcp::tcp_ext)
+		.add_var("socket", var::make_constant<type>(tcp::socket::socket, type_id(typeid(tcp::socket_t)), tcp::socket::socket_ext))
 		.add_var("acceptor", make_cni(tcp::acceptor, true))
 		.add_var("endpoint", make_cni(tcp::endpoint, true))
 		.add_var("endpoint_v4", make_cni(tcp::endpoint_v4, true))
 		.add_var("endpoint_v6", make_cni(tcp::endpoint_v6, true))
 		.add_var("resolve", make_cni(tcp::resolve, true));
-		tcp::socket::socket_ext
+		(*tcp::socket::socket_ext)
 		.add_var("connect", make_cni(tcp::socket::connect))
 		.add_var("accept", make_cni(tcp::socket::accept))
 		.add_var("close", make_cni(tcp::socket::close))
@@ -334,16 +326,16 @@ namespace network_cs_ext {
 		.add_var("receive", make_cni(tcp::socket::receive))
 		.add_var("send", make_cni(tcp::socket::send))
 		.add_var("remote_endpoint", make_cni(tcp::socket::remote_endpoint));
-		tcp::ep::ep_ext
+		(*tcp::ep::ep_ext)
 		.add_var("address", make_cni(tcp::ep::address, true))
 		.add_var("port", make_cni(tcp::ep::port, true));
-		udp::udp_ext
-		.add_var("socket", var::make_constant<type>(udp::socket::socket, type_id(typeid(udp::socket_t)), udp::socket::socket_ext_shared))
+		(*udp::udp_ext)
+		.add_var("socket", var::make_constant<type>(udp::socket::socket, type_id(typeid(udp::socket_t)), udp::socket::socket_ext))
 		.add_var("endpoint", make_cni(udp::endpoint, true))
 		.add_var("endpoint_v4", make_cni(udp::endpoint_v4, true))
 		.add_var("endpoint_v6", make_cni(udp::endpoint_v6, true))
 		.add_var("resolve", make_cni(udp::resolve, true));
-		udp::socket::socket_ext
+		(*udp::socket::socket_ext)
 		.add_var("open_v4", make_cni(udp::socket::open_v4))
 		.add_var("open_v6", make_cni(udp::socket::open_v6))
 		.add_var("bind", make_cni(udp::socket::bind))
@@ -351,34 +343,34 @@ namespace network_cs_ext {
 		.add_var("is_open", make_cni(udp::socket::is_open))
 		.add_var("receive_from", make_cni(udp::socket::receive_from))
 		.add_var("send_to", make_cni(udp::socket::send_to));
-		udp::ep::ep_ext
+		(*udp::ep::ep_ext)
 		.add_var("address", make_cni(udp::ep::address, true))
 		.add_var("port", make_cni(udp::ep::port, true));
 	}
 }
 namespace cs_impl {
 	template<>
-	cs::extension_t &get_ext<network_cs_ext::tcp::socket_t>()
+	cs::namespace_t &get_ext<network_cs_ext::tcp::socket_t>()
 	{
-		return network_cs_ext::tcp::socket::socket_ext_shared;
+		return network_cs_ext::tcp::socket::socket_ext;
 	}
 
 	template<>
-	cs::extension_t &get_ext<network_cs_ext::tcp::endpoint_t>()
+	cs::namespace_t &get_ext<network_cs_ext::tcp::endpoint_t>()
 	{
-		return network_cs_ext::tcp::ep::ep_ext_shared;
+		return network_cs_ext::tcp::ep::ep_ext;
 	}
 
 	template<>
-	cs::extension_t &get_ext<network_cs_ext::udp::socket_t>()
+	cs::namespace_t &get_ext<network_cs_ext::udp::socket_t>()
 	{
-		return network_cs_ext::udp::socket::socket_ext_shared;
+		return network_cs_ext::udp::socket::socket_ext;
 	}
 
 	template<>
-	cs::extension_t &get_ext<network_cs_ext::udp::endpoint_t>()
+	cs::namespace_t &get_ext<network_cs_ext::udp::endpoint_t>()
 	{
-		return network_cs_ext::udp::ep::ep_ext_shared;
+		return network_cs_ext::udp::ep::ep_ext;
 	}
 
 	template<>
@@ -412,8 +404,7 @@ namespace cs_impl {
 	}
 }
 
-cs::extension *cs_extension()
+void cs_extension_main(cs::name_space& ns)
 {
-	network_cs_ext::init();
-	return &network_cs_ext::network_ext;
+	network_cs_ext::init(ns);
 }
