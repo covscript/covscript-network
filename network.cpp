@@ -305,9 +305,9 @@ namespace network_cs_ext {
 		}
 	}
 
-	void init(name_space& network_ext)
+	void init(name_space *network_ext)
 	{
-		network_ext
+		(*network_ext)
 		.add_var("tcp", make_namespace(tcp::tcp_ext))
 		.add_var("udp", make_namespace(udp::udp_ext))
 		.add_var("host_name", make_cni(host_name, true));
@@ -404,7 +404,7 @@ namespace cs_impl {
 	}
 }
 
-void cs_extension_main(cs::name_space& ns)
+void cs_extension_main(cs::name_space *ns)
 {
 	network_cs_ext::init(ns);
 }
