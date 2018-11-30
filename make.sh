@@ -21,8 +21,9 @@ function set_flag() {
     fi
 }
 
-DEFAULT_CXXFLAGS="-std=c++11 -I ../include -shared -fPIC -s -O3"
-DEFAULT_LDFLAGS="-lpthread"
+
+DEFAULT_CXXFLAGS="-std=c++11 -I$CS_DEV_PATH/include -I../include -shared -fPIC -s -O3"
+DEFAULT_LDFLAGS="-L$CS_DEV_PATH/lib -lcovscript -lpthread"
 DEFAULT_CXX=g++
 
 set_flag CXX $DEFAULT_CXX
