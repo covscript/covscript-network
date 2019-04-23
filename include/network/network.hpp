@@ -24,6 +24,7 @@
 #define _WIN32_WINDOWS
 #endif
 
+#include <covscript/covscript.hpp>
 #include "asio.hpp"
 #include <string>
 
@@ -76,15 +77,38 @@ namespace cs_impl {
 			}
 
 			class socket final {
+				std::size_t timeout_time=1000;
 				tcp::socket sock;
 			public:
 				socket() : sock(cs_net_service) {}
 
 				socket(const socket &) = delete;
 
+				void set_timeout(std::size_t time)
+				{
+					timeout_time=time;
+				}
+
 				void connect(const tcp::endpoint &ep)
 				{
-					sock.connect(ep);
+					bool timeout=false, wait=true;
+					asio::steady_timer timer(sock.get_io_context(), asio::chrono::milliseconds(timeout_time));
+					sock.async_connect(ep, [&wait](const asio::error_code& error){
+						if(error)
+							throw cs::lang_error(error.message());
+						else
+							wait=false;
+					});
+					timer.async_wait([&timeout, &wait](const asio::error_code& error){
+						if(!error){
+							timeout=true;
+							wait=false;
+						}else
+							throw cs::lang_error(error.message());
+					});
+					do cs_net_service.run_one(); while(wait);
+					if(timeout)
+						throw cs::lang_error("cs::network::timeout");
 				}
 
 				void close()
@@ -94,7 +118,24 @@ namespace cs_impl {
 
 				void accept(tcp::acceptor &a)
 				{
-					a.accept(sock);
+					bool timeout=false, wait=true;
+					asio::steady_timer timer(sock.get_io_context(), asio::chrono::milliseconds(timeout_time));
+					a.async_accept(sock, [&wait](const asio::error_code& error){
+						if(error)
+							throw cs::lang_error(error.message());
+						else
+							wait=false;
+					});
+					timer.async_wait([&timeout, &wait](const asio::error_code& error){
+						if(!error){
+							timeout=true;
+							wait=false;
+						}else
+							throw cs::lang_error(error.message());
+					});
+					do cs_net_service.run_one(); while(wait);
+					if(timeout)
+						throw cs::lang_error("cs::network::timeout");
 				}
 
 				bool is_open()
