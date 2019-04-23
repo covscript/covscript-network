@@ -24,8 +24,8 @@
 #define _WIN32_WINDOWS
 #endif
 
-#include <covscript/covscript.hpp>
 #include "asio.hpp"
+#include <covscript/covscript.hpp>
 #include <string>
 
 namespace cs_impl {
@@ -93,20 +93,22 @@ namespace cs_impl {
 				{
 					bool timeout=false, wait=true;
 					asio::steady_timer timer(sock.get_io_context(), asio::chrono::milliseconds(timeout_time));
-					sock.async_connect(ep, [&wait](const asio::error_code& error){
+					sock.async_connect(ep, [&wait](const asio::error_code& error) {
 						if(error)
 							throw cs::lang_error(error.message());
 						else
 							wait=false;
 					});
-					timer.async_wait([&timeout, &wait](const asio::error_code& error){
-						if(!error){
+					timer.async_wait([&timeout, &wait](const asio::error_code& error) {
+						if(!error) {
 							timeout=true;
 							wait=false;
-						}else
+						}
+						else
 							throw cs::lang_error(error.message());
 					});
-					do cs_net_service.run_one(); while(wait);
+					do cs_net_service.run_one();
+					while(wait);
 					if(timeout)
 						throw cs::lang_error("cs::network::timeout");
 				}
@@ -120,20 +122,22 @@ namespace cs_impl {
 				{
 					bool timeout=false, wait=true;
 					asio::steady_timer timer(sock.get_io_context(), asio::chrono::milliseconds(timeout_time));
-					a.async_accept(sock, [&wait](const asio::error_code& error){
+					a.async_accept(sock, [&wait](const asio::error_code& error) {
 						if(error)
 							throw cs::lang_error(error.message());
 						else
 							wait=false;
 					});
-					timer.async_wait([&timeout, &wait](const asio::error_code& error){
-						if(!error){
+					timer.async_wait([&timeout, &wait](const asio::error_code& error) {
+						if(!error) {
 							timeout=true;
 							wait=false;
-						}else
+						}
+						else
 							throw cs::lang_error(error.message());
 					});
-					do cs_net_service.run_one(); while(wait);
+					do cs_net_service.run_one();
+					while(wait);
 					if(timeout)
 						throw cs::lang_error("cs::network::timeout");
 				}
