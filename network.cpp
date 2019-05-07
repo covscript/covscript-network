@@ -319,7 +319,7 @@ namespace network_cs_ext {
 		.add_var("udp", make_namespace(udp::udp_ext))
 		.add_var("host_name", make_cni(host_name, true));
 		(*tcp::tcp_ext)
-		.add_var("socket", var::make_constant<type>(tcp::socket::socket, type_id(typeid(tcp::socket_t)), tcp::socket::socket_ext))
+		.add_var("socket", var::make_constant<type_t>(tcp::socket::socket, type_id(typeid(tcp::socket_t)), tcp::socket::socket_ext))
 		.add_var("acceptor", make_cni(tcp::acceptor, true))
 		.add_var("endpoint", make_cni(tcp::endpoint, true))
 		.add_var("endpoint_v4", make_cni(tcp::endpoint_v4, true))
@@ -338,7 +338,7 @@ namespace network_cs_ext {
 		.add_var("address", make_cni(tcp::ep::address, true))
 		.add_var("port", make_cni(tcp::ep::port, true));
 		(*udp::udp_ext)
-		.add_var("socket", var::make_constant<type>(udp::socket::socket, type_id(typeid(udp::socket_t)), udp::socket::socket_ext))
+		.add_var("socket", var::make_constant<type_t>(udp::socket::socket, type_id(typeid(udp::socket_t)), udp::socket::socket_ext))
 		.add_var("endpoint", make_cni(udp::endpoint, true))
 		.add_var("endpoint_v4", make_cni(udp::endpoint_v4, true))
 		.add_var("endpoint_v6", make_cni(udp::endpoint_v6, true))
