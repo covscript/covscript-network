@@ -36,6 +36,12 @@ add_library(network SHARED network.cpp)
 
 target_link_libraries(network covscript)
 
+if (WIN32)
+    target_link_libraries(network ws2_32 wsock32)
+else ()
+    target_link_libraries(network pthread)
+endif ()
+
 set_target_properties(network PROPERTIES OUTPUT_NAME network)
 set_target_properties(network PROPERTIES PREFIX "")
 set_target_properties(network PROPERTIES SUFFIX ".cse")
