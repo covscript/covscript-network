@@ -92,7 +92,7 @@ namespace cs_impl {
 				void connect(const tcp::endpoint &ep)
 				{
 					bool timeout=false, wait=true;
-					asio::steady_timer timer(sock.get_io_context(), asio::chrono::milliseconds(timeout_time));
+					asio::steady_timer timer(sock.get_executor(), asio::chrono::milliseconds(timeout_time));
 					sock.async_connect(ep, [&wait](const asio::error_code& error) {
 						if(error)
 							throw cs::lang_error(error.message());
@@ -121,7 +121,7 @@ namespace cs_impl {
 				void accept(tcp::acceptor &a)
 				{
 					bool timeout=false, wait=true;
-					asio::steady_timer timer(sock.get_io_context(), asio::chrono::milliseconds(timeout_time));
+					asio::steady_timer timer(sock.get_executor(), asio::chrono::milliseconds(timeout_time));
 					a.async_accept(sock, [&wait](const asio::error_code& error) {
 						if(error)
 							throw cs::lang_error(error.message());
