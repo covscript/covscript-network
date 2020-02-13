@@ -32,9 +32,13 @@ else ()
     set(CMAKE_CXX_FLAGS "-fPIC -O3")
 endif ()
 
+add_subdirectory(curl)
+include_directories(curl/include)
+
 add_library(network SHARED network.cpp)
 
 target_link_libraries(network covscript)
+target_link_libraries(network libcurl)
 
 if (WIN32)
     target_link_libraries(network ws2_32 wsock32)
