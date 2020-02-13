@@ -42,6 +42,7 @@
 #CovScript Headers
 /include/covscript/
 
-cmake-build/
+cmake-build*
 
 .DS_Store
+
