@@ -35,7 +35,7 @@ endif ()
 add_subdirectory(curl)
 include_directories(curl/include)
 
-add_library(network SHARED network.cpp)
+add_library(network SHARED network.cpp curl_wrapper.cpp curl_wrapper.hpp)
 
 target_link_libraries(network covscript)
 target_link_libraries(network libcurl)

@@ -21,6 +21,8 @@
 #include <covscript/dll.hpp>
 #include <memory>
 
+#include "curl_wrapper.hpp"
+
 namespace network_cs_ext {
 	using namespace cs;
 
@@ -312,11 +314,16 @@ namespace network_cs_ext {
 		}
 	}
 
+	namespace curl {
+        static namespace_t curl_ext = make_shared_namespace<name_space>();
+	}
+
 	void init(name_space *network_ext)
 	{
 		(*network_ext)
 		.add_var("tcp", make_namespace(tcp::tcp_ext))
 		.add_var("udp", make_namespace(udp::udp_ext))
+		.add_var("curl", make_namespace(curl::curl_ext))
 		.add_var("host_name", make_cni(host_name, true));
 		(*tcp::tcp_ext)
 		.add_var("socket", var::make_constant<type_t>(tcp::socket::socket, type_id(typeid(tcp::socket_t)), tcp::socket::socket_ext))
@@ -354,6 +361,15 @@ namespace network_cs_ext {
 		(*udp::ep::ep_ext)
 		.add_var("address", make_cni(udp::ep::address, true))
 		.add_var("port", make_cni(udp::ep::port, true));
+
+        (*curl::curl_ext)
+        .add_var("get_url_text", make_cni([] (const std::string &url) {
+            try {
+                return network::get_url_text(url);
+            } catch (const std::exception &e) {
+                throw cs::lang_error(e.what());
+            }
+        }));
 	}
 }
 namespace cs_impl {
