@@ -88,13 +88,6 @@ namespace network_cs_ext {
 				return var::make<socket_t>(std::make_shared<cs_impl::network::tcp::socket>());
 			}
 
-			void set_timeout(socket_t &sock, number time)
-			{
-				if(time<=0)
-					throw cs::lang_error("Time out time must above zero.");
-				sock->set_timeout(time);
-			}
-
 			void connect(socket_t &sock, const endpoint_t &ep)
 			{
 				try {
@@ -326,7 +319,6 @@ namespace network_cs_ext {
 		.add_var("endpoint_v6", make_cni(tcp::endpoint_v6, true))
 		.add_var("resolve", make_cni(tcp::resolve, true));
 		(*tcp::socket::socket_ext)
-		.add_var("set_timeout", make_cni(tcp::socket::set_timeout))
 		.add_var("connect", make_cni(tcp::socket::connect))
 		.add_var("accept", make_cni(tcp::socket::accept))
 		.add_var("close", make_cni(tcp::socket::close))
