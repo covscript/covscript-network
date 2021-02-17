@@ -194,6 +194,14 @@ namespace network_cs_ext {
 				return var::make<endpoint_t>(asio::ip::udp::v4(), static_cast<unsigned short>(port));
 		}
 
+		var endpoint_broadcast(number port)
+		{
+			if (port < 0)
+				throw lang_error("Port number can not under zero.");
+			else
+				return var::make<endpoint_t>(asio::ip::address_v4::broadcast(), static_cast<unsigned short>(port));
+		}
+
 		var endpoint_v6(number port)
 		{
 			if (port < 0)
@@ -265,6 +273,16 @@ namespace network_cs_ext {
 				return sock->is_open();
 			}
 
+			void set_opt_reuse_address(socket_t &sock, bool value)
+			{
+				sock->set_option(asio::ip::udp::socket::reuse_address(value));
+			}
+
+			void set_opt_broadcast(socket_t &sock, bool value)
+			{
+				sock->set_option(asio::socket_base::broadcast(value));
+			}
+
 			string receive_from(socket_t &sock, number max, endpoint_t &ep)
 			{
 				if (max <= 0)
@@ -333,6 +351,7 @@ namespace network_cs_ext {
 		.add_var("socket", var::make_constant<type_t>(udp::socket::socket, type_id(typeid(udp::socket_t)), udp::socket::socket_ext))
 		.add_var("endpoint", make_cni(udp::endpoint, true))
 		.add_var("endpoint_v4", make_cni(udp::endpoint_v4, true))
+		.add_var("endpoint_broadcast", make_cni(udp::endpoint_broadcast, true))
 		.add_var("endpoint_v6", make_cni(udp::endpoint_v6, true))
 		.add_var("resolve", make_cni(udp::resolve, true));
 		(*udp::socket::socket_ext)
@@ -341,6 +360,8 @@ namespace network_cs_ext {
 		.add_var("bind", make_cni(udp::socket::bind))
 		.add_var("close", make_cni(udp::socket::close))
 		.add_var("is_open", make_cni(udp::socket::is_open))
+		.add_var("set_opt_reuse_address", make_cni(udp::socket::set_opt_reuse_address))
+		.add_var("set_opt_broadcast", make_cni(udp::socket::set_opt_broadcast))
 		.add_var("receive_from", make_cni(udp::socket::receive_from))
 		.add_var("send_to", make_cni(udp::socket::send_to));
 		(*udp::ep::ep_ext)
