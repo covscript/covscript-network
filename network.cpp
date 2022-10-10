@@ -21,6 +21,7 @@
 */
 #include <network/network.hpp>
 #include <covscript/dll.hpp>
+#include <covscript/cni.hpp>
 #include <memory>
 
 namespace network_cs_ext {
