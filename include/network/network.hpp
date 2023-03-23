@@ -105,6 +105,11 @@ namespace cs_impl {
 					return sock.is_open();
 				}
 
+				std::size_t available()
+				{
+					return sock.available();
+				}
+
 				std::string receive(std::size_t maximum)
 				{
 					buffer<> buff(maximum);
@@ -173,6 +178,11 @@ namespace cs_impl {
 				void set_option(opt_t &&opt)
 				{
 					sock.set_option(std::forward<opt_t>(opt));
+				}
+
+				std::size_t available()
+				{
+					return sock.available();
 				}
 
 				std::string receive_from(std::size_t maximum, udp::endpoint &ep)

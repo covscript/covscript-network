@@ -126,6 +126,16 @@ namespace network_cs_ext {
 				return sock->is_open();
 			}
 
+			number available(socket_t &sock)
+			{
+				try {
+					return sock->available();
+				}
+				catch (const std::exception &e) {
+					throw lang_error(e.what());
+				}
+			}
+
 			string receive(socket_t &sock, number max)
 			{
 				if (max <= 0)
@@ -286,6 +296,16 @@ namespace network_cs_ext {
 				sock->set_option(asio::socket_base::broadcast(value));
 			}
 
+			number available(socket_t &sock)
+			{
+				try {
+					return sock->available();
+				}
+				catch (const std::exception &e) {
+					throw lang_error(e.what());
+				}
+			}
+
 			string receive_from(socket_t &sock, number max, endpoint_t &ep)
 			{
 				if (max <= 0)
@@ -344,6 +364,7 @@ namespace network_cs_ext {
 		.add_var("accept", make_cni(tcp::socket::accept))
 		.add_var("close", make_cni(tcp::socket::close))
 		.add_var("is_open", make_cni(tcp::socket::is_open))
+		.add_var("available", make_cni(tcp::socket::available))
 		.add_var("receive", make_cni(tcp::socket::receive))
 		.add_var("send", make_cni(tcp::socket::send))
 		.add_var("remote_endpoint", make_cni(tcp::socket::remote_endpoint));
@@ -365,6 +386,7 @@ namespace network_cs_ext {
 		.add_var("is_open", make_cni(udp::socket::is_open))
 		.add_var("set_opt_reuse_address", make_cni(udp::socket::set_opt_reuse_address))
 		.add_var("set_opt_broadcast", make_cni(udp::socket::set_opt_broadcast))
+		.add_var("available", make_cni(udp::socket::available))
 		.add_var("receive_from", make_cni(udp::socket::receive_from))
 		.add_var("send_to", make_cni(udp::socket::send_to));
 		(*udp::ep::ep_ext)
