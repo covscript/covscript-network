@@ -3,7 +3,7 @@
     "Name": "network",
     "Info": "Socket Extension",
     "Author": "CovScript Organization",
-    "Version": "1.24.0_v2",
+    "Version": "1.24.0_v3",
     "Target": "build/imports/network.cse",
     "Dependencies": []
 }

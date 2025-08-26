@@ -1,24 +1,24 @@
 /*
-* Covariant Script Network Extension
-*
-* Licensed under the Apache License, Version 2.0 (the "License");
-* you may not use this file except in compliance with the License.
-* You may obtain a copy of the License at
-*
-*     http://www.apache.org/licenses/LICENSE-2.0
-*
-* Unless required by applicable law or agreed to in writing, software
-* distributed under the License is distributed on an "AS IS" BASIS,
-* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-* See the License for the specific language governing permissions and
-* limitations under the License.
-*
-* Copyright (C) 2017-2021 Michael Lee(李登淳)
-*
-* Email:   lee@covariant.cn, mikecovlee@163.com
-* Github:  https://github.com/mikecovlee
-* Website: http://covscript.org.cn
-*/
+ * Covariant Script Network Extension
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * Copyright (C) 2017-2025 Michael Lee(李登淳)
+ *
+ * Email:   mikecovlee@163.com
+ * Github:  https://github.com/mikecovlee
+ * Website: http://covscript.org.cn
+ */
 #include <network/network.hpp>
 #include <covscript/dll.hpp>
 #include <covscript/cni.hpp>
@@ -34,9 +34,9 @@ namespace network_cs_ext {
 
 	namespace tcp {
 		static namespace_t tcp_ext = make_shared_namespace<name_space>();
-		using socket_t=std::shared_ptr<cs_impl::network::tcp::socket>;
-		using acceptor_t=std::shared_ptr<asio::ip::tcp::acceptor>;
-		using endpoint_t=asio::ip::tcp::endpoint;
+		using socket_t = std::shared_ptr<cs_impl::network::tcp::socket>;
+		using acceptor_t = std::shared_ptr<asio::ip::tcp::acceptor>;
+		using endpoint_t = asio::ip::tcp::endpoint;
 
 		var acceptor(const endpoint_t &ep)
 		{
@@ -169,17 +169,27 @@ namespace network_cs_ext {
 					throw lang_error(e.what());
 				}
 			}
+
+			cs::istream get_istream(socket_t &sock)
+			{
+				return sock->get_istream();
+			}
+
+			cs::ostream get_ostream(socket_t &sock)
+			{
+				return sock->get_ostream();
+			}
 		}
 
 		namespace ep {
 			static namespace_t ep_ext = make_shared_namespace<name_space>();
 
-			string address(const endpoint_t& ep)
+			string address(const endpoint_t &ep)
 			{
 				return ep.address().to_string();
 			}
 
-			number port(const endpoint_t& ep)
+			number port(const endpoint_t &ep)
 			{
 				return ep.port();
 			}
@@ -187,9 +197,9 @@ namespace network_cs_ext {
 	}
 
 	namespace udp {
-		static namespace_t udp_ext=make_shared_namespace<name_space>();
-		using socket_t=std::shared_ptr<cs_impl::network::udp::socket>;
-		using endpoint_t=asio::ip::udp::endpoint;
+		static namespace_t udp_ext = make_shared_namespace<name_space>();
+		using socket_t = std::shared_ptr<cs_impl::network::udp::socket>;
+		using endpoint_t = asio::ip::udp::endpoint;
 
 		var endpoint(const string &host, number port)
 		{
@@ -234,7 +244,7 @@ namespace network_cs_ext {
 		}
 
 		namespace socket {
-			static namespace_t socket_ext=make_shared_namespace<name_space>();
+			static namespace_t socket_ext = make_shared_namespace<name_space>();
 
 			var socket()
 			{
@@ -332,14 +342,14 @@ namespace network_cs_ext {
 		}
 
 		namespace ep {
-			static namespace_t ep_ext=make_shared_namespace<name_space>();
+			static namespace_t ep_ext = make_shared_namespace<name_space>();
 
-			string address(const endpoint_t& ep)
+			string address(const endpoint_t &ep)
 			{
 				return ep.address().to_string();
 			}
 
-			number port(const endpoint_t& ep)
+			number port(const endpoint_t &ep)
 			{
 				return ep.port();
 			}
@@ -367,7 +377,9 @@ namespace network_cs_ext {
 		.add_var("available", make_cni(tcp::socket::available))
 		.add_var("receive", make_cni(tcp::socket::receive))
 		.add_var("send", make_cni(tcp::socket::send))
-		.add_var("remote_endpoint", make_cni(tcp::socket::remote_endpoint));
+		.add_var("remote_endpoint", make_cni(tcp::socket::remote_endpoint))
+		.add_var("get_istream", make_cni(tcp::socket::get_istream))
+		.add_var("get_ostream", make_cni(tcp::socket::get_ostream));
 		(*tcp::ep::ep_ext)
 		.add_var("address", make_cni(tcp::ep::address, true))
 		.add_var("port", make_cni(tcp::ep::port, true));
@@ -395,55 +407,55 @@ namespace network_cs_ext {
 	}
 }
 namespace cs_impl {
-	template<>
+	template <>
 	cs::namespace_t &get_ext<network_cs_ext::tcp::socket_t>()
 	{
 		return network_cs_ext::tcp::socket::socket_ext;
 	}
 
-	template<>
+	template <>
 	cs::namespace_t &get_ext<network_cs_ext::tcp::endpoint_t>()
 	{
 		return network_cs_ext::tcp::ep::ep_ext;
 	}
 
-	template<>
+	template <>
 	cs::namespace_t &get_ext<network_cs_ext::udp::socket_t>()
 	{
 		return network_cs_ext::udp::socket::socket_ext;
 	}
 
-	template<>
+	template <>
 	cs::namespace_t &get_ext<network_cs_ext::udp::endpoint_t>()
 	{
 		return network_cs_ext::udp::ep::ep_ext;
 	}
 
-	template<>
+	template <>
 	constexpr const char *get_name_of_type<network_cs_ext::tcp::socket_t>()
 	{
 		return "cs::network::tcp::socket";
 	}
 
-	template<>
+	template <>
 	constexpr const char *get_name_of_type<network_cs_ext::tcp::acceptor_t>()
 	{
 		return "cs::network::tcp::acceptor";
 	}
 
-	template<>
+	template <>
 	constexpr const char *get_name_of_type<network_cs_ext::tcp::endpoint_t>()
 	{
 		return "cs::network::tcp::endpoint";
 	}
 
-	template<>
+	template <>
 	constexpr const char *get_name_of_type<network_cs_ext::udp::socket_t>()
 	{
 		return "cs::network::udp::socket";
 	}
 
-	template<>
+	template <>
 	constexpr const char *get_name_of_type<network_cs_ext::udp::endpoint_t>()
 	{
 		return "cs::network::udp::endpoint";
