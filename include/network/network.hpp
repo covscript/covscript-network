@@ -69,6 +69,11 @@ namespace cs_impl {
 
 				socket(const socket &) = delete;
 
+				tcp::socket &get_raw()
+				{
+					return sock;
+				}
+
 				void connect(const tcp::endpoint &ep)
 				{
 					sock.connect(ep);
@@ -166,6 +171,11 @@ namespace cs_impl {
 				socket() : sock(get_io_context()) {}
 
 				socket(const socket &) = delete;
+
+				udp::socket &get_raw()
+				{
+					return sock;
+				}
 
 				void open_v4()
 				{

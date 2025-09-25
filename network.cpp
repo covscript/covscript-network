@@ -22,6 +22,7 @@
 #include <network/network.hpp>
 #include <covscript/dll.hpp>
 #include <covscript/cni.hpp>
+#include <atomic>
 #include <memory>
 
 namespace network_cs_ext {
@@ -455,12 +456,139 @@ namespace network_cs_ext {
 		}
 	}
 
+	// Asynchronous
+
+	struct async_state {
+		bool is_udp = false;
+		bool is_read = false;
+		std::atomic<bool> done;
+		std::size_t bytes_transferred = 0;
+		std::vector<char> buffer;
+		udp::endpoint_t endpoint;
+		asio::error_code ec;
+	};
+
+	using async_state_t = std::shared_ptr<async_state>;
+
+	static namespace_t async_state_ext = make_shared_namespace<name_space>();
+
+	bool has_done(const async_state_t &state)
+	{
+		return state->done.load(std::memory_order_acquire);
+	}
+
+	cs::var get_buffer(const async_state_t &state)
+	{
+		if (!state->is_read)
+			throw cs::lang_error("Asynchronous operation not a read/receive session.");
+		if (!state->done.load(std::memory_order_acquire))
+			return cs::null_pointer;
+		if (state->ec)
+			throw cs::lang_error("Asynchronous operation has encountered an error: " + state->ec.message());
+		return cs::var::make<cs::string>(state->buffer.data(), state->bytes_transferred);
+	}
+
+	cs::var get_error(const async_state_t &state)
+	{
+		if (!state->done.load(std::memory_order_acquire))
+			return cs::null_pointer;
+		if (!state->ec)
+			return cs::null_pointer;
+		else
+			return cs::var::make<cs::string>(state->ec.message());
+	}
+
+	udp::endpoint_t get_endpoint(const async_state_t &state)
+	{
+		if (!state->is_udp || !state->is_read)
+			throw cs::lang_error("Asynchronous operation not a receive_from session.");
+		if (!state->done.load(std::memory_order_acquire))
+			throw cs::lang_error("Asynchronous operation not finished.");
+		if (state->ec)
+			throw cs::lang_error("Asynchronous operation has encountered an error: " + state->ec.message());
+		return state->endpoint;
+	}
+
+	async_state_t async_read(tcp::socket_t &sock, std::size_t n)
+	{
+		async_state_t state = std::make_shared<async_state>();
+		state->is_read = true;
+		state->buffer.resize(n);
+		asio::async_read(sock->get_raw(), asio::buffer(state->buffer), [state](const asio::error_code &ec, std::size_t bytes) {
+			state->ec = ec;
+			state->bytes_transferred = bytes;
+			state->done.store(true, std::memory_order_release);
+		});
+		return state;
+	}
+
+	async_state_t async_write(tcp::socket_t &sock, const std::string &data)
+	{
+		async_state_t state = std::make_shared<async_state>();
+		state->buffer.insert(state->buffer.begin(), data.begin(), data.end());
+		asio::async_write(sock->get_raw(), asio::buffer(state->buffer), [state](const asio::error_code &ec, std::size_t bytes) {
+			state->ec = ec;
+			state->bytes_transferred = bytes;
+			state->done.store(true, std::memory_order_release);
+		});
+		return state;
+	}
+
+	async_state_t async_receive_from(udp::socket_t &sock, std::size_t n)
+	{
+		async_state_t state = std::make_shared<async_state>();
+		state->is_udp = true;
+		state->is_read = true;
+		state->buffer.resize(n);
+		sock->get_raw().async_receive_from(asio::buffer(state->buffer), state->endpoint, [state](const asio::error_code &ec, std::size_t bytes) {
+			state->ec = ec;
+			state->bytes_transferred = bytes;
+			state->done.store(true, std::memory_order_release);
+		});
+		return state;
+	}
+
+	async_state_t async_send_to(udp::socket_t &sock, const std::string &data, const udp::endpoint_t &ep)
+	{
+		async_state_t state = std::make_shared<async_state>();
+		state->is_udp = true;
+		state->endpoint = ep;
+		state->buffer.insert(state->buffer.begin(), data.begin(), data.end());
+		sock->get_raw().async_send_to(asio::buffer(state->buffer), state->endpoint, [state](const asio::error_code &ec, std::size_t bytes) {
+			state->ec = ec;
+			state->bytes_transferred = bytes;
+			state->done.store(true, std::memory_order_release);
+		});
+		return state;
+	}
+
+	bool async_poll()
+	{
+		return cs_impl::network::get_io_context().poll() > 0;
+	}
+
+	bool async_poll_once()
+	{
+		return cs_impl::network::get_io_context().poll_one() > 0;
+	}
+
 	void init(name_space *network_ext)
 	{
 		(*network_ext)
 		.add_var("tcp", make_namespace(tcp::tcp_ext))
 		.add_var("udp", make_namespace(udp::udp_ext))
-		.add_var("host_name", make_cni(host_name, true));
+		.add_var("host_name", make_cni(host_name))
+		.add_var("async_read", make_cni(async_read))
+		.add_var("async_write", make_cni(async_write))
+		.add_var("async_receive_from", make_cni(async_receive_from))
+		.add_var("async_send_to", make_cni(async_send_to))
+		.add_var("async_poll", make_cni(async_poll))
+		.add_var("async_poll_once", make_cni(async_poll_once));
+		(*async_state_ext)
+		.add_var("has_done", make_cni(has_done))
+		.add_var("get_buffer", make_cni(get_buffer))
+		.add_var("get_error", make_cni(get_error))
+		.add_var("get_endpoint", make_cni(get_endpoint));
 		(*tcp::tcp_ext)
 		.add_var("socket", var::make_constant<type_t>(tcp::socket::socket, type_id(typeid(tcp::socket_t)), tcp::socket::socket_ext))
 		.add_var("acceptor", make_cni(tcp::acceptor, true))
@@ -542,6 +670,12 @@ namespace cs_impl {
 	}
 
 	template <>
+	cs::namespace_t &get_ext<network_cs_ext::async_state_t>()
+	{
+		return network_cs_ext::async_state_ext;
+	}
+
+	template <>
 	constexpr const char *get_name_of_type<network_cs_ext::tcp::socket_t>()
 	{
 		return "cs::network::tcp::socket";
@@ -569,6 +703,12 @@ namespace cs_impl {
 	constexpr const char *get_name_of_type<network_cs_ext::udp::endpoint_t>()
 	{
 		return "cs::network::udp::endpoint";
+	}
+
+	template <>
+	constexpr const char *get_name_of_type<network_cs_ext::async_state_t>()
+	{
+		return "cs::network::async_state";
 	}
 }
 
