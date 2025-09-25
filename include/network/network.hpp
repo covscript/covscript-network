@@ -32,9 +32,9 @@
 
 namespace cs_impl {
 	namespace network {
-		asio::io_service &get_io_service()
+		static asio::io_context &get_io_context()
 		{
-			static asio::io_service instance;
+			static asio::io_context instance;
 			return instance;
 		}
 		namespace tcp {
@@ -42,17 +42,17 @@ namespace cs_impl {
 
 			tcp::acceptor acceptor(const tcp::endpoint &ep)
 			{
-				return std::move(tcp::acceptor(get_io_service(), ep));
+				return std::move(tcp::acceptor(get_io_context(), ep));
 			}
 
 			tcp::endpoint endpoint(const std::string &address, unsigned short port)
 			{
-				return std::move(tcp::endpoint(asio::ip::address::from_string(address), port));
+				return std::move(tcp::endpoint(asio::ip::make_address(address), port));
 			}
 
 			cs::var resolve(const std::string &host, const std::string &service)
 			{
-				tcp::resolver resolver(get_io_service());
+				static tcp::resolver resolver(get_io_context());
 				tcp::resolver::results_type results = resolver.resolve(host, service);
 				cs::var ret = cs::var::make<cs::array>();
 				cs::array &arr = ret.val<cs::array>();
@@ -65,7 +65,7 @@ namespace cs_impl {
 				tcp::socket sock;
 
 			public:
-				socket() : sock(get_io_service()) {}
+				socket() : sock(get_io_context()) {}
 
 				socket(const socket &) = delete;
 
@@ -145,12 +145,12 @@ namespace cs_impl {
 
 			udp::endpoint endpoint(const std::string &address, unsigned short port)
 			{
-				return std::move(udp::endpoint(asio::ip::address::from_string(address), port));
+				return std::move(udp::endpoint(asio::ip::make_address(address), port));
 			}
 
 			cs::var resolve(const std::string &host, const std::string &service)
 			{
-				udp::resolver resolver(get_io_service());
+				static udp::resolver resolver(get_io_context());
 				udp::resolver::results_type results = resolver.resolve(host, service);
 				cs::var ret = cs::var::make<cs::array>();
 				cs::array &arr = ret.val<cs::array>();
@@ -163,7 +163,7 @@ namespace cs_impl {
 				udp::socket sock;
 
 			public:
-				socket() : sock(get_io_service()) {}
+				socket() : sock(get_io_context()) {}
 
 				socket(const socket &) = delete;
 
