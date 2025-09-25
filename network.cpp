@@ -1,24 +1,24 @@
 /*
-* Covariant Script Network Extension
-*
-* Licensed under the Apache License, Version 2.0 (the "License");
-* you may not use this file except in compliance with the License.
-* You may obtain a copy of the License at
-*
-*     http://www.apache.org/licenses/LICENSE-2.0
-*
-* Unless required by applicable law or agreed to in writing, software
-* distributed under the License is distributed on an "AS IS" BASIS,
-* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-* See the License for the specific language governing permissions and
-* limitations under the License.
-*
-* Copyright (C) 2017-2021 Michael Lee(李登淳)
-*
-* Email:   lee@covariant.cn, mikecovlee@163.com
-* Github:  https://github.com/mikecovlee
-* Website: http://covscript.org.cn
-*/
+ * Covariant Script Network Extension
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * Copyright (C) 2017-2025 Michael Lee(李登淳)
+ *
+ * Email:   mikecovlee@163.com
+ * Github:  https://github.com/mikecovlee
+ * Website: http://covscript.org.cn
+ */
 #include <network/network.hpp>
 #include <covscript/dll.hpp>
 #include <covscript/cni.hpp>
@@ -34,9 +34,9 @@ namespace network_cs_ext {
 
 	namespace tcp {
 		static namespace_t tcp_ext = make_shared_namespace<name_space>();
-		using socket_t=std::shared_ptr<cs_impl::network::tcp::socket>;
-		using acceptor_t=std::shared_ptr<asio::ip::tcp::acceptor>;
-		using endpoint_t=asio::ip::tcp::endpoint;
+		using socket_t = std::shared_ptr<cs_impl::network::tcp::socket>;
+		using acceptor_t = std::shared_ptr<asio::ip::tcp::acceptor>;
+		using endpoint_t = asio::ip::tcp::endpoint;
 
 		var acceptor(const endpoint_t &ep)
 		{
@@ -76,7 +76,7 @@ namespace network_cs_ext {
 		var resolve(const string &host, const string &service)
 		{
 			try {
-				return var::make<endpoint_t>(cs_impl::network::tcp::resolve(host, service));
+				return cs_impl::network::tcp::resolve(host, service);
 			}
 			catch (const std::exception &e) {
 				throw lang_error(e.what());
@@ -126,6 +126,21 @@ namespace network_cs_ext {
 				return sock->is_open();
 			}
 
+			void set_opt_reuse_address(socket_t &sock, bool value)
+			{
+				sock->set_option(asio::ip::tcp::socket::reuse_address(value));
+			}
+
+			void set_opt_no_delay(socket_t &sock, bool value)
+			{
+				sock->set_option(asio::ip::tcp::no_delay(value));
+			}
+
+			void set_opt_keep_alive(socket_t &sock, bool value)
+			{
+				sock->set_option(asio::socket_base::keep_alive(value));
+			}
+
 			number available(socket_t &sock)
 			{
 				try {
@@ -150,10 +165,54 @@ namespace network_cs_ext {
 				}
 			}
 
+			string read(socket_t &sock, number size)
+			{
+				if (size <= 0)
+					throw lang_error("Buffer size must above zero.");
+				else {
+					try {
+						return sock->read(static_cast<std::size_t>(size));
+					}
+					catch (const std::exception &e) {
+						throw lang_error(e.what());
+					}
+				}
+			}
+
 			void send(socket_t &sock, const string &str)
 			{
 				try {
 					sock->send(str);
+				}
+				catch (const std::exception &e) {
+					throw lang_error(e.what());
+				}
+			}
+
+			void write(socket_t &sock, const string &str)
+			{
+				try {
+					sock->write(str);
+				}
+				catch (const std::exception &e) {
+					throw lang_error(e.what());
+				}
+			}
+
+			void shutdown(socket_t &sock)
+			{
+				try {
+					sock->shutdown();
+				}
+				catch (const std::exception &e) {
+					throw lang_error(e.what());
+				}
+			}
+
+			endpoint_t local_endpoint(socket_t &sock)
+			{
+				try {
+					return sock->local_endpoint();
 				}
 				catch (const std::exception &e) {
 					throw lang_error(e.what());
@@ -174,12 +233,22 @@ namespace network_cs_ext {
 		namespace ep {
 			static namespace_t ep_ext = make_shared_namespace<name_space>();
 
-			string address(const endpoint_t& ep)
+			string address(const endpoint_t &ep)
 			{
 				return ep.address().to_string();
 			}
 
-			number port(const endpoint_t& ep)
+			bool is_v4(const endpoint_t &ep)
+			{
+				return ep.address().is_v4();
+			}
+
+			bool is_v6(const endpoint_t &ep)
+			{
+				return ep.address().is_v6();
+			}
+
+			number port(const endpoint_t &ep)
 			{
 				return ep.port();
 			}
@@ -187,9 +256,9 @@ namespace network_cs_ext {
 	}
 
 	namespace udp {
-		static namespace_t udp_ext=make_shared_namespace<name_space>();
-		using socket_t=std::shared_ptr<cs_impl::network::udp::socket>;
-		using endpoint_t=asio::ip::udp::endpoint;
+		static namespace_t udp_ext = make_shared_namespace<name_space>();
+		using socket_t = std::shared_ptr<cs_impl::network::udp::socket>;
+		using endpoint_t = asio::ip::udp::endpoint;
 
 		var endpoint(const string &host, number port)
 		{
@@ -226,7 +295,7 @@ namespace network_cs_ext {
 		var resolve(const string &host, const string &service)
 		{
 			try {
-				return var::make<endpoint_t>(cs_impl::network::udp::resolve(host, service));
+				return cs_impl::network::udp::resolve(host, service);
 			}
 			catch (const std::exception &e) {
 				throw lang_error(e.what());
@@ -234,7 +303,7 @@ namespace network_cs_ext {
 		}
 
 		namespace socket {
-			static namespace_t socket_ext=make_shared_namespace<name_space>();
+			static namespace_t socket_ext = make_shared_namespace<name_space>();
 
 			var socket()
 			{
@@ -265,6 +334,16 @@ namespace network_cs_ext {
 			{
 				try {
 					sock->bind(ep);
+				}
+				catch (const std::exception &e) {
+					throw lang_error(e.what());
+				}
+			}
+
+			void connect(socket_t &sock, const endpoint_t &ep)
+			{
+				try {
+					sock->connect(ep);
 				}
 				catch (const std::exception &e) {
 					throw lang_error(e.what());
@@ -329,17 +408,47 @@ namespace network_cs_ext {
 					throw lang_error(e.what());
 				}
 			}
+
+			endpoint_t local_endpoint(socket_t &sock)
+			{
+				try {
+					return sock->local_endpoint();
+				}
+				catch (const std::exception &e) {
+					throw lang_error(e.what());
+				}
+			}
+
+			endpoint_t remote_endpoint(socket_t &sock)
+			{
+				try {
+					return sock->remote_endpoint();
+				}
+				catch (const std::exception &e) {
+					throw lang_error(e.what());
+				}
+			}
 		}
 
 		namespace ep {
-			static namespace_t ep_ext=make_shared_namespace<name_space>();
+			static namespace_t ep_ext = make_shared_namespace<name_space>();
 
-			string address(const endpoint_t& ep)
+			string address(const endpoint_t &ep)
 			{
 				return ep.address().to_string();
 			}
 
-			number port(const endpoint_t& ep)
+			bool is_v4(const endpoint_t &ep)
+			{
+				return ep.address().is_v4();
+			}
+
+			bool is_v6(const endpoint_t &ep)
+			{
+				return ep.address().is_v6();
+			}
+
+			number port(const endpoint_t &ep)
 			{
 				return ep.port();
 			}
@@ -364,12 +473,20 @@ namespace network_cs_ext {
 		.add_var("accept", make_cni(tcp::socket::accept))
 		.add_var("close", make_cni(tcp::socket::close))
 		.add_var("is_open", make_cni(tcp::socket::is_open))
+		.add_var("set_opt_reuse_address", make_cni(tcp::socket::set_opt_reuse_address))
+		.add_var("set_opt_no_delay", make_cni(tcp::socket::set_opt_no_delay))
+		.add_var("set_opt_keep_alive", make_cni(tcp::socket::set_opt_keep_alive))
 		.add_var("available", make_cni(tcp::socket::available))
 		.add_var("receive", make_cni(tcp::socket::receive))
+		.add_var("read", make_cni(tcp::socket::read))
 		.add_var("send", make_cni(tcp::socket::send))
+		.add_var("write", make_cni(tcp::socket::write))
+		.add_var("local_endpoint", make_cni(tcp::socket::local_endpoint))
 		.add_var("remote_endpoint", make_cni(tcp::socket::remote_endpoint));
 		(*tcp::ep::ep_ext)
 		.add_var("address", make_cni(tcp::ep::address, true))
+		.add_var("is_v4", make_cni(tcp::ep::is_v4, true))
+		.add_var("is_v6", make_cni(tcp::ep::is_v6, true))
 		.add_var("port", make_cni(tcp::ep::port, true));
 		(*udp::udp_ext)
 		.add_var("socket", var::make_constant<type_t>(udp::socket::socket, type_id(typeid(udp::socket_t)), udp::socket::socket_ext))
@@ -382,68 +499,73 @@ namespace network_cs_ext {
 		.add_var("open_v4", make_cni(udp::socket::open_v4))
 		.add_var("open_v6", make_cni(udp::socket::open_v6))
 		.add_var("bind", make_cni(udp::socket::bind))
+		.add_var("connect", make_cni(udp::socket::connect))
 		.add_var("close", make_cni(udp::socket::close))
 		.add_var("is_open", make_cni(udp::socket::is_open))
 		.add_var("set_opt_reuse_address", make_cni(udp::socket::set_opt_reuse_address))
 		.add_var("set_opt_broadcast", make_cni(udp::socket::set_opt_broadcast))
 		.add_var("available", make_cni(udp::socket::available))
 		.add_var("receive_from", make_cni(udp::socket::receive_from))
-		.add_var("send_to", make_cni(udp::socket::send_to));
+		.add_var("send_to", make_cni(udp::socket::send_to))
+		.add_var("local_endpoint", make_cni(udp::socket::local_endpoint))
+		.add_var("remote_endpoint", make_cni(udp::socket::remote_endpoint));
 		(*udp::ep::ep_ext)
 		.add_var("address", make_cni(udp::ep::address, true))
+		.add_var("is_v4", make_cni(udp::ep::is_v4, true))
+		.add_var("is_v6", make_cni(udp::ep::is_v6, true))
 		.add_var("port", make_cni(udp::ep::port, true));
 	}
 }
 namespace cs_impl {
-	template<>
+	template <>
 	cs::namespace_t &get_ext<network_cs_ext::tcp::socket_t>()
 	{
 		return network_cs_ext::tcp::socket::socket_ext;
 	}
 
-	template<>
+	template <>
 	cs::namespace_t &get_ext<network_cs_ext::tcp::endpoint_t>()
 	{
 		return network_cs_ext::tcp::ep::ep_ext;
 	}
 
-	template<>
+	template <>
 	cs::namespace_t &get_ext<network_cs_ext::udp::socket_t>()
 	{
 		return network_cs_ext::udp::socket::socket_ext;
 	}
 
-	template<>
+	template <>
 	cs::namespace_t &get_ext<network_cs_ext::udp::endpoint_t>()
 	{
 		return network_cs_ext::udp::ep::ep_ext;
 	}
 
-	template<>
+	template <>
 	constexpr const char *get_name_of_type<network_cs_ext::tcp::socket_t>()
 	{
 		return "cs::network::tcp::socket";
 	}
 
-	template<>
+	template <>
 	constexpr const char *get_name_of_type<network_cs_ext::tcp::acceptor_t>()
 	{
 		return "cs::network::tcp::acceptor";
 	}
 
-	template<>
+	template <>
 	constexpr const char *get_name_of_type<network_cs_ext::tcp::endpoint_t>()
 	{
 		return "cs::network::tcp::endpoint";
 	}
 
-	template<>
+	template <>
 	constexpr const char *get_name_of_type<network_cs_ext::udp::socket_t>()
 	{
 		return "cs::network::udp::socket";
 	}
 
-	template<>
+	template <>
 	constexpr const char *get_name_of_type<network_cs_ext::udp::endpoint_t>()
 	{
 		return "cs::network::udp::endpoint";
