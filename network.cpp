@@ -549,6 +549,18 @@ namespace network_cs_ext {
 
 		static namespace_t async_ext = make_shared_namespace<name_space>();
 
+		state_t accept(tcp::socket_t &sock, tcp::acceptor_t &acceptor)
+		{
+			state_t state = std::make_shared<async_state>();
+			state->init = true;
+			state->done = false;
+			acceptor->async_accept(sock->get_raw(), [state](const asio::error_code &ec) {
+				state->ec = ec;
+				state->done.store(true, std::memory_order_release);
+			});
+			return state;
+		}
+
 		void read_until(tcp::socket_t &sock, state_t &state, const std::string &pattern)
 		{
 			if (!state->init) {
@@ -665,6 +677,7 @@ namespace network_cs_ext {
 		.add_var("get_endpoint", make_cni(async::get_endpoint));
 		(*async::async_ext)
 		.add_var("state", var::make_constant<type_t>(async::create_async_state, type_id(typeid(async::state_t)), async::state_ext))
+		.add_var("accept", make_cni(async::accept))
 		.add_var("read_until", make_cni(async::read_until))
 		.add_var("read", make_cni(async::read))
 		.add_var("write", make_cni(async::write))

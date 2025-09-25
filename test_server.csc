@@ -1,39 +1,34 @@
 import network
 using network
 
-function wait_for(co, time)
+function wait_for(state, time)
     var start_time = runtime.time()
-    var result = null
-    while (result = co.resume()) && runtime.time() - start_time < time
-        runtime.delay(10)
+    while !state.has_done()
+        async.poll_once()
+        if runtime.time() - start_time > time
+            break
+        else
+            runtime.delay(10)
+        end
     end
-    return result
 end
 
 var sock = new tcp.socket
 var acpt = tcp.acceptor(tcp.endpoint_v4(1024))
-var acpt_co = fiber.create([]()->runtime.await(sock.accept, acpt))
-
-var wait_times = 0
-while wait_for(acpt_co, 1000)
-    system.out.println("Waiting for " + ++wait_times + "s")
+var state = async.accept(sock, acpt)
+while !state.has_done()
+    system.out.println("Waiting...")
+    wait_for(state, 1000)
 end
-
-var state = new async.state
-
+state = new async.state
 loop
-    async.read_until(sock, state, "\r\n")
-    var start_time = runtime.time()
-    while !state.has_done()
-        async.poll_once()
-        if runtime.time() - start_time > 1000
-            system.out.println("Receiving...")
-            start_time = runtime.time()
-        end
-        runtime.delay(100)
-    end
-    system.out.print(state.get_result())
     if !async.poll()
         async.restart()
     end
+    async.read_until(sock, state, "\r\n")
+    while !state.has_done()
+        system.out.println("Receiving...")
+        wait_for(state, 1000)
+    end
+    system.out.print(state.get_result())
 end
