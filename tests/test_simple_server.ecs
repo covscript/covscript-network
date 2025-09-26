@@ -1,7 +1,7 @@
 import netutils
 # netutils.log_stream = system.out
 var server = new netutils.http_server
-server.worker_count = 2
+server.worker_count = 4
 server.bind_page("/", "./index.html", netutils.state_codes.code_200)
 server.bind_page("404", "./404.html", netutils.state_codes.code_404)
 server.bind_func("/test", [](session, data){
