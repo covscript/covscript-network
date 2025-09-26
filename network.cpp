@@ -25,6 +25,7 @@
 #include <covscript/cni.hpp>
 #include <atomic>
 #include <memory>
+#include <regex>
 
 namespace network_cs_ext {
 	using namespace cs;
@@ -468,7 +469,6 @@ namespace network_cs_ext {
 			std::atomic<bool> done;
 			std::size_t bytes_transferred = 0;
 			asio::streambuf buffer;
-			std::string pattern;
 			udp::endpoint_t endpoint;
 			asio::error_code ec;
 		};
@@ -561,6 +561,39 @@ namespace network_cs_ext {
 			return state;
 		}
 
+		state_t connect(tcp::socket_t &sock, const tcp::endpoint_t &ep)
+		{
+			state_t state = std::make_shared<async_state>();
+			state->init = true;
+			state->done = false;
+			sock->get_raw().async_connect(ep, [state](const asio::error_code &ec) {
+				state->ec = ec;
+				state->done.store(true, std::memory_order_release);
+			});
+			return state;
+		}
+
+		struct regex_match_condition {
+			using iterator = asio::buffers_iterator<asio::streambuf::const_buffers_type>;
+			using result_type = std::pair<iterator, bool>;
+
+			std::regex pattern;
+
+			regex_match_condition(const std::string &p) : pattern(p) {}
+
+			template <typename Iterator>
+			result_type operator()(Iterator begin, Iterator end) const
+			{
+				std::string data(begin, end);
+				std::smatch m;
+				if (std::regex_search(data, m, pattern)) {
+					auto match_end = begin + m.position() + m.length();
+					return {match_end, true};
+				}
+				return {end, false};
+			}
+		};
+
 		void read_until(tcp::socket_t &sock, state_t &state, const std::string &pattern)
 		{
 			if (!state->init) {
@@ -571,9 +604,8 @@ namespace network_cs_ext {
 			else if (!state->done.load(std::memory_order_acquire))
 				throw cs::lang_error("Last asynchronous operation have not done yet.");
 			state->done = false;
-			state->pattern = pattern;
 			state->ec.clear();
-			asio::async_read_until(sock->get_raw(), state->buffer, state->pattern, [state](const asio::error_code &ec, std::size_t bytes) {
+			asio::async_read_until(sock->get_raw(), state->buffer, regex_match_condition(pattern), [state](const asio::error_code &ec, std::size_t bytes) {
 				state->ec = ec;
 				state->bytes_transferred = bytes;
 				state->done.store(true, std::memory_order_release);
@@ -655,9 +687,23 @@ namespace network_cs_ext {
 			return cs_impl::network::get_io_context().poll_one() > 0;
 		}
 
+		bool stopped()
+		{
+			return cs_impl::network::get_io_context().stopped();
+		}
+
 		void restart()
 		{
 			cs_impl::network::get_io_context().restart();
+		}
+
+		using work_guard_t = asio::executor_work_guard<asio::io_context::executor_type>;
+
+		var work_guard()
+		{
+			if (stopped())
+				restart();
+			return var::make<work_guard_t>(cs_impl::network::get_io_context().get_executor());
 		}
 	}
 
@@ -678,6 +724,7 @@ namespace network_cs_ext {
 		(*async::async_ext)
 		.add_var("state", var::make_constant<type_t>(async::create_async_state, type_id(typeid(async::state_t)), async::state_ext))
 		.add_var("accept", make_cni(async::accept))
+		.add_var("connect", make_cni(async::connect))
 		.add_var("read_until", make_cni(async::read_until))
 		.add_var("read", make_cni(async::read))
 		.add_var("write", make_cni(async::write))
@@ -685,7 +732,9 @@ namespace network_cs_ext {
 		.add_var("send_to", make_cni(async::send_to))
 		.add_var("poll", make_cni(async::poll))
 		.add_var("poll_once", make_cni(async::poll_once))
-		.add_var("restart", make_cni(async::restart));
+		.add_var("stopped", make_cni(async::stopped))
+		.add_var("restart", make_cni(async::restart))
+		.add_var("work_guard", var::make_constant<type_t>(async::work_guard, type_id(typeid(async::work_guard_t))));
 		(*tcp::tcp_ext)
 		.add_var("socket", var::make_constant<type_t>(tcp::socket::socket, type_id(typeid(tcp::socket_t)), tcp::socket::socket_ext))
 		.add_var("acceptor", make_cni(tcp::acceptor, true))
@@ -807,6 +856,12 @@ namespace cs_impl {
 	constexpr const char *get_name_of_type<network_cs_ext::async::state_t>()
 	{
 		return "cs::network::async::state";
+	}
+
+	template <>
+	constexpr const char *get_name_of_type<network_cs_ext::async::work_guard_t>()
+	{
+		return "cs::network::async::work_guard";
 	}
 }
 
