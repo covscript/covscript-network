@@ -1,4 +1,4 @@
-#$cSYM/1.0(.\netutils.ecs):-,-,-,-,355,355,355,355,355,356,357,355,355,362,362,362,362,362,362,362,362,362,363,362,362,0,2,2,2,6,7,9,10,11,12,13,14,15,16,20,24,26,27,28,29,30,31,32,33,34,35,37,38,42,43,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,95,97,98,99,100,101,105,106,107,108,110,111,112,113,114,116,117,118,120,121,122,123,124,125,126,128,129,130,131,132,133,134,135,136,137,138,139,140,141,142,143,144,145,146,147,149,150,151,152,153,154,155,156,157,159,162,163,164,165,166,167,168,169,170,171,172,173,174,175,176,177,179,180,181,182,183,184,185,186,187,191,192,194,195,196,197,198,199,200,201,202,203,204,205,206,207,209,210,211,212,213,214,215,216,217,218,219,220,221,222,223,224,225,226,227,228,229,230,231,232,233,234,235,236,238,241,242,243,244,245,246,247,248,249,250,251,252,253,254,255,256,257,258,259,261,262,263,264,265,266,267,268,269,274,276,277,278,279,280,281,282,283,284,285,286,287,288,292,294,295,296,297,298,299,300,301,302,303,304,305,306,307,308,309,310,311,312,313,314,315,316,317,319,320,321,322,323,324,325,326,327,328,329,330,331,332,333,334,335,336,337,338,339,340,341,342,343,344,346,347,348,349,350,351,352,353,354,358,359,360,361,364,365,366,366,367,368,369,369,370,371,372,374,375,376,377,378,379,380,381,382,383,384,385,386,387,388,389,390
+#$cSYM/1.0(netutils.ecs):-,-,-,-,317,317,317,317,317,318,319,317,317,324,324,324,324,324,324,324,324,324,325,324,324,0,2,2,2,6,7,9,10,11,12,13,14,15,16,20,24,26,27,28,29,30,31,32,33,34,35,37,38,42,43,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98,99,100,101,102,103,104,105,106,107,108,109,110,114,116,117,118,119,120,124,125,127,128,129,131,132,133,134,135,137,138,139,141,142,143,144,145,146,147,148,149,150,151,152,153,154,155,156,157,158,159,160,161,163,164,165,166,167,168,169,170,171,172,173,174,175,176,177,178,179,180,181,182,183,184,185,186,187,189,191,192,193,194,195,196,197,198,199,200,201,202,203,204,205,206,207,208,209,210,211,212,213,215,216,217,218,219,220,221,223,224,225,226,227,228,229,231,232,233,234,235,236,237,238,239,240,241,242,243,247,249,250,251,252,253,254,255,256,257,258,259,260,261,262,263,264,265,266,267,268,269,270,271,272,274,275,276,277,278,279,280,281,282,283,284,285,286,287,288,289,290,291,292,293,294,295,296,297,298,299,301,302,303,304,305,306,307,309,310,311,312,313,314,315,316,320,321,322,323,326,327,328,328,329,330,331,331,332,333,334,336,337,338,339,340,341,342,343,344,345,346,347,348,349,350,351,352,353,354,355,356,357,358,359,360,361
 package netutils
 
 import network.*, regex, curl
@@ -82,13 +82,32 @@ class http_session
         end
     end
     function send_response(code, data, type)
-        sock.send("HTTP/" + version + " " + code + "\r\n")
-        sock.send(compose_http_time() + "\r\n")
-        sock.send("Connection: " + connection)
-        sock.send("Content-Length: " + data.size + "\r\n")
-        sock.send("Content-Type: " + type + "\r\n")
-        sock.send("\r\n")
-        sock.send(data)
+        var conn = connection
+        if conn == null || conn.empty()
+            conn = "keep-alive"
+        end
+        var content_len = to_string(data.size)
+        var resp = new string
+        resp.append("HTTP/" + version + " " + code + "\r\n")
+        resp.append(compose_http_time() + "\r\n")
+        resp.append("Server: CovScript-HTTP/1.0\r\n")
+        resp.append("Connection: " + conn + "\r\n")
+        resp.append("Content-Length: " + content_len + "\r\n")
+        resp.append("Content-Type: " + type + "\r\n")
+        resp.append("\r\n")
+        resp.append(data)
+        var state = async.write(sock, resp)
+        loop
+            async.poll()
+            if state.has_done()
+                break
+            else
+                fiber.yield()
+            end
+        end
+        if state.get_error() != null
+            system.out.println("Error: " + state.get_error())
+        end
     end
 end
 
@@ -102,10 +121,12 @@ function log(msg)
     end
 end
 
-# Coroutines
+# Workers
 
 struct worker_type
     var co = null
+    # 0 = init, 1 = wait, 2 = busy
+    var state = 0
     var server = null
 end
 
@@ -115,88 +136,14 @@ function wait_sock(sock, size)
     end
 end
 
-function fiber_main(self)
-    constant buffer_size = 256
+function worker_main(self)
     loop
-        # Accept new connection
-        while self->server->ac_lock
-            fiber.yield()
-        end
-        self->server->ac_lock = true
-        var sock = new tcp.socket
-        runtime.await(sock.accept, self->server->ac)
-        self->server->ac_lock = false
-        # Process request
-        var header = new array
-        var buffer = new string
-        loop
-            wait_sock(sock, 1)
-            var str = sock.receive(buffer_size)
-            var skip_cntl_n = false
-            var end_of_header = 0
-            foreach ch in str
-                if end_of_header == 2
-                    buffer.append(ch)
-                    continue
-                end
-                if skip_cntl_n
-                    skip_cntl_n = false
-                    if ch == '\n'
-                        header.push_back(buffer)
-                        buffer = new string
-                        ++end_of_header
-                        continue
-                    end
-                    # log("Data transmission error: expected \\n after \\r.")
-                end
-                if ch == '\r'
-                    skip_cntl_n = true
-                    continue
-                end
-                end_of_header = 0
-                buffer.append(ch)
-            end
-        until end_of_header == 2
-        # Construct session
-        var session = new http_session{sock, header}
-        # log("Received: Method = " + session.method + ", URL = " + session.url + ", Host = " + session.host)
-        # Receive POST data
-        var data = null
-        if session.method == "POST"
-            data = buffer
-            if session.content_length > buffer.size
-                var last_length = session.content_length - buffer.size
-                while last_length > buffer_size
-                    wait_sock(sock, buffer_size)
-                    data.append(sock.receive(buffer_size))
-                    last_length -= buffer_size
-                end
-                wait_sock(sock, last_length)
-                data.append(sock.receive(last_length))
-            end
-        else
-            data = session.args
-        end
-        # Calling function
-        link url_map = self->server->url_map
-        if url_map.exist(session.url)
-            url_map[session.url](session, data)
-        else
-            url_map["404"](session, data)
-        end
-        sock.close()
-    end
-end
-
-# ASIO
-
-function asio_main(self)
-    loop
+        self->state = 1
         # Accept new connection
         var sock = new tcp.socket
-        var state = async.accept(sock, self->server->ac)
+        var state = async.accept(sock, self->server->acceptor)
         loop
-            async.poll_once()
+            async.poll()
             if state.has_done()
                 break
             else
@@ -207,73 +154,81 @@ function asio_main(self)
             system.out.println("Error: " + state.get_error())
             continue
         end
-        # Process request
-        var header = new array
-        var error = false
-        state = new async.state
+        self->state = 2
+        sock.set_opt_no_delay(true)
+        var last_request_time = runtime.time()
         loop
-            async.read_until(sock, state, "\r\n")
+            if runtime.time() - last_request_time > self->server->keep_alive_timeout
+                break
+            end
+            # Read HTTP headers
+            var header = new array
+            state = new async.state
             loop
-                async.poll_once()
-                if state.has_done()
-                    break
-                else
-                    fiber.yield()
-                end
-            end
-            if state.get_error() != null
-                system.out.println("Error: " + state.get_error())
-                error = true
-                break
-            end
-            var line = state.get_result()
-            line = line.substr(0, line.size - 2)
-            if line.empty()
-                break
-            end
-            header.push_back(move(line))
-        end
-        if error
-            continue
-        end
-        # Construct session
-        var session = new http_session{sock, header}
-        # log("Received: Method = " + session.method + ", URL = " + session.url + ", Host = " + session.host)
-        # Receive POST data
-        var data = null
-        if session.method == "POST"
-            data = state.get_buffer()
-            var last_length = session.content_length - data.size
-            if last_length > 0
-                state = async.read(sock, last_length)
+                async.read_until(sock, state, "\r\n")
                 loop
-                    async.poll_once()
+                    async.poll()
                     if state.has_done()
                         break
                     else
                         fiber.yield()
                     end
                 end
-                data.append(state.get_result())
+                if state.eof() || state.get_error() != null
+                    break
+                end
+                var line = state.get_result()
+                line = line.substr(0, line.size - 2)
+                if line.empty()
+                    break
+                end
+                header.push_back(move(line))
             end
-        else
-            data = session.args
-        end
-        # Calling function
-        link url_map = self->server->url_map
-        if url_map.exist(session.url)
-            url_map[session.url](session, data)
-        else
-            url_map["404"](session, data)
+            if state.eof() || state.get_error() != null || header.empty()
+                break
+            end
+            # Construct HTTP session
+            var session = new http_session{sock, header}
+            # Read POST data if needed
+            var data = null
+            if session.method == "POST"
+                data = state.get_buffer()
+                var remaining = session.content_length - data.size
+                while remaining > 0
+                    state = async.read(sock, remaining)
+                    loop
+                        async.poll()
+                        if state.has_done()
+                            break
+                        else
+                            fiber.yield()
+                        end
+                    end
+                    if state.eof() || state.get_error() != null
+                        break
+                    end
+                    data.append(state.get_result())
+                    remaining = session.content_length - data.size
+                end
+            else
+                data = session.args
+            end
+            # Call handler
+            link url_map = self->server->url_map
+            if url_map.exist(session.url)
+                url_map[session.url](session, data)
+            else
+                url_map["404"](session, data)
+            end
+            last_request_time = runtime.time()
+            # Keep-Alive check
+            if session.version == "HTTP/1.0" || (session.connection != null && session.connection.tolower() == "close")
+                break
+            end
         end
         sock.close()
     end
 end
-
-var worker_map = {
-    "fiber": fiber_main,
-    "asio": asio_main
-} as hash_map
 
 function read_file(path)
     var ifs = iostream.ifstream(path)
@@ -345,14 +300,21 @@ function http_post(url, post_fields)
     end
 end
 
+function local_addr()
+    var sock = new udp.socket
+    sock.connect(udp.endpoint("8.8.8.8", 53))
+    var addr = sock.local_endpoint().address()
+    sock.close()
+    return addr
+end
+
 class http_server
-    var ac = null
-    var ac_lock = false
+    var acceptor = null
     var async_guard = null
-    var worker_impl = "asio"
     var url_map = new hash_map
     var worker_list = new array
-    var worker_count = 10
+    var worker_count = 4
+    var keep_alive_timeout = 10000
     function initialize()
         url_map.insert("404", [](session, post_data){
             var response_data = "<html><head><meta charset=\"UTF-8\"></head><body><p>404 Not Found: " + session.url + "</p></body></html>"
@@ -369,20 +331,29 @@ class http_server
         url_map.insert(url, func)
     end
     function listen(port : integer)
-        ac = tcp.acceptor(tcp.endpoint_v4(port))
+        acceptor = tcp.acceptor(tcp.endpoint_v4(port))
     end
-    function run()
+    function init()
         # Init workers
-        if worker_impl == "asio"
-            async_guard = new async.work_guard
-        end
+        async_guard = new async.work_guard
         foreach it in range(worker_count)
             var worker = gcnew worker_type
             worker->server = &this
-            worker->co = fiber.create(worker_map[worker_impl], worker)
+            worker->co = fiber.create(worker_main, worker)
             worker->co.resume()
             worker_list.push_back(worker)
         end
+    end
+    function poll()
+        if async_guard is null
+            init()
+        end
+        foreach worker in worker_list
+            worker->co.resume()
+        end
+    end
+    function run()
+        init()
         loop
             foreach worker in worker_list
                 worker->co.resume()

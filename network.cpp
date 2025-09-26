@@ -526,6 +526,13 @@ namespace network_cs_ext {
 				return state->buffer.size();
 		}
 
+		bool eof(const state_t &state)
+		{
+			if (!state->done.load(std::memory_order_acquire))
+				return false;
+			return state->ec == asio::error::eof || state->ec == asio::error::connection_reset;
+		}
+
 		cs::var get_error(const state_t &state)
 		{
 			if (!state->done.load(std::memory_order_acquire))
@@ -718,6 +725,7 @@ namespace network_cs_ext {
 		.add_var("has_done", make_cni(async::has_done))
 		.add_var("get_result", make_cni(async::get_result))
 		.add_var("get_buffer", make_cni(async::get_buffer))
+		.add_var("eof", make_cni(async::eof))
 		.add_var("available", make_cni(async::available))
 		.add_var("get_error", make_cni(async::get_error))
 		.add_var("get_endpoint", make_cni(async::get_endpoint));
