@@ -1,0 +1,17 @@
+import netutils
+# netutils.log_stream = system.out
+var server = new netutils.http_server
+server.worker_impl = "asio"
+server.bind_page("/", "./index.html", netutils.state_codes.code_200)
+server.bind_page("404", "./404.html", netutils.state_codes.code_404)
+server.bind_func("/test", [](session, data){
+    # Simple ECHO Server
+    if session.method != "POST"
+        session.send_response(netutils.state_codes.code_400, "Please use POST method. Data = " + data, "text/plain")
+    else
+        session.send_response(netutils.state_codes.code_200, data, "text/plain")
+    end
+})
+server.listen(8080)
+system.out.println("Starting HTTP server at http://127.0.0.1:8080/")
+server.run()

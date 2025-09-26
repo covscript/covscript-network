@@ -1,0 +1,20 @@
+import netutils
+
+var time = runtime.time()
+var count = 0
+var avg = 0
+loop
+    var data = to_string(math.randint(1000000000, 9999999999))
+    var response = netutils.http_post("http://127.0.0.1:8080/test", data)
+    if response != data
+        system.out.println("ERROR: " + response)
+        break
+    end
+    if runtime.time() - time >= 1000
+        avg = (avg == 0 ? count : ((avg + count) / 2) as integer)
+        system.out.println("Concurrency: " + avg)
+        time = runtime.time()
+        count = 0
+    end
+    ++count
+end

@@ -496,7 +496,7 @@ namespace network_cs_ext {
 			if (state->ec)
 				throw cs::lang_error("Asynchronous operation has encountered an error: " + state->ec.message());
 			if (state->bytes_transferred == 0)
-				return cs::null_pointer;
+				return cs::var::make<cs::string>();
 			std::string data(asio::buffers_begin(state->buffer.data()), asio::buffers_begin(state->buffer.data()) + state->bytes_transferred);
 			state->buffer.consume(state->bytes_transferred);
 			state->bytes_transferred = 0;
@@ -512,7 +512,7 @@ namespace network_cs_ext {
 			if (state->ec)
 				throw cs::lang_error("Asynchronous operation has encountered an error: " + state->ec.message());
 			if (state->buffer.size() == 0)
-				return cs::null_pointer;
+				return cs::var::make<cs::string>();
 			std::string data(asio::buffers_begin(state->buffer.data()), asio::buffers_end(state->buffer.data()));
 			state->buffer.consume(data.size());
 			return cs::var::make<cs::string>(std::move(data));
