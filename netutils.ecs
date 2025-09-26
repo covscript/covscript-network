@@ -50,6 +50,14 @@ function compose_response(code)
         "Content-Length: 0\r\n\r\n"
 end
 
+var log_stream = null
+
+function log(msg)
+    if log_stream != null
+        log_stream.println("[" + compose_http_time() + "]: " + msg)
+    end
+end
+
 function async_send(sock, resp)
     if !sock.is_open()
         return
@@ -64,7 +72,7 @@ function async_send(sock, resp)
         end
     end
     if state.get_error() != null
-        system.out.println("Send Error: " + state.get_error())
+        log("Send Error: " + state.get_error())
     end
 end
 
@@ -124,16 +132,6 @@ class http_session
     end
 end
 
-# Logs
-
-var log_stream = null
-
-function log(msg)
-    if log_stream != null
-        log_stream.println("[" + compose_http_time() + "]: " + msg)
-    end
-end
-
 # Workers
 
 struct worker_type
@@ -179,14 +177,15 @@ function worker_main(self)
             end
         end
         if state.get_error() != null
-            system.out.println("Accept Error: " + state.get_error())
+            log("Accept Error: " + state.get_error())
             continue
         end
         self->state = 2
         sock.set_opt_no_delay(true)
         var last_request_time = runtime.time()
+        var request_count = 0
         loop
-            if runtime.time() - last_request_time > self->server->keep_alive_timeout
+            if request_count >= self->server->max_keep_alive || runtime.time() - last_request_time > self->server->keep_alive_timeout
                 async_send(sock, compose_response(state_codes.code_408))
                 break
             end
@@ -228,6 +227,8 @@ function worker_main(self)
             end
             # Construct HTTP session
             var session = new http_session{sock, header}
+            log("Received: Method = " + session.method + ", URL = " + session.url + ", Host = " + session.host)
+            ++request_count
             # Read POST data if needed
             var data = null
             if session.method == "POST"
@@ -364,6 +365,7 @@ class http_server
     var worker_list = new array
     var worker_count = 4
     var keep_alive_timeout = 5000
+    var max_keep_alive = 100
     function initialize()
         url_map.insert("404", [](session, post_data){
             var response_data = "<html><head><meta charset=\"UTF-8\"></head><body><p>404 Not Found: " + session.url + "</p></body></html>"
