@@ -1,25 +1,25 @@
 #pragma once
 /*
-* Covariant Script Network
-*
-* Licensed under the Apache License, Version 2.0 (the "License");
-* you may not use this file except in compliance with the License.
-* You may obtain a copy of the License at
-*
-*     http://www.apache.org/licenses/LICENSE-2.0
-*
-* Unless required by applicable law or agreed to in writing, software
-* distributed under the License is distributed on an "AS IS" BASIS,
-* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-* See the License for the specific language governing permissions and
-* limitations under the License.
-*
-* Copyright (C) 2017-2021 Michael Lee(李登淳)
-*
-* Email:   lee@covariant.cn, mikecovlee@163.com
-* Github:  https://github.com/mikecovlee
-* Website: http://covscript.org.cn
-*/
+ * Covariant Script Network
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * Copyright (C) 2017-2025 Michael Lee(李登淳)
+ *
+ * Email:   mikecovlee@163.com
+ * Github:  https://github.com/mikecovlee
+ * Website: http://covscript.org.cn
+ */
 #define ASIO_STANDALONE
 
 #if defined(__WIN32__) || defined(WIN32)
@@ -32,58 +32,47 @@
 
 namespace cs_impl {
 	namespace network {
-		static asio::io_service cs_net_service;
-
-		template<typename char_t=char>
-		class buffer final {
-			char_t *buff = nullptr;
-		public:
-			buffer() = delete;
-
-			buffer(const buffer &) = delete;
-
-			buffer(buffer &b) noexcept
-			{
-				std::swap(this->buff, b.buff);
-			}
-
-			buffer(std::size_t size) : buff(new char_t[size]) {}
-
-			~buffer()
-			{
-				delete[] buff;
-			}
-
-			char_t *get() const
-			{
-				return buff;
-			}
-		};
+		static asio::io_context &get_io_context()
+		{
+			static asio::io_context instance;
+			return instance;
+		}
 		namespace tcp {
 			using asio::ip::tcp;
-			static tcp::resolver resolver(cs_net_service);
 
 			tcp::acceptor acceptor(const tcp::endpoint &ep)
 			{
-				return std::move(tcp::acceptor(cs_net_service, ep));
+				return std::move(tcp::acceptor(get_io_context(), ep));
 			}
 
 			tcp::endpoint endpoint(const std::string &address, unsigned short port)
 			{
-				return std::move(tcp::endpoint(asio::ip::address::from_string(address), port));
+				return std::move(tcp::endpoint(asio::ip::make_address(address), port));
 			}
 
-			tcp::endpoint resolve(const std::string &host, const std::string &service)
+			cs::var resolve(const std::string &host, const std::string &service)
 			{
-				return *resolver.resolve({host, service});
+				static tcp::resolver resolver(get_io_context());
+				tcp::resolver::results_type results = resolver.resolve(host, service);
+				cs::var ret = cs::var::make<cs::array>();
+				cs::array &arr = ret.val<cs::array>();
+				for (auto &ep : results)
+					arr.push_back(cs::var::make<tcp::endpoint>(ep));
+				return ret;
 			}
 
 			class socket final {
 				tcp::socket sock;
+
 			public:
-				socket() : sock(cs_net_service) {}
+				socket() : sock(get_io_context()) {}
 
 				socket(const socket &) = delete;
+
+				tcp::socket &get_raw()
+				{
+					return sock;
+				}
 
 				void connect(const tcp::endpoint &ep)
 				{
@@ -105,6 +94,12 @@ namespace cs_impl {
 					return sock.is_open();
 				}
 
+				template <typename opt_t>
+				void set_option(opt_t &&opt)
+				{
+					sock.set_option(std::forward<opt_t>(opt));
+				}
+
 				std::size_t available()
 				{
 					return sock.available();
@@ -112,9 +107,16 @@ namespace cs_impl {
 
 				std::string receive(std::size_t maximum)
 				{
-					buffer<> buff(maximum);
-					std::size_t actually = sock.read_some(asio::buffer(buff.get(), maximum));
-					return std::string(buff.get(), actually);
+					std::vector<char> buff(maximum);
+					std::size_t actually = sock.read_some(asio::buffer(buff));
+					return std::string(buff.data(), actually);
+				}
+
+				std::string read(std::size_t size)
+				{
+					std::vector<char> buff(size);
+					std::size_t n = asio::read(sock, asio::buffer(buff));
+					return std::string(buff.data(), n);
 				}
 
 				void send(const std::string &s)
@@ -122,32 +124,58 @@ namespace cs_impl {
 					sock.write_some(asio::buffer(s));
 				}
 
+				void write(const std::string &s)
+				{
+					asio::write(sock, asio::buffer(s));
+				}
+
+				void shutdown()
+				{
+					sock.shutdown(tcp::socket::shutdown_both);
+				}
+
+				tcp::endpoint local_endpoint()
+				{
+					return sock.local_endpoint();
+				}
+
 				tcp::endpoint remote_endpoint()
 				{
-					return std::move(sock.remote_endpoint());
+					return sock.remote_endpoint();
 				}
 			};
 		}
 		namespace udp {
 			using asio::ip::udp;
-			static udp::resolver resolver(cs_net_service);
 
 			udp::endpoint endpoint(const std::string &address, unsigned short port)
 			{
-				return std::move(udp::endpoint(asio::ip::address::from_string(address), port));
+				return std::move(udp::endpoint(asio::ip::make_address(address), port));
 			}
 
-			udp::endpoint resolve(const std::string &host, const std::string &service)
+			cs::var resolve(const std::string &host, const std::string &service)
 			{
-				return *resolver.resolve({host, service});
+				static udp::resolver resolver(get_io_context());
+				udp::resolver::results_type results = resolver.resolve(host, service);
+				cs::var ret = cs::var::make<cs::array>();
+				cs::array &arr = ret.val<cs::array>();
+				for (auto &ep : results)
+					arr.push_back(cs::var::make<udp::endpoint>(ep));
+				return ret;
 			}
 
 			class socket final {
 				udp::socket sock;
+
 			public:
-				socket() : sock(cs_net_service) {}
+				socket() : sock(get_io_context()) {}
 
 				socket(const socket &) = delete;
+
+				udp::socket &get_raw()
+				{
+					return sock;
+				}
 
 				void open_v4()
 				{
@@ -164,6 +192,11 @@ namespace cs_impl {
 					sock.bind(ep);
 				}
 
+				void connect(const udp::endpoint &ep)
+				{
+					sock.connect(ep);
+				}
+
 				void close()
 				{
 					sock.close();
@@ -174,7 +207,7 @@ namespace cs_impl {
 					return sock.is_open();
 				}
 
-				template<typename opt_t>
+				template <typename opt_t>
 				void set_option(opt_t &&opt)
 				{
 					sock.set_option(std::forward<opt_t>(opt));
@@ -187,14 +220,24 @@ namespace cs_impl {
 
 				std::string receive_from(std::size_t maximum, udp::endpoint &ep)
 				{
-					buffer<> buff(maximum);
-					std::size_t actually = sock.receive_from(asio::buffer(buff.get(), maximum), ep);
-					return std::string(buff.get(), actually);
+					std::vector<char> buff(maximum);
+					std::size_t actually = sock.receive_from(asio::buffer(buff), ep);
+					return std::string(buff.data(), actually);
 				}
 
 				void send_to(const std::string &s, const udp::endpoint &ep)
 				{
 					sock.send_to(asio::buffer(s), ep);
+				}
+
+				udp::endpoint local_endpoint()
+				{
+					return sock.local_endpoint();
+				}
+
+				udp::endpoint remote_endpoint()
+				{
+					return sock.remote_endpoint();
 				}
 			};
 		}

@@ -2,7 +2,7 @@
 // any_completion_handler.hpp
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~
 //
-// Copyright (c) 2003-2023 Christopher M. Kohlhoff (chris at kohlhoff dot com)
+// Copyright (c) 2003-2025 Christopher M. Kohlhoff (chris at kohlhoff dot com)
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -128,7 +128,7 @@ public:
         (get_associated_immediate_executor)(handler_, candidate));
   }
 
-  void* allocate(std::size_t size, std::size_t align) const
+  void* allocate(std::size_t size, std::size_t align_size) const
   {
     typename std::allocator_traits<
       associated_allocator_t<Handler,
@@ -137,13 +137,13 @@ public:
             (get_associated_allocator)(handler_,
               asio::recycling_allocator<void>()));
 
-    std::size_t space = size + align - 1;
+    std::size_t space = size + align_size - 1;
     unsigned char* base =
       std::allocator_traits<decltype(alloc)>::allocate(
         alloc, space + sizeof(std::ptrdiff_t));
 
     void* p = base;
-    if (detail::align(align, size, p, space))
+    if (detail::align(align_size, size, p, space))
     {
       std::ptrdiff_t off = static_cast<unsigned char*>(p) - base;
       std::memcpy(static_cast<unsigned char*>(p) + size, &off, sizeof(off));
@@ -514,9 +514,15 @@ public:
   /// Allocate space for @c n objects of the allocator's value type.
   T* allocate(std::size_t n) const
   {
-    return static_cast<T*>(
-        fn_table_->allocate(
-          impl_, sizeof(T) * n, alignof(T)));
+    if (fn_table_)
+    {
+      return static_cast<T*>(
+          fn_table_->allocate(
+            impl_, sizeof(T) * n, alignof(T)));
+    }
+    std::bad_alloc ex;
+    asio::detail::throw_exception(ex);
+    return nullptr;
   }
 
   /// Deallocate space for @c n objects of the allocator's value type.
@@ -724,7 +730,7 @@ public:
   /// Get the associated cancellation slot.
   cancellation_slot_type get_cancellation_slot() const noexcept
   {
-    return impl_->get_cancellation_slot();
+    return impl_ ? impl_->get_cancellation_slot() : cancellation_slot_type();
   }
 
   /// Function call operator.
@@ -786,8 +792,10 @@ struct associated_executor<any_completion_handler<Signatures...>, Candidate>
   static type get(const any_completion_handler<Signatures...>& handler,
       const Candidate& candidate = Candidate()) noexcept
   {
-    return handler.fn_table_->executor(handler.impl_,
-        any_completion_executor(std::nothrow, candidate));
+    any_completion_executor any_candidate(std::nothrow, candidate);
+    return handler.fn_table_
+      ? handler.fn_table_->executor(handler.impl_, any_candidate)
+      : any_candidate;
   }
 };
 
@@ -800,8 +808,10 @@ struct associated_immediate_executor<
   static type get(const any_completion_handler<Signatures...>& handler,
       const Candidate& candidate = Candidate()) noexcept
   {
-    return handler.fn_table_->immediate_executor(handler.impl_,
-        any_io_executor(std::nothrow, candidate));
+    any_io_executor any_candidate(std::nothrow, candidate);
+    return handler.fn_table_
+      ? handler.fn_table_->immediate_executor(handler.impl_, any_candidate)
+      : any_candidate;
   }
 };
 

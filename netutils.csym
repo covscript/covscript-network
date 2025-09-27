@@ -1,0 +1,416 @@
+#$cSYM/1.0(./netutils.ecs):-,-,-,-,369,369,369,369,369,370,371,369,369,376,376,376,376,376,376,376,376,376,377,376,376,0,2,2,2,6,7,9,10,11,12,13,14,15,16,17,21,25,27,28,29,30,31,32,33,34,35,36,38,39,43,44,46,49,50,52,54,55,56,57,58,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98,99,100,101,102,103,104,105,106,107,108,109,110,111,112,113,114,115,116,117,118,119,120,121,122,123,124,125,126,127,128,129,130,131,132,136,137,139,140,141,143,144,145,146,147,149,150,151,152,153,154,155,156,157,158,159,160,161,162,164,165,166,168,169,170,171,172,173,174,175,176,177,178,179,180,181,182,183,184,185,186,187,188,189,190,192,193,194,195,196,197,198,199,200,201,201,202,203,204,205,206,206,207,208,209,210,210,211,212,213,213,214,215,216,217,218,219,220,221,222,223,224,225,226,228,229,230,232,233,234,235,236,237,238,239,240,241,242,242,243,244,245,246,247,247,248,249,250,251,251,252,253,254,254,255,256,257,258,259,260,261,262,263,264,266,267,268,269,270,271,272,274,275,276,277,278,279,280,282,283,284,285,286,287,288,289,290,291,292,293,294,298,300,301,302,303,304,305,306,307,308,309,310,311,312,313,314,315,316,317,318,319,320,321,322,323,325,326,327,328,329,330,331,332,333,334,335,336,337,338,339,340,341,342,343,344,345,346,347,348,349,350,352,353,354,355,356,357,358,360,361,362,363,364,365,366,367,368,372,373,374,375,378,379,380,380,381,382,383,383,384,385,386,388,389,390,391,392,393,394,395,396,397,398,399,400,401,402,403,404,405,406,407,408,409,410,411,412,413
+package netutils
+
+import network.*, regex, curl
+
+# Internal Functions
+
+var request_line_reg = regex.build("^([^ ]*) ([^? ]*)(\\?([^ ]*))? HTTP/([^ ]*)$")
+var request_header_reg = regex.build("^([^:]*): ?(.*)$")
+
+namespace state_codes
+    constant code_200 = "200 OK"
+    constant code_400 = "400 Bad Request"
+    constant code_403 = "403 Forbidden"
+    constant code_404 = "404 Not Found"
+    constant code_408 = "408 Request Timeout"
+    constant code_500 = "500 Internal Server Error"
+    constant code_503 = "503 Service Unavailable"
+end
+
+var wday_map = {
+    "Mon", "Tues", "Wed", "Thur", "Fri", "Sat", "Sun"
+}
+
+var mon_map = {
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+}
+
+function time_padding(obj, width)
+    var time = to_string(obj)
+    var last = width - time.size
+    if last <= 0
+        return time
+    end
+    var str = new string
+    foreach it in range(last) do str.append("0")
+    return str + time
+end
+
+function compose_http_time()
+    var tm = runtime.utc_time()
+    return "Date: " +
+        wday_map[tm.wday - 1] + ", " +
+        tm.mday + " " + mon_map[tm.mon] + " " + to_string(1900 + tm.year) + " " +
+        time_padding(tm.hour, 2) + ":" + time_padding(tm.min, 2) + ":" + time_padding(tm.sec, 2) + " GMT"
+end
+
+function compose_response(code)
+    return "HTTP/1.1 " + code + "\r\n" +
+        "Connection: close\r\n" +
+        "Content-Length: 0\r\n\r\n"
+end
+
+var log_stream = null
+
+function log(msg)
+    if log_stream != null
+        log_stream.println("[" + compose_http_time() + "]: " + msg)
+    end
+end
+
+function async_send(sock, resp)
+    if !sock.is_open()
+        return
+    end
+    var state = async.write(sock, resp)
+    loop
+        async.poll()
+        if state.has_done()
+            break
+        else
+            fiber.yield()
+        end
+    end
+    if state.get_error() != null
+        log("Send Error: " + state.get_error())
+    end
+end
+
+class http_session
+    var url = null
+    var args = null
+    var sock = null
+    var host = null
+    var method = null
+    var version = null
+    var connection = null
+    var content_length = null
+    function construct(socket, request_header)
+        sock = socket
+        var request_line = request_header.front
+        request_header.pop_front()
+        var match = request_line_reg.match(request_line)
+        if !match.empty()
+            method = match.str(1)
+            url = match.str(2)
+            args = match.str(4)
+            version = match.str(5)
+        end
+        foreach line in request_header
+            var match = request_header_reg.match(line)
+            if !match.empty()
+                switch match.str(1)
+                    case "Host"
+                        host = match.str(2)
+                    end
+                    case "Connection"
+                        connection = match.str(2)
+                    end
+                    case "Content-Length"
+                        content_length = match.str(2).to_number()
+                    end
+                end
+            end
+        end
+    end
+    function send_response(code, data, type)
+        var conn = connection
+        if conn == null || conn.empty()
+            conn = "keep-alive"
+        end
+        var content_len = to_string(data.size)
+        var resp = new string
+        resp.append("HTTP/" + version + " " + code + "\r\n")
+        resp.append(compose_http_time() + "\r\n")
+        resp.append("Server: CovScript-HTTP/1.0\r\n")
+        resp.append("Connection: " + conn + "\r\n")
+        resp.append("Content-Length: " + content_len + "\r\n")
+        resp.append("Content-Type: " + type + "\r\n")
+        resp.append("\r\n")
+        resp.append(data)
+        async_send(sock, resp)
+    end
+end
+
+# Workers
+
+struct worker_type
+    var co = null
+    # 0 = init, 1 = wait, 2 = busy
+    var state = 0
+    var server = null
+end
+
+function wait_sock(sock, size)
+    while sock.available() < size
+        fiber.yield()
+    end
+end
+
+function trim(str)
+    var beg = 0
+    var end = str.size - 1
+    while beg <= end && str[beg].isspace()
+        ++beg
+    end
+    while end >= beg && str[end].isspace()
+        --end
+    end
+    if beg > end
+        return ""
+    end
+    return str.substr(beg, end - beg + 1)
+end
+
+function worker_main(self)
+    loop
+        self->state = 1
+        # Accept new connection
+        var sock = new tcp.socket
+        var state = async.accept(sock, self->server->acceptor)
+        loop
+            async.poll()
+            if state.has_done()
+                break
+            else
+                fiber.yield()
+            end
+        end
+        if state.get_error() != null
+            log("Accept Error: " + state.get_error())
+            continue
+        end
+        self->state = 2
+        sock.set_opt_no_delay(true)
+        var last_request_time = runtime.time()
+        var request_count = 0
+        loop
+            if request_count >= self->server->max_keep_alive || runtime.time() - last_request_time > self->server->keep_alive_timeout
+                async_send(sock, compose_response(state_codes.code_408))
+                break
+            end
+            # Read HTTP headers
+            var header = new array
+            var error_code = null
+            state = new async.state
+            loop
+                async.read_until(sock, state, "\r\n")
+                loop
+                    async.poll()
+                    if state.has_done()
+                        break
+                    else if runtime.time() - last_request_time > self->server->keep_alive_timeout
+                        error_code = state_codes.code_408
+                        break
+                    else
+                        fiber.yield()
+                    end
+                end
+                if error_code != null
+                    break
+                else if state.get_error() != null 
+                    error_code = state_codes.code_500
+                    break
+                end
+                var line = trim(state.get_result())
+                if line.empty()
+                    break
+                end
+                header.push_back(move(line))
+            end
+            if error_code == null && header.empty()
+                error_code = state_codes.code_400
+            end
+            if error_code != null
+                async_send(sock, compose_response(error_code))
+                break
+            end
+            # Construct HTTP session
+            var session = new http_session{sock, header}
+            log("Received: Method = " + session.method + ", URL = " + session.url + ", Host = " + session.host)
+            ++request_count
+            # Read POST data if needed
+            var data = null
+            if session.method == "POST"
+                data = state.get_buffer()
+                var remaining = session.content_length - data.size
+                while remaining > 0
+                    state = async.read(sock, remaining)
+                    loop
+                        async.poll()
+                        if state.has_done()
+                            break
+                        else if runtime.time() - last_request_time > self->server->keep_alive_timeout
+                            error_code = state_codes.code_408
+                            break
+                        else
+                            fiber.yield()
+                        end
+                    end
+                    if error_code != null
+                        break
+                    else if state.get_error() != null
+                        error_code = state_codes.code_500
+                        break
+                    end
+                    data.append(state.get_result())
+                    remaining = session.content_length - data.size
+                end
+                if error_code != null
+                    async_send(sock, compose_response(error_code))
+                    break
+                end
+            else
+                data = session.args
+            end
+            # Call handler
+            link url_map = self->server->url_map
+            if url_map.exist(session.url)
+                url_map[session.url](session, data)
+            else
+                url_map["404"](session, data)
+            end
+            last_request_time = runtime.time()
+            # Keep-Alive check
+            if !sock.is_open() || session.version == "HTTP/1.0" || (session.connection != null && session.connection.tolower() == "close")
+                break
+            end
+        end
+        sock.close()
+    end
+end
+
+function read_file(path)
+    var ifs = iostream.ifstream(path)
+    var data = new string
+    loop
+        var ch = ifs.get()
+        if ifs.good() && !ifs.eof()
+            data.append(ch)
+        else
+            break
+        end
+    end
+    return move(data)
+end
+
+# Public Interfaces
+
+var proxy = null, timeout_ms = null, low_speed_limit = null
+
+function http_get(url)
+    var buff = new iostream.char_buff
+    var session = curl.make_session_os(buff.get_ostream())
+    session.set_url(url)
+    session.allow_redirect(true)
+    if proxy != null
+        session.set_proxy(proxy)
+    end
+    session.set_ssl_verify_host(false)
+    session.set_ssl_verify_peer(false)
+    if timeout_ms != null
+        session.set_connect_timeout_ms(timeout_ms)
+        session.set_accept_timeout_ms(timeout_ms)
+        session.set_low_speed_time(timeout_ms)
+    end
+    if low_speed_limit != null
+        session.set_low_speed_limit(low_speed_limit)
+    end
+    if session.perform()
+        return buff.get_string()
+    else
+        return null
+    end
+end
+
+function http_post(url, post_fields)
+    var buff = new iostream.char_buff
+    var session = curl.make_session_os(buff.get_ostream())
+    session.set_url(url)
+    session.allow_redirect(true)
+    if proxy != null
+        session.set_proxy(proxy)
+    end
+    session.set_http_post(true)
+    session.set_http_post_fields(post_fields)
+    session.set_ssl_verify_host(false)
+    session.set_ssl_verify_peer(false)
+    if timeout_ms != null
+        session.set_connect_timeout_ms(timeout_ms)
+        session.set_accept_timeout_ms(timeout_ms)
+        session.set_low_speed_time(timeout_ms)
+    end
+    if low_speed_limit != null
+        session.set_low_speed_limit(low_speed_limit)
+    end
+    if session.perform()
+        return buff.get_string()
+    else
+        return null
+    end
+end
+
+function local_addr()
+    var sock = new udp.socket
+    sock.connect(udp.endpoint("8.8.8.8", 53))
+    var addr = sock.local_endpoint().address()
+    sock.close()
+    return addr
+end
+
+class http_server
+    var acceptor = null
+    var async_guard = null
+    var url_map = new hash_map
+    var worker_list = new array
+    var worker_count = 4
+    var keep_alive_timeout = 5000
+    var max_keep_alive = 100
+    function initialize()
+        url_map.insert("404", [](session, post_data){
+            var response_data = "<html><head><meta charset=\"UTF-8\"></head><body><p>404 Not Found: " + session.url + "</p></body></html>"
+            session.send_response(state_codes.code_404, response_data, "text/html")
+        })
+    end
+    function bind_page(url, path, state_code)
+        var response_data = read_file(path)
+        url_map.insert(url, [response_data, state_code](session, post_data){
+            session.send_response(state_code, response_data, "text/html")
+        })
+    end
+    function bind_func(url, func : function)
+        url_map.insert(url, func)
+    end
+    function listen(port : integer)
+        acceptor = tcp.acceptor(tcp.endpoint_v4(port))
+    end
+    function init()
+        # Init workers
+        async_guard = new async.work_guard
+        foreach it in range(worker_count)
+            var worker = gcnew worker_type
+            worker->server = &this
+            worker->co = fiber.create(worker_main, worker)
+            worker->co.resume()
+            worker_list.push_back(worker)
+        end
+    end
+    function poll()
+        if async_guard is null
+            init()
+        end
+        foreach worker in worker_list
+            worker->co.resume()
+        end
+    end
+    function run()
+        init()
+        loop
+            foreach worker in worker_list
+                worker->co.resume()
+            end
+        end
+    end
+end
+
