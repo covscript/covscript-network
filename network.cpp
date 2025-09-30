@@ -23,6 +23,7 @@
 #include <network/network.hpp>
 #include <covscript/dll.hpp>
 #include <covscript/cni.hpp>
+#include <thread>
 #include <atomic>
 #include <memory>
 #include <regex>
@@ -461,40 +462,38 @@ namespace network_cs_ext {
 	// Asynchronous
 
 	namespace async {
-		struct async_state {
+		struct state_type {
 			bool init = false;
 			bool is_udp = false;
 			bool is_read = false;
-			bool is_read_until = false;
-			std::atomic<bool> done;
+			bool is_reentrant = false;
+			std::atomic<bool> has_done{false};
 			std::size_t bytes_transferred = 0;
+			udp::endpoint_t udp_endpoint;
 			asio::streambuf buffer;
-			udp::endpoint_t endpoint;
 			asio::error_code ec;
 		};
 
-		using state_t = std::shared_ptr<async_state>;
+		using state_t = std::shared_ptr<state_type>;
 
 		state_t create_async_state()
 		{
-			return std::make_shared<async_state>();
+			return std::make_shared<state_type>();
 		}
 
 		static namespace_t state_ext = make_shared_namespace<name_space>();
 
 		bool has_done(const state_t &state)
 		{
-			return state->done.load(std::memory_order_acquire);
+			return state->has_done.load(std::memory_order_acquire);
 		}
 
 		cs::var get_result(const state_t &state)
 		{
 			if (!state->is_read)
 				throw cs::lang_error("Asynchronous operation not a read/receive session.");
-			if (!state->done.load(std::memory_order_acquire))
+			if (!state->has_done.load(std::memory_order_acquire))
 				return cs::null_pointer;
-			if (state->ec)
-				throw cs::lang_error("Asynchronous operation has encountered an error: " + state->ec.message());
 			if (state->bytes_transferred == 0)
 				return cs::var::make<cs::string>();
 			std::string data(asio::buffers_begin(state->buffer.data()), asio::buffers_begin(state->buffer.data()) + state->bytes_transferred);
@@ -507,35 +506,34 @@ namespace network_cs_ext {
 		{
 			if (!state->is_read)
 				throw cs::lang_error("Asynchronous operation not a read/receive session.");
-			if (!state->done.load(std::memory_order_acquire))
+			if (!state->has_done.load(std::memory_order_acquire))
 				return cs::null_pointer;
-			if (state->ec)
-				throw cs::lang_error("Asynchronous operation has encountered an error: " + state->ec.message());
 			if (state->buffer.size() == 0)
 				return cs::var::make<cs::string>();
 			std::string data(asio::buffers_begin(state->buffer.data()), asio::buffers_end(state->buffer.data()));
 			state->buffer.consume(data.size());
+			state->bytes_transferred = 0;
 			return cs::var::make<cs::string>(std::move(data));
 		}
 
 		std::size_t available(const state_t &state)
 		{
-			if (!state->is_read || !state->done.load(std::memory_order_acquire) || state->ec)
-				return 0;
-			else
+			if (state->is_read && state->has_done.load(std::memory_order_acquire))
 				return state->buffer.size();
+			else
+				return 0;
 		}
 
 		bool eof(const state_t &state)
 		{
-			if (!state->done.load(std::memory_order_acquire))
+			if (!state->has_done.load(std::memory_order_acquire))
 				return false;
 			return state->ec == asio::error::eof || state->ec == asio::error::connection_reset;
 		}
 
 		cs::var get_error(const state_t &state)
 		{
-			if (!state->done.load(std::memory_order_acquire))
+			if (!state->has_done.load(std::memory_order_acquire))
 				return cs::null_pointer;
 			if (!state->ec)
 				return cs::null_pointer;
@@ -547,35 +545,74 @@ namespace network_cs_ext {
 		{
 			if (!state->is_udp || !state->is_read)
 				throw cs::lang_error("Asynchronous operation not a receive_from session.");
-			if (!state->done.load(std::memory_order_acquire))
+			if (!state->has_done.load(std::memory_order_acquire))
 				throw cs::lang_error("Asynchronous operation not finished.");
 			if (state->ec)
 				throw cs::lang_error("Asynchronous operation has encountered an error: " + state->ec.message());
-			return state->endpoint;
+			return state->udp_endpoint;
+		}
+
+		bool wait(const state_t &state)
+		{
+			asio::io_context &io = cs_impl::network::get_io_context();
+			while (true) {
+				io.poll();
+				if (state->has_done.load(std::memory_order_acquire))
+					return !state->ec;
+#if COVSCRIPT_ABI_VERSION >= 250908
+				if (cs::current_process->fiber_stack.empty())
+					std::this_thread::sleep_for(std::chrono::milliseconds(1));
+				else
+					cs::fiber::yield();
+#else
+				std::this_thread::sleep_for(std::chrono::milliseconds(1));
+#endif
+			}
+		}
+
+		bool wait_for(const state_t &state, size_t timeout_ms)
+		{
+			asio::io_context &io = cs_impl::network::get_io_context();
+			auto start = std::chrono::steady_clock::now();
+			std::chrono::milliseconds timeout_duration(timeout_ms);
+			while (true) {
+				io.poll();
+				if (state->has_done.load(std::memory_order_acquire))
+					return !state->ec;
+				auto now = std::chrono::steady_clock::now();
+				if (now - start >= timeout_duration)
+					return state->has_done.load(std::memory_order_acquire) && !state->ec;
+#if COVSCRIPT_ABI_VERSION >= 250908
+				if (cs::current_process->fiber_stack.empty())
+					std::this_thread::sleep_for(std::chrono::milliseconds(1));
+				else
+					cs::fiber::yield();
+#else
+				std::this_thread::sleep_for(std::chrono::milliseconds(1));
+#endif
+			}
 		}
 
 		static namespace_t async_ext = make_shared_namespace<name_space>();
 
 		state_t accept(tcp::socket_t &sock, tcp::acceptor_t &acceptor)
 		{
-			state_t state = std::make_shared<async_state>();
+			state_t state = std::make_shared<state_type>();
 			state->init = true;
-			state->done = false;
 			acceptor->async_accept(sock->get_raw(), [state](const asio::error_code &ec) {
 				state->ec = ec;
-				state->done.store(true, std::memory_order_release);
+				state->has_done.store(true, std::memory_order_release);
 			});
 			return state;
 		}
 
 		state_t connect(tcp::socket_t &sock, const tcp::endpoint_t &ep)
 		{
-			state_t state = std::make_shared<async_state>();
+			state_t state = std::make_shared<state_type>();
 			state->init = true;
-			state->done = false;
 			sock->get_raw().async_connect(ep, [state](const asio::error_code &ec) {
 				state->ec = ec;
-				state->done.store(true, std::memory_order_release);
+				state->has_done.store(true, std::memory_order_release);
 			});
 			return state;
 		}
@@ -591,9 +628,10 @@ namespace network_cs_ext {
 			template <typename Iterator>
 			result_type operator()(Iterator begin, Iterator end) const
 			{
-				std::string data(begin, end);
-				std::smatch m;
-				if (std::regex_search(data, m, pattern)) {
+				if (begin == end)
+					return {end, false};
+				std::match_results<Iterator> m;
+				if (std::regex_search(begin, end, m, pattern)) {
 					auto match_end = begin + m.position() + m.length();
 					return {match_end, true};
 				}
@@ -606,80 +644,78 @@ namespace network_cs_ext {
 			if (!state->init) {
 				state->init = true;
 				state->is_read = true;
-				state->is_read_until = true;
+				state->is_reentrant = true;
 			}
-			else if (!state->done.load(std::memory_order_acquire))
+			else if (!state->has_done.load(std::memory_order_acquire))
 				throw cs::lang_error("Last asynchronous operation have not done yet.");
-			state->done = false;
+			state->has_done = false;
 			state->ec.clear();
-			asio::async_read_until(sock->get_raw(), state->buffer, regex_match_condition(pattern), [state](const asio::error_code &ec, std::size_t bytes) {
-				state->ec = ec;
+			asio::async_read_until(sock->get_raw(), state->buffer, regex_match_condition(pattern),
+			[state](const asio::error_code &ec, std::size_t bytes) {
+				state->buffer.commit(bytes);
 				state->bytes_transferred = bytes;
-				state->done.store(true, std::memory_order_release);
+				state->ec = ec;
+				state->has_done.store(true, std::memory_order_release);
 			});
 		}
 
 		state_t read(tcp::socket_t &sock, std::size_t n)
 		{
-			state_t state = std::make_shared<async_state>();
+			state_t state = std::make_shared<state_type>();
 			state->init = true;
-			state->done = false;
 			state->is_read = true;
 			asio::async_read(sock->get_raw(), state->buffer.prepare(n), [state](const asio::error_code &ec, std::size_t bytes) {
 				state->buffer.commit(bytes);
-				state->ec = ec;
 				state->bytes_transferred = bytes;
-				state->done.store(true, std::memory_order_release);
+				state->ec = ec;
+				state->has_done.store(true, std::memory_order_release);
 			});
 			return state;
 		}
 
 		state_t write(tcp::socket_t &sock, const std::string &data)
 		{
-			state_t state = std::make_shared<async_state>();
+			state_t state = std::make_shared<state_type>();
 			state->init = true;
-			state->done = false;
 			std::ostream os(&state->buffer);
 			os << data;
 			asio::async_write(sock->get_raw(), state->buffer, [state](const asio::error_code &ec, std::size_t bytes) {
 				state->buffer.consume(bytes);
-				state->ec = ec;
 				state->bytes_transferred = bytes;
-				state->done.store(true, std::memory_order_release);
+				state->ec = ec;
+				state->has_done.store(true, std::memory_order_release);
 			});
 			return state;
 		}
 
 		state_t receive_from(udp::socket_t &sock, std::size_t n)
 		{
-			state_t state = std::make_shared<async_state>();
+			state_t state = std::make_shared<state_type>();
 			state->init = true;
-			state->done = false;
 			state->is_udp = true;
 			state->is_read = true;
-			sock->get_raw().async_receive_from(state->buffer.prepare(n), state->endpoint, [state](const asio::error_code &ec, std::size_t bytes) {
+			sock->get_raw().async_receive_from(state->buffer.prepare(n), state->udp_endpoint, [state](const asio::error_code &ec, std::size_t bytes) {
 				state->buffer.commit(bytes);
-				state->ec = ec;
 				state->bytes_transferred = bytes;
-				state->done.store(true, std::memory_order_release);
+				state->ec = ec;
+				state->has_done.store(true, std::memory_order_release);
 			});
 			return state;
 		}
 
 		state_t send_to(udp::socket_t &sock, const std::string &data, const udp::endpoint_t &ep)
 		{
-			state_t state = std::make_shared<async_state>();
+			state_t state = std::make_shared<state_type>();
 			state->init = true;
-			state->done = false;
 			state->is_udp = true;
-			state->endpoint = ep;
+			state->udp_endpoint = ep;
 			std::ostream os(&state->buffer);
 			os << data;
-			sock->get_raw().async_send_to(asio::buffer(state->buffer.data(), state->buffer.size()), state->endpoint, [state](const asio::error_code &ec, std::size_t bytes) {
+			sock->get_raw().async_send_to(asio::buffer(state->buffer.data(), state->buffer.size()), state->udp_endpoint, [state](const asio::error_code &ec, std::size_t bytes) {
 				state->buffer.consume(bytes);
-				state->ec = ec;
 				state->bytes_transferred = bytes;
-				state->done.store(true, std::memory_order_release);
+				state->ec = ec;
+				state->has_done.store(true, std::memory_order_release);
 			});
 			return state;
 		}
@@ -728,7 +764,9 @@ namespace network_cs_ext {
 		.add_var("eof", make_cni(async::eof))
 		.add_var("available", make_cni(async::available))
 		.add_var("get_error", make_cni(async::get_error))
-		.add_var("get_endpoint", make_cni(async::get_endpoint));
+		.add_var("get_endpoint", make_cni(async::get_endpoint))
+		.add_var("wait", make_cni(async::wait))
+		.add_var("wait_for", make_cni(async::wait_for));
 		(*async::async_ext)
 		.add_var("state", var::make_constant<type_t>(async::create_async_state, type_id(typeid(async::state_t)), async::state_ext))
 		.add_var("accept", make_cni(async::accept))
