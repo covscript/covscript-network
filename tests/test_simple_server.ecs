@@ -1,6 +1,8 @@
 import netutils
+
 var port = 8080
 # netutils.log_stream = system.out
+
 var server = new netutils.http_server
 server.worker_count = 4
 server.bind_page("/", "./index.html", netutils.state_codes.code_200)
@@ -15,21 +17,4 @@ server.bind_func("/test", [](session, data){
 })
 server.listen(port)
 system.out.println("Starting HTTP server at http://" + netutils.local_addr() + ":" + port + "/")
-if netutils.log_stream != null
-    var time = runtime.time()
-    loop
-        server.poll()
-        if runtime.time() - time >= 1000
-            var busy_count = 0
-            foreach it in server.worker_list
-                if it->state == 2
-                    ++busy_count
-                end
-            end
-            system.out.println("Worker Busy/Idle: " + busy_count + "/" + (server.worker_list.size - busy_count))
-            time = runtime.time()
-        end
-    end
-else
-    server.run()
-end
+server.run()

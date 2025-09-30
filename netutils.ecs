@@ -2,6 +2,9 @@ package netutils
 
 import network.*, regex, curl
 
+constant server_name = "CovScript-NetUtils"
+constant server_version = "1.1.2"
+
 # Internal Functions
 
 var request_line_reg = regex.build("^([A-Z]+) ([^ ?]+)(?:\\?([^ ]*))? HTTP/([0-9.]+)$")
@@ -72,6 +75,25 @@ function async_send(sock, resp)
     end
 end
 
+function read_file(path)
+    var ifs = iostream.ifstream(path)
+    var data = new string
+    var start_time = runtime.time()
+    loop
+        var ch = ifs.get()
+        if ifs.good() && !ifs.eof()
+            data.append(ch)
+        else
+            break
+        end
+        if runtime.time() - start_time > 10
+            fiber.yield()
+            start_time = runtime.time()
+        end
+    end
+    return move(data)
+end
+
 class http_session
     var url = null
     var args = null
@@ -81,6 +103,8 @@ class http_session
     var version = null
     var connection = null
     var content_length = null
+    var mtime_map = new hash_map
+    var content_map = new hash_map
     function construct(socket, request_header)
         sock = socket
         var request_line = request_header.front
@@ -101,30 +125,45 @@ class http_session
         foreach line in request_header
             var match = request_header_reg.match(line)
             if !match.empty()
-                switch match.str(1)
-                    case "Host"
+                switch match.str(1).tolower()
+                    case "host"
                         host = match.str(2)
                     end
-                    case "Connection"
+                    case "connection"
                         connection = match.str(2)
                     end
-                    case "Content-Length"
+                    case "content-length"
                         content_length = match.str(2).to_number()
                     end
                 end
             end
         end
     end
+    function read_file(path)
+        if mtime_map.exist(path)
+            var last_mtime = mtime_map[path]
+            var current_mtime = system.file.mtime(path)
+            if current_mtime == last_mtime && content_map.exist(path)
+                return content_map[path]
+            end
+            mtime_map[path] = current_mtime
+        else
+            mtime_map.insert(path, system.file.mtime(path))
+        end
+        var data = global.read_file(path)
+        content_map.insert(path, data)
+        return data
+    end
     function send_response(code, data, type)
         var conn = connection
         if conn == null || conn.empty()
-            conn = "keep-alive"
+            conn = (version <= "1.0" ? "close" : "keep-alive")
         end
         var content_len = to_string(data.size)
         var resp = new string
         resp.append("HTTP/" + version + " " + code + "\r\n")
         resp.append("Date: " + compose_http_time() + "\r\n")
-        resp.append("Server: CovScript-HTTP/1.0\r\n")
+        resp.append("Server: " + server_name + "/" + server_version + "\r\n")
         resp.append("Connection: " + conn + "\r\n")
         resp.append("Content-Length: " + content_len + "\r\n")
         resp.append("Content-Type: " + type + "\r\n")
@@ -174,7 +213,6 @@ function worker_main(self)
             log("Accept error: " + state.get_error())
             continue
         end
-        log("Incoming connection from " + sock.remote_endpoint().address())
         self->state = 2
         sock.set_opt_no_delay(true)
         var last_request_time = runtime.time()
@@ -259,23 +297,8 @@ function worker_main(self)
                 break
             end
         end
-        log("Closing connection from " + sock.remote_endpoint().address())
         sock.close()
     end
-end
-
-function read_file(path)
-    var ifs = iostream.ifstream(path)
-    var data = new string
-    loop
-        var ch = ifs.get()
-        if ifs.good() && !ifs.eof()
-            data.append(ch)
-        else
-            break
-        end
-    end
-    return move(data)
 end
 
 # Public Interfaces
@@ -357,9 +380,8 @@ class http_server
         })
     end
     function bind_page(url, path, state_code)
-        var response_data = read_file(path)
-        url_map.insert(url, [response_data, state_code](session, post_data){
-            session.send_response(state_code, response_data, "text/html")
+        url_map.insert(url, [path, state_code](session, post_data){
+            session.send_response(state_code, session.read_file(path), "text/html")
         })
     end
     function bind_func(url, func : function)

@@ -3,7 +3,7 @@
     "Name": "netutils.csym",
     "Info": "Network Utilities cSYM Module",
     "Author": "CovScript Organization",
-    "Version": "1.1.1",
+    "Version": "1.1.2",
     "Target": "netutils.csym",
     "Dependencies": [
         "netutils"
