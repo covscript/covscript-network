@@ -48,3 +48,5 @@ cmake-build/
 
 *.orig
 .ecs_output/
+
+tests/netutils.*

@@ -1,10 +1,10 @@
-#$cSYM/1.0(./netutils.ecs):-,-,-,-,376,376,376,376,376,377,378,376,376,382,382,382,382,382,382,382,382,382,383,382,382,0,2,2,2,4,5,9,10,12,13,14,15,16,17,18,19,20,24,29,31,32,33,34,35,36,37,38,39,40,42,43,50,51,53,56,57,59,61,62,63,64,65,67,68,69,70,71,72,73,74,75,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,96,97,98,99,100,101,102,103,104,105,106,107,108,109,110,111,112,113,114,115,116,117,118,119,120,121,122,123,124,125,126,127,128,129,130,131,132,133,134,135,136,137,138,139,140,141,142,143,144,145,146,147,148,149,150,151,152,153,154,155,156,157,158,159,160,161,162,163,164,165,166,167,168,169,170,171,172,173,177,178,180,181,182,184,185,186,187,188,190,191,192,193,194,195,196,197,198,199,200,201,202,203,205,206,207,209,210,211,212,213,214,215,216,217,218,219,220,221,222,223,224,226,227,228,229,230,231,232,233,234,235,236,237,238,239,240,241,242,243,244,245,246,247,248,249,250,251,252,253,254,256,257,259,260,261,262,263,264,265,266,267,268,269,270,271,272,273,274,275,276,277,278,279,280,281,282,283,284,285,287,288,289,290,291,292,293,295,296,297,298,299,300,301,305,307,308,309,310,311,312,313,314,315,316,317,318,319,320,321,322,323,324,325,326,327,328,329,330,332,333,334,335,336,337,338,339,340,341,342,343,344,345,346,347,348,349,350,351,352,353,354,355,356,357,359,360,361,362,363,364,365,367,368,369,370,371,372,373,374,375,379,380,381,384,385,386,386,387,388,389,389,390,391,392,394,395,396,397,398,399,400,401,402,403,404,405,406,407,408,409,410,411,412,413,414,415,416,417,418,419
+#$cSYM/1.0(./netutils.ecs):-,-,-,-,547,547,547,547,547,547,547,547,547,548,547,547,554,554,554,554,554,554,554,554,554,555,554,554,0,2,2,2,4,5,9,10,12,13,14,15,16,17,18,19,20,24,29,31,32,33,34,35,36,37,38,39,40,42,43,50,51,53,56,57,59,61,62,63,64,65,67,68,69,70,71,72,73,74,75,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,97,98,99,100,101,102,103,104,105,106,107,108,109,110,111,112,113,114,115,116,117,118,119,120,121,122,123,124,125,126,127,128,129,130,131,132,133,134,135,136,137,138,139,140,141,142,143,144,145,146,147,148,149,150,151,152,153,154,154,155,156,156,157,158,158,158,159,160,161,162,163,164,165,166,179,181,182,183,184,185,186,187,188,189,190,191,192,194,195,196,197,198,199,200,201,202,203,204,205,206,207,208,209,210,211,212,213,214,215,216,217,218,219,220,221,222,223,224,225,226,227,228,229,230,231,232,233,234,235,236,237,238,239,240,241,242,243,244,245,246,247,248,249,250,251,252,253,254,258,259,261,262,263,265,266,267,268,269,271,272,273,274,275,276,277,278,279,280,281,282,283,284,286,287,288,290,291,292,293,294,295,296,297,298,299,300,301,302,303,304,305,307,308,309,310,311,312,313,314,315,316,317,318,319,320,321,322,323,324,325,326,327,328,329,330,331,332,333,334,335,336,338,339,341,342,343,344,345,346,347,348,349,350,351,352,353,354,355,356,357,358,359,360,361,362,363,364,365,366,367,369,370,371,372,372,373,374,375,376,377,378,379,380,381,382,383,384,385,386,387,388,389,390,391,392,393,394,395,396,397,398,399,399,400,401,402,403,404,405,406,407,408,410,411,412,413,414,415,416,420,422,423,424,425,426,427,428,429,430,431,432,433,434,435,436,437,438,439,440,441,442,443,444,445,447,448,449,450,451,452,453,454,455,456,457,458,459,460,461,462,463,464,465,466,467,468,469,470,471,472,474,475,476,477,478,479,480,482,483,484,485,486,487,488,489,490,491,492,494,495,496,497,498,499,500,501,502,503,504,505,506,507,508,509,510,512,513,514,515,516,517,518,519,520,521,523,524,525,526,527,528,529,530,531,532,533,534,535,536,537,538,539,540,541,542,543,544,545,546,549,550,551,552,553,556,557,558,559,559,560,561,562,563,563,564,565,566,567,568,569,570,571,572,573,574,575,576,577,578,579,580,581,582,583,584
 package netutils
 
 import network.*, regex, curl
 
 constant server_name = "CovScript-NetUtils"
-constant server_version = "1.1.2"
+constant server_version = "1.1.3"
 
 # Internal Functions
 
@@ -77,22 +77,120 @@ function async_send(sock, resp)
 end
 
 function read_file(path)
-    var ifs = iostream.ifstream(path)
-    var data = new string
     var start_time = runtime.time()
+    var ifs = iostream.fstream(path, iostream.openmode.bin_in)
+    var data = new iostream.char_buff
+    var ofs = data.get_ostream()
     loop
         var ch = ifs.get()
         if ifs.good() && !ifs.eof()
-            data.append(ch)
+            ofs.put(ch)
         else
             break
         end
-        if runtime.time() - start_time > 10
+        if runtime.time() - start_time > 100
             fiber.yield()
             start_time = runtime.time()
         end
     end
-    return move(data)
+    return data.get_string()
+end
+
+function path_normalize(path)
+    if path == null || path.empty()
+        return "."
+    end
+    var alt_sep = (system.path.separator == '/' ? '\\' : '/')
+    var is_unc = false
+    var is_abs = false
+    var drive_letter = ""
+    var norm_path = new string
+    foreach ch in path
+        if ch == alt_sep
+            norm_path.append('/')
+        else
+            norm_path.append(ch)
+        end
+    end
+    context.unlink_var("path")
+    path = norm_path
+    if system.path.separator == '\\'
+        if path.find("//", 0) == 0  # UNC Path
+            is_unc = true
+            path = path.substr(2, path.size - 2)
+        else
+            var m = regex.build("^([A-Za-z]:)").match(path)
+            if !m.empty()
+                drive_letter = m.str(1)
+                path = path.substr(drive_letter.size, path.size - drive_letter.size)
+                is_abs = true
+            end
+        end
+        is_abs = is_abs or is_unc
+    else
+        if path.find("/", 0) == 0
+            is_abs = true
+        end
+    end
+    var components = path.split({'/'})
+    var stack = new array
+    foreach comp in components
+        if comp.empty() or comp == "."
+            continue
+        end
+        if comp == ".."
+            if stack.size > 0 and stack.back != ".."
+                stack.pop_back()
+            else
+                if !is_abs
+                    stack.push_back("..")
+                end
+            end
+        else
+            stack.push_back(comp)
+        end
+    end
+    var result = new string
+    if is_unc
+        result = "//"
+    else if drive_letter != ""
+        result = drive_letter
+    else if is_abs
+        result = "/"
+    end
+    foreach comp in stack
+        if !result.empty() and result[-1] != '/'
+            result.append("/")
+        end
+        result.append(comp)
+    end
+    return result
+end
+
+var mime_map = {
+    ".html": "text/html",
+    ".htm": "text/html",
+    ".txt": "text/plain",
+    ".js": "application/javascript",
+    ".css": "text/css",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".json": "application/json"
+} as hash_map
+
+function get_mime(path)
+    var pos = path.rfind(".", path.size - 1)
+    if pos == -1
+        return "application/octet-stream"
+    end
+    var ext = path.substr(pos, path.size - pos).tolower()
+    if mime_map.exist(ext)
+        return mime_map[ext]
+    else
+        return "application/octet-stream"
+    end
 end
 
 class http_session
@@ -104,8 +202,6 @@ class http_session
     var version = null
     var connection = null
     var content_length = null
-    var mtime_map = new hash_map
-    var content_map = new hash_map
     function construct(socket, request_header)
         sock = socket
         var request_line = request_header.front
@@ -139,21 +235,6 @@ class http_session
                 end
             end
         end
-    end
-    function read_file(path)
-        if mtime_map.exist(path)
-            var last_mtime = mtime_map[path]
-            var current_mtime = system.file.mtime(path)
-            if current_mtime == last_mtime && content_map.exist(path)
-                return content_map[path]
-            end
-            mtime_map[path] = current_mtime
-        else
-            mtime_map.insert(path, system.file.mtime(path))
-        end
-        var data = global.read_file(path)
-        content_map.insert(path, data)
-        return data
     end
     function send_response(code, data, type)
         var conn = connection
@@ -248,6 +329,7 @@ function worker_main(self)
                 header.push_back(move(line))
             end
             if error_code == null && header.empty()
+                log("Read request header error: Empty request.")
                 error_code = state_codes.code_400
             end
             if error_code != null
@@ -260,7 +342,7 @@ function worker_main(self)
             # Read POST data if needed
             var data = null
             if session.method == "POST"
-                data = state.get_buffer()
+                data = state.get_buffer(session.content_length)
                 var remaining = session.content_length - data.size
                 while remaining > 0
                     state = async.read(sock, remaining)
@@ -288,13 +370,46 @@ function worker_main(self)
             # Call handler
             link url_map = self->server->url_map
             if url_map.exist(session.url)
-                url_map[session.url](session, data)
+                url_map[session.url](*self->server, session, data)
+            else if self->server->wwwroot_path != null
+                var base_path = self->server->wwwroot_path
+                var full_path = path_normalize(base_path + "/" + session.url)
+                log("Resolved path: " + full_path)
+                if full_path.find(base_path, 0) == 0
+                    if system.path.is_directory(full_path)
+                        if full_path[-1] != '/'
+                            full_path.append('/')
+                        end
+                        full_path.append("index.html")
+                        log("Directory request, try to serve: " + full_path)
+                    end
+                    if system.path.is_file(full_path) && system.file.can_read(full_path)
+                        log("Serving file: " + full_path)
+                        session.send_response(state_codes.code_200, self->server->read_file(full_path), get_mime(full_path))
+                    else
+                        if system.file.exist(full_path)
+                            error_code = state_codes.code_403
+                        else
+                            error_code = state_codes.code_404
+                        end
+                    end
+                else
+                    error_code = state_codes.code_403
+                end
             else
-                url_map["404"](session, data)
+                error_code = state_codes.code_403
+            end
+            if error_code != null
+                log("Resolving resource error: " + error_code)
+                if url_map.exist(error_code)
+                    url_map[error_code](*self->server, session, data)
+                else
+                    async_send(sock, compose_response(error_code))
+                end
             end
             last_request_time = runtime.time()
             # Keep-Alive check
-            if !sock.is_open() || session.version == "HTTP/1.0" || (session.connection != null && session.connection.tolower() == "close")
+            if !sock.is_open() || session.version <= "1.0" || (session.connection != null && session.connection.tolower() == "close")
                 break
             end
         end
@@ -369,31 +484,35 @@ end
 class http_server
     var acceptor = null
     var async_guard = null
+    var wwwroot_path = null
     var url_map = new hash_map
-    var worker_list = new array
+    var worker_list = null
     var worker_count = 4
-    var keep_alive_timeout = 5000
     var max_keep_alive = 100
-    function initialize()
-        url_map.insert("404", [](session, post_data){
-            var response_data = "<html><head><meta charset=\"UTF-8\"></head><body><p>404 Not Found: " + session.url + "</p></body></html>"
-            session.send_response(state_codes.code_404, response_data, "text/html")
-        })
-    end
-    function bind_page(url, path, state_code)
-        url_map.insert(url, [path, state_code](session, post_data){
-            session.send_response(state_code, session.read_file(path), "text/html")
-        })
-    end
-    function bind_func(url, func : function)
-        url_map.insert(url, func)
-    end
-    function listen(port : integer)
-        acceptor = tcp.acceptor(tcp.endpoint_v4(port))
+    var keep_alive_timeout = 5000
+    var mtime_map = new hash_map
+    var content_map = new hash_map
+    # private functions
+    function read_file(path)
+        var time = runtime.time()
+        if mtime_map.exist(path)
+            var last_mtime = mtime_map[path]
+            var current_mtime = system.file.mtime(path)
+            if current_mtime == last_mtime && content_map.exist(path)
+                return content_map[path]
+            end
+            mtime_map[path] = current_mtime
+        else
+            mtime_map.insert(path, system.file.mtime(path))
+        end
+        var data = global.read_file(path)
+        content_map.insert(path, move(data))
+        return data
     end
     function init()
         # Init workers
         async_guard = new async.work_guard
+        worker_list = new array
         foreach it in range(worker_count)
             var worker = gcnew worker_type
             worker->server = &this
@@ -401,6 +520,52 @@ class http_server
             worker->co.resume()
             worker_list.push_back(worker)
         end
+    end
+    # public functions
+    function set_wwwroot(path)
+        if system.path.is_directory(path)
+            wwwroot_path = path_normalize(path)
+            if wwwroot_path[-1] == '/'
+                wwwroot_path.cut(1)
+            end
+            log("Set wwwroot to: " + wwwroot_path)
+        end
+        return this
+    end
+    function set_config(conf)
+        if conf.exist("worker_count")
+            worker_count = conf["worker_count"] as integer
+        end
+        if conf.exist("max_keep_alive")
+            max_keep_alive = conf["max_keep_alive"] as integer
+        end
+        if conf.exist("keep_alive_timeout")
+            keep_alive_timeout = conf["keep_alive_timeout"] as integer
+        end
+        return this
+    end
+    function bind_page(url, path, state_code)
+        var normalized_path = path_normalize((wwwroot_path != null ? wwwroot_path + "/" + path : path))
+        url_map.insert(url, [normalized_path, state_code](server, session, post_data){
+            session.send_response(state_code, server.read_file(normalized_path), get_mime(normalized_path))
+        })
+        return this
+    end
+    function bind_code(state_code, path)
+        var normalized_path = path_normalize((wwwroot_path != null ? wwwroot_path + "/" + path : path))
+        url_map.insert(state_code, [normalized_path, state_code](server, session, post_data){
+            session.send_response(state_code, server.read_file(normalized_path), get_mime(normalized_path))
+        })
+        return this
+    end
+    function bind_func(url, func : function)
+        url_map.insert(url, func)
+        return this
+    end
+    function listen(port : integer)
+        acceptor = tcp.acceptor(tcp.endpoint_v4(port))
+        log("Listening on port: " + to_string(port))
+        return this
     end
     function poll()
         if async_guard is null

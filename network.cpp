@@ -502,7 +502,7 @@ namespace network_cs_ext {
 			return cs::var::make<cs::string>(std::move(data));
 		}
 
-		cs::var get_buffer(const state_t &state)
+		cs::var get_buffer(const state_t &state, std::size_t max_bytes)
 		{
 			if (!state->is_read)
 				throw cs::lang_error("Asynchronous operation not a read/receive session.");
@@ -510,9 +510,10 @@ namespace network_cs_ext {
 				return cs::null_pointer;
 			if (state->buffer.size() == 0)
 				return cs::var::make<cs::string>();
-			std::string data(asio::buffers_begin(state->buffer.data()), asio::buffers_end(state->buffer.data()));
-			state->buffer.consume(data.size());
-			state->bytes_transferred = 0;
+			std::size_t to_read = (std::min)(max_bytes, state->buffer.size());
+			std::string data(asio::buffers_begin(state->buffer.data()), asio::buffers_begin(state->buffer.data()) + to_read);
+			state->buffer.consume(to_read);
+			state->bytes_transferred = state->bytes_transferred > to_read ? state->bytes_transferred - to_read : 0;
 			return cs::var::make<cs::string>(std::move(data));
 		}
 
@@ -570,7 +571,7 @@ namespace network_cs_ext {
 			}
 		}
 
-		bool wait_for(const state_t &state, size_t timeout_ms)
+		bool wait_for(const state_t &state, std::size_t timeout_ms)
 		{
 			asio::io_context &io = cs_impl::network::get_io_context();
 			auto start = std::chrono::steady_clock::now();
