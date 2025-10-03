@@ -1,0 +1,45 @@
+import process
+
+var worker_count = 4
+var slave_worker_count = 2
+var worker_list = new array
+var master_addr = "127.0.0.1"
+var master_port = "54321"
+
+var pwd = runtime.get_current_dir()
+
+system.out.println("Current work folder: " + pwd)
+
+system.run("ecs -o \"" + pwd + "\" \"" + pwd + system.path.separator + "multi-node-server.ecs\"")
+
+function build_process(role, workers)
+    var b = new process.builder
+    b.dir(pwd).cmd("cs")
+    b.arg({pwd + system.path.separator + "multi-node-server.csc", role, workers, master_addr, master_port})
+    return b.start()
+end
+
+var master_process = build_process("master", to_string(worker_count * slave_worker_count))
+
+foreach it in range(worker_count)
+    worker_list.push_back(build_process("slave_" + to_string(it), to_string(slave_worker_count)))
+end
+
+system.out.println(master_process.out().getline())
+system.out.println("Press q to exit")
+loop
+    if system.console.kbhit() && system.console.getch().tolower() == 'q'
+        break
+    end
+    if master_process.has_exited()
+        system.out.println("Master process exited.")
+        break
+    end
+    runtime.delay(100)
+end
+
+master_process.kill(true)
+foreach it in worker_list
+    it.kill(true)
+end
+system.file.remove(pwd + system.path.separator + "multi-node-server.csc")
