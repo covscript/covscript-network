@@ -905,7 +905,6 @@ class http_server
         worker_list = new array
         var worker_func = null
         # Init multi-process
-        
         if multi_process
             if is_master
                 log("Running in multi-process mode as master.")
@@ -936,6 +935,9 @@ class http_server
         return this
     end
     function set_config(conf)
+        if conf.exist("wwwroot")
+            set_wwwroot(conf["wwwroot"])
+        end
         if conf.exist("worker_count")
             worker_count = conf["worker_count"] as integer
         end
@@ -965,18 +967,18 @@ class http_server
         url_map.insert(url, func)
         return this
     end
-    function set_master(ip, port)
+    function set_master(port : integer)
         multi_process = true
         is_master = true
-        master_acceptor = tcp.acceptor(tcp.endpoint(ip, port))
+        master_acceptor = tcp.acceptor(tcp.endpoint_v4(port))
         log("Set as master server, listening on port: " + to_string(port))
         return this
     end
-    function set_slave(ip, port)
+    function set_slave(ip : string, port : integer)
         multi_process = true
         is_master = false
         master_endpoint = tcp.endpoint(ip, port)
-        log("Set as slave server, connecting to port: " + to_string(port))
+        log("Set as slave worker, connecting to " + ip + ":" + to_string(port))
         return this
     end
     function listen(port : integer)

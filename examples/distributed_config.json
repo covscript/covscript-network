@@ -1,0 +1,10 @@
+{
+    "keep_alive_timeout": 5000,
+    "max_keep_alive": 100,
+    "worker_count": 2,
+    "master_addr": "127.0.0.1",
+    "master_port": 54321,
+    "slave_count": 4,
+    "wwwroot": "wwwroot",
+    "port": 8088
+}

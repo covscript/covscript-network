@@ -1,0 +1,64 @@
+import netutils
+import argparse
+import codec.json
+
+var parser = new argparse.ArgumentParser
+parser.program_name = "ecs http_server.ecs"
+parser.description = "HTTP Server based on NetUtils"
+parser.add_argument("config", true, "Configure JSON file")
+parser.add_option("--dir", false, false, "Work directory").set_defaults("--dir", ".")
+parser.add_option("--log", false, false, "Log file").set_defaults("--log", "netutils_[ROLE].json")
+parser.add_option("--role", false, false, "Work role, expected simple, master or slave_N").set_defaults("--role", "simple")
+
+var args = null
+try
+    args = parser.parse_args(context.cmd_args)
+catch e
+    system.out.println(e.what)
+    parser.print_help()
+    system.exit(0)
+end
+
+if args.dir == "."
+    args.dir = runtime.get_current_dir()
+end
+
+var config = json.to_var(json.from_stream(iostream.ifstream(args.config)))
+
+netutils.log_stream = iostream.ofstream(args.log == "netutils_[ROLE].json" ?
+    args.dir + system.path.separator + "netutils_" + args.role + ".log" : args.log)
+
+if netutils.log_stream.good()
+    netutils.log("Log started for role: " + args.role)
+else
+    netutils.log_stream = null
+end
+
+var server = (new netutils.http_server)
+    .set_config(config)
+    .bind_code(netutils.state_codes.code_404, "404.html")
+    .bind_func("/test", [](server, session, data){
+        # Simple ECHO Server
+        if session.method != "POST"
+            session.send_response(netutils.state_codes.code_400, "Please use POST method. Data = " + data, "text/plain")
+        else
+            session.send_response(netutils.state_codes.code_200, data, "text/plain")
+        end
+    })
+
+# multi-node setup
+switch args.role
+    case "simple"
+        server.listen(config.port)
+        system.out.println("Starting Simple HTTP server at http://" + netutils.local_addr() + ":" + config.port + "/")
+    end
+    case "master"
+        server.set_master(config.master_port as integer).listen(config.port)
+        system.out.println("Starting Distributed HTTP server at http://" + netutils.local_addr() + ":" + config.port + "/")
+    end
+    default
+        server.set_slave(config.master_addr, config.master_port as integer)
+    end
+end
+
+server.run()
