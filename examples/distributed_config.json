@@ -6,5 +6,6 @@
     "master_port": 54321,
     "slave_count": 4,
     "wwwroot": "wwwroot",
-    "port": 8088
+    "port": 8088,
+    "database": "http_server.db"
 }

@@ -6,6 +6,7 @@ var parser = new argparse.ArgumentParser
 parser.program_name = "ecs spawn_http_server.ecs"
 parser.description = "Distributed HTTP Server Spawner"
 parser.add_argument("config", true, "Configure JSON file")
+parser.add_option("--log", true, false, "Log file").set_defaults("--log", false)
 parser.add_option("--dir", false, false, "Work directory").set_defaults("--dir", ".")
 
 var args = null
@@ -26,7 +27,11 @@ system.run("ecs -o \"" + pwd + "\" \"" + pwd + system.path.separator + "http_ser
 function build_process(role, workers)
     var b = new process.builder
     b.dir(pwd).cmd("cs")
-    b.arg({pwd + system.path.separator + "http_server.csc", args.config, "--role", role, "--dir", pwd})
+    if args.log
+        b.arg({pwd + system.path.separator + "http_server.csc", args.config, "--role", role, "--dir", pwd, "--log", pwd + system.path.separator + "netutils_" + args.role + ".log"})
+    else
+        b.arg({pwd + system.path.separator + "http_server.csc", args.config, "--role", role, "--dir", pwd})
+    end
     return b.start()
 end
 

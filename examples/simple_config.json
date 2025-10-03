@@ -3,5 +3,6 @@
     "max_keep_alive": 100,
     "worker_count": 4,
     "wwwroot": "wwwroot",
-    "port": 8080
+    "port": 8080,
+    "database": "http_server.db"
 }
