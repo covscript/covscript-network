@@ -28,7 +28,7 @@ function build_process(role, workers)
     var b = new process.builder
     b.dir(pwd).cmd("cs")
     if args.log
-        b.arg({pwd + system.path.separator + "http_server.csc", args.config, "--role", role, "--dir", pwd, "--log", pwd + system.path.separator + "netutils_" + args.role + ".log"})
+        b.arg({pwd + system.path.separator + "http_server.csc", args.config, "--role", role, "--dir", pwd, "--log", pwd + system.path.separator + "netutils_" + role + ".log"})
     else
         b.arg({pwd + system.path.separator + "http_server.csc", args.config, "--role", role, "--dir", pwd})
     end
