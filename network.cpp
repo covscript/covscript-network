@@ -31,6 +31,21 @@
 namespace network_cs_ext {
 	using namespace cs;
 
+	std::string to_fixed_hex(const numeric &n)
+	{
+		numeric_integer val = n.as_integer();
+		std::ostringstream oss;
+		oss << std::hex << std::uppercase << std::setw(16) << std::setfill('0') << val;
+		return oss.str();
+	}
+
+	numeric from_fixed_hex(const std::string &s)
+	{
+		if (s.size() != 16)
+			throw cs::lang_error("Invalid byte string size, must be 16.");
+		return std::stoull(s, nullptr, 16);
+	}
+
 	string host_name()
 	{
 		return asio::ip::host_name();
@@ -557,7 +572,7 @@ namespace network_cs_ext {
 		{
 			asio::io_context &io = cs_impl::network::get_io_context();
 			while (true) {
-				io.poll();
+				io.poll_one();
 				if (state->has_done.load(std::memory_order_acquire))
 					return !state->ec;
 #if COVSCRIPT_ABI_VERSION >= 250908
@@ -577,7 +592,7 @@ namespace network_cs_ext {
 			auto start = std::chrono::steady_clock::now();
 			std::chrono::milliseconds timeout_duration(timeout_ms);
 			while (true) {
-				io.poll();
+				io.poll_one();
 				if (state->has_done.load(std::memory_order_acquire))
 					return !state->ec;
 				auto now = std::chrono::steady_clock::now();
@@ -679,7 +694,7 @@ namespace network_cs_ext {
 			state_t state = std::make_shared<state_type>();
 			state->init = true;
 			std::ostream os(&state->buffer);
-			os << data;
+			os.write(data.data(), data.size());
 			asio::async_write(sock->get_raw(), state->buffer, [state](const asio::error_code &ec, std::size_t bytes) {
 				state->buffer.consume(bytes);
 				state->bytes_transferred = bytes;
@@ -711,7 +726,7 @@ namespace network_cs_ext {
 			state->is_udp = true;
 			state->udp_endpoint = ep;
 			std::ostream os(&state->buffer);
-			os << data;
+			os.write(data.data(), data.size());
 			sock->get_raw().async_send_to(asio::buffer(state->buffer.data(), state->buffer.size()), state->udp_endpoint, [state](const asio::error_code &ec, std::size_t bytes) {
 				state->buffer.consume(bytes);
 				state->bytes_transferred = bytes;
@@ -757,6 +772,8 @@ namespace network_cs_ext {
 		.add_var("tcp", make_namespace(tcp::tcp_ext))
 		.add_var("udp", make_namespace(udp::udp_ext))
 		.add_var("host_name", make_cni(host_name))
+		.add_var("to_fixed_hex", make_cni(to_fixed_hex))
+		.add_var("from_fixed_hex", make_cni(from_fixed_hex))
 		.add_var("async", make_namespace(async::async_ext));
 		(*async::state_ext)
 		.add_var("has_done", make_cni(async::has_done))

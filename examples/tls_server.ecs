@@ -1,0 +1,69 @@
+import simple_tls as tls
+import argparse
+
+var parser = new argparse.ArgumentParser
+parser.program_name = "ecs tls_server.ecs"
+parser.description = "A simple TLS server"
+parser.add_argument("addr", true, "Address to listen")
+parser.add_argument("pub_key", true, "Public key")
+parser.add_argument("priv_key", true, "Private key")
+parser.add_argument("passwd", true, "Password of private key")
+parser.add_option("--port", false, false, "Port to listen").set_defaults("--port", 1024).set_option_alias("--port", "-p")
+
+var args = null
+try
+    args = parser.parse_args(context.cmd_args)
+catch e
+    system.out.println(e.what)
+    parser.print_help()
+    system.exit(0)
+end
+
+function wait_for(co, time)
+    var start_time = runtime.time()
+    var result = null
+    loop
+        co.resume()
+        runtime.delay(10)
+    until co.is_finished() || runtime.time() - start_time > time
+    return !co.is_finished()
+end
+
+var s = new tls.server
+system.out.println("Listening on " + args.addr + ":" + args.port)
+s.listen(args.pub_key, args.priv_key, args.passwd, args.addr, args.port as integer)
+system.out.println("Fingerprint: " + s.fingerprint())
+var acceptor = fiber.create(s.accept)
+var wait_times = 0
+while wait_for(acceptor, 1000)
+    system.out.println("Waiting for " + ++wait_times + "s")
+end
+system.out.println("Connection Established.")
+
+function stdio_worker(sock)
+    loop
+        var input = runtime.await(system.in.getline)
+        if input.toupper() == "EXIT"
+            sock.close()
+            break
+        end
+        if input == ""
+            continue
+        end
+        sock.send(input)
+    end
+end
+
+var stdio_co = fiber.create(stdio_worker, s)
+
+loop
+    stdio_co.resume()
+    if !s.is_open()
+        system.out.println("Connection Closed.")
+        break
+    end
+    s.sync()
+    while s.available()
+        system.out.println("Receive: " + s.receive_some())
+    end
+end

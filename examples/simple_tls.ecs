@@ -1,0 +1,271 @@
+package simple_tls
+
+import codec.json
+import network.*
+import gmssl
+
+function send_content(sock, content)
+    async.write(sock, to_fixed_hex(content.size) + content)
+end
+
+function receive_content(sock)
+    return sock.read(from_fixed_hex(sock.read(16)))
+end
+
+class server
+    var pkey = null
+    var vkey = null
+    var vkeypass = null
+    var sock = null
+    var acpt = null
+    var session_id = null
+    var send_buff = new array
+    var recv_buff = new array
+    var close_flag = false
+    var mode = null
+    var log = null
+
+    function _log(str)
+        if log != null
+            log.println(str)
+        end
+    end
+
+    # string pkey_path: Path to SM2 public key.
+    # string vkey_path: Path to SM2 private key.
+    # string addr: Address to be listened.
+    #     127.0.0.1: localhost only
+    #       0.0.0.0: any host
+    # integer port: Port to be listened.
+
+    function listen(pkey_path, vkey_path, keypass, addr, port)
+        pkey = gmssl.sm2_pem_read(pkey_path)
+        vkey = gmssl.sm2_pem_read(vkey_path)
+        vkeypass = keypass
+        sock = new tcp.socket
+        acpt = tcp.acceptor(tcp.endpoint(addr, port))
+        _log("Listen on " + addr + " port " + port)
+    end
+
+    function fingerprint()
+        return gmssl.bytes_decode(gmssl.base64_encode(gmssl.sm3(pkey)))
+    end
+
+    # return: true for succeed, false for failed
+    # throw: unknown response
+
+    function accept()
+        _log("Waiting for incoming connection...")
+        runtime.await(sock.accept, acpt)
+        send_content(sock, gmssl.bytes_decode(gmssl.base64_encode(pkey)))
+        var response = receive_content(sock)
+        switch response
+            case "TLS_AUTH_SUCCESS"
+                _log("Authentication succeed.")
+            end
+            case "TLS_AUTH_FAILED"
+                _log("Authentication failed.")
+                sock.close()
+                return false
+            end
+            default
+                throw runtime.exception("TLS unknown response: " + response)
+            end
+        end
+        session_id = gmssl.sm2_decrypt(vkey, vkeypass, gmssl.base64_decode(gmssl.bytes_encode(receive_content(sock))))
+        var session_id_digest = gmssl.bytes_decode(gmssl.base64_encode(gmssl.sm3(session_id)))
+        send_content(sock, session_id_digest)
+        response = receive_content(sock)
+        switch response
+            case "TLS_HANDSHAKE_SUCCESS"
+                _log("Handshake succeed.")
+            end
+            case "TLS_HANDSHAKE_FAILED"
+                _log("Handshake failed.")
+                sock.close()
+                return false
+            end
+            default
+                throw runtime.exception("TLS unknown response: " + response)
+            end
+        end
+        return true
+    end
+
+    function sync()
+        _log("Retrieving transmission password...")
+        var pass = gmssl.sm2_decrypt(vkey, vkeypass, gmssl.base64_decode(gmssl.bytes_encode(receive_content(sock))))
+        _log("Sending server side information...")
+        var s_head = json.to_string(json.from_var({"send_size": send_buff.size, "close_flag": close_flag}.to_hash_map()))
+        send_content(sock, gmssl.bytes_decode(gmssl.base64_encode(gmssl.sm4(gmssl.sm4_mode.ctr_encrypt, pass, session_id, gmssl.bytes_encode(s_head)))))
+        _log("Receiving client side information...")
+        var c_head = json.to_var(json.from_string(gmssl.bytes_decode(gmssl.sm4(gmssl.sm4_mode.ctr_decrypt, pass, session_id, gmssl.base64_decode(gmssl.bytes_encode(receive_content(sock)))))))
+        foreach i in range(send_buff.size)
+            _log("Sending data from buffer...")
+            send_content(sock, gmssl.bytes_decode(gmssl.base64_encode(gmssl.sm4(gmssl.sm4_mode.ctr_encrypt, pass, session_id, gmssl.bytes_encode(send_buff[i])))))
+        end
+        send_buff = new array
+        foreach i in range(c_head.send_size)
+            _log("Receiving data to buffer...")
+            recv_buff.push_back(gmssl.bytes_decode(gmssl.sm4(gmssl.sm4_mode.ctr_decrypt, pass, session_id, gmssl.base64_decode(gmssl.bytes_encode(receive_content(sock))))))
+        end
+        if close_flag || c_head.close_flag
+            _log("Closing pipe...")
+            sock.close()
+            close_flag = false
+        end
+    end
+
+    # string data: data to be send
+
+    function send(data)
+        send_buff.push_back(data)
+        sync()
+    end
+
+    # return: received data in string
+
+    function receive()
+        while recv_buff.empty()
+            sync()
+        end
+        var content = recv_buff.front
+        recv_buff.pop_front()
+        return content
+    end
+
+    function receive_some()
+        if !recv_buff.empty()
+            var content = recv_buff.front
+            recv_buff.pop_front()
+            return content
+        else
+            return null
+        end
+    end
+
+    function available()
+        return !recv_buff.empty()
+    end
+
+    function is_open()
+        return sock.is_open()
+    end
+
+    function close()
+        close_flag = true
+        sync()
+    end
+end
+
+class client
+    var pkey = null
+    var sock = null
+    var authorized_keys = new hash_set
+    var session_id = null
+    var send_buff = new array
+    var recv_buff = new array
+    var close_flag = false
+    var mode = null
+    var log = null
+
+    function _log(str)
+        if log != null
+            log.println(str)
+        end
+    end
+
+    # string addr: Address to be listened.
+    #     127.0.0.1: localhost only
+    #       0.0.0.0: any host
+    # integer port: Port to be listened.
+
+    function connect(addr, port)
+        sock = new tcp.socket
+        sock.connect(tcp.endpoint(addr, port))
+        pkey = gmssl.base64_decode(gmssl.bytes_encode(receive_content(sock)))
+        var pkey_digest = gmssl.bytes_decode(gmssl.base64_encode(gmssl.sm3(pkey)))
+        if !authorized_keys.exist(pkey_digest)
+            send_content(sock, "TLS_AUTH_FAILED")
+            sock.close()
+            _log("Authentication failed.")
+            return false
+        end
+        send_content(sock, "TLS_AUTH_SUCCESS")
+        _log("Authentication succeed.")
+        session_id = gmssl.rand_bytes(gmssl.sm4_key_size)
+        send_content(sock, gmssl.bytes_decode(gmssl.base64_encode(gmssl.sm2_encrypt(pkey, session_id))))
+        var session_id_digest1 = receive_content(sock)
+        var session_id_digest2 = gmssl.bytes_decode(gmssl.base64_encode(gmssl.sm3(session_id)))
+        if session_id_digest1 != session_id_digest2
+            send_content(sock, "TLS_HANDSHAKE_FAILED")
+            sock.close()
+            _log("Authentication failed.")
+            return false
+        end
+        send_content(sock, "TLS_HANDSHAKE_SUCCESS")
+        _log("Handshake succeed.")
+    end
+
+    function sync()
+        _log("Sending transmission password...")
+        var pass = gmssl.rand_bytes(gmssl.sm4_key_size)
+        send_content(sock, gmssl.bytes_decode(gmssl.base64_encode(gmssl.sm2_encrypt(pkey, pass))))
+        _log("Receiving client side information...")
+        var s_head = json.to_var(json.from_string(gmssl.bytes_decode(gmssl.sm4(gmssl.sm4_mode.ctr_decrypt, pass, session_id, gmssl.base64_decode(gmssl.bytes_encode(receive_content(sock)))))))
+        _log("Sending server side information...")
+        var c_head = json.to_string(json.from_var({"send_size": send_buff.size, "close_flag": close_flag}.to_hash_map()))
+        send_content(sock, gmssl.bytes_decode(gmssl.base64_encode(gmssl.sm4(gmssl.sm4_mode.ctr_encrypt, pass, session_id, gmssl.bytes_encode(c_head)))))
+        foreach i in range(s_head.send_size)
+            _log("Receiving data to buffer...")
+            recv_buff.push_back(gmssl.bytes_decode(gmssl.sm4(gmssl.sm4_mode.ctr_decrypt, pass, session_id, gmssl.base64_decode(gmssl.bytes_encode(receive_content(sock))))))
+        end
+        foreach i in range(send_buff.size)
+            _log("Sending data from buffer...")
+            send_content(sock, gmssl.bytes_decode(gmssl.base64_encode(gmssl.sm4(gmssl.sm4_mode.ctr_encrypt, pass, session_id, gmssl.bytes_encode(send_buff[i])))))
+        end
+        send_buff = new array
+        if s_head.close_flag || close_flag
+            _log("Closing pipe...")
+            sock.close()
+            close_flag = false
+        end
+    end
+
+    function send(data)
+        send_buff.push_back(data)
+        sync()
+    end
+
+    function receive()
+        while recv_buff.empty()
+            sync()
+        end
+        var content = recv_buff.front
+        recv_buff.pop_front()
+        return content
+    end
+
+    function receive_some()
+        if !recv_buff.empty()
+            var content = recv_buff.front
+            recv_buff.pop_front()
+            return content
+        else
+            return null
+        end
+    end
+
+    function available()
+        return !recv_buff.empty()
+    end
+
+    function is_open()
+        return sock.is_open()
+    end
+
+    function close()
+        close_flag = true
+        sync()
+    end
+end
