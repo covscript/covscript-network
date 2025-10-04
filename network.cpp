@@ -819,6 +819,7 @@ namespace network_cs_ext {
 		.add_var("read", make_cni(tcp::socket::read))
 		.add_var("send", make_cni(tcp::socket::send))
 		.add_var("write", make_cni(tcp::socket::write))
+		.add_var("shutdown", make_cni(tcp::socket::shutdown))
 		.add_var("local_endpoint", make_cni(tcp::socket::local_endpoint))
 		.add_var("remote_endpoint", make_cni(tcp::socket::remote_endpoint));
 		(*tcp::ep::ep_ext)

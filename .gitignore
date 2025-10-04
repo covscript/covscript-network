@@ -54,4 +54,5 @@ examples/*.csp
 examples/*.csc
 *.pem
 *.log
+*.db
 authorized_keys

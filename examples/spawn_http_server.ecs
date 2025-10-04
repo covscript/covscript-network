@@ -22,7 +22,7 @@ var config = json.to_var(json.from_stream(iostream.ifstream(args.config)))
 
 var pwd = args.dir == "." ? runtime.get_current_dir() : args.dir
 
-system.run("ecs -o \"" + pwd + "\" \"" + pwd + system.path.separator + "http_server.ecs\"")
+system.run("ecs -f -o \"" + pwd + "\" \"" + pwd + system.path.separator + "http_server.ecs\"")
 
 function build_process(role, workers)
     var b = new process.builder

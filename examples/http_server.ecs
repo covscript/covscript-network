@@ -148,10 +148,10 @@ end
 var server = (new netutils.http_server)
     .set_config(config)
     .bind_code(netutils.state_codes.code_404, "404.html")
-    .bind_func("/get", [](server, session, data){
+    .bind_func("/get", [](server, session){
         # DB query
         if session.method != "POST"
-            var args = parse_get_args(data)
+            var args = parse_get_args(session.args)
             get_stmt.bind(0, args.id)
         else
             session.send_response(netutils.state_codes.code_403, "Please use GET method.", "text/plain")
@@ -163,10 +163,10 @@ var server = (new netutils.http_server)
             session.send_response(netutils.state_codes.code_200, result[0][1].data, "text/plain")
         end
     })
-    .bind_func("/set", [](server, session, data){
+    .bind_func("/set", [](server, session){
         # DB insert
         if session.method != "POST"
-            var args = parse_get_args(data)
+            var args = parse_get_args(session.args)
             set_stmt.bind(0, args.id)
             set_stmt.bind(1, args.val)
         else
@@ -175,17 +175,17 @@ var server = (new netutils.http_server)
         var result = set_stmt.just_exec()
         session.send_response(netutils.state_codes.code_200, "OK", "text/plain")
     })
-    .bind_func("/block", [](server, session, data){
+    .bind_func("/block", [](server, session){
         # Test for block API
         fiber_delay(50)
         session.send_response(netutils.state_codes.code_200, "OK", "text/plain")
     })
-    .bind_func("/test", [](server, session, data){
+    .bind_func("/test", [](server, session){
         # Simple ECHO Server
         if session.method != "POST"
-            session.send_response(netutils.state_codes.code_400, "Please use POST method. Data = " + data, "text/plain")
+            session.send_response(netutils.state_codes.code_400, "Please use POST method. Data = " + session.args, "text/plain")
         else
-            session.send_response(netutils.state_codes.code_200, data, "text/plain")
+            session.send_response(netutils.state_codes.code_200, session.post_data, "text/plain")
         end
     })
 
