@@ -1,0 +1,57 @@
+import simple_tls as tls
+import argparse
+
+var parser = new argparse.ArgumentParser
+parser.program_name = "ecs tls_client.ecs"
+parser.description = "A simple TLS client"
+parser.add_argument("addr", true, "Address to connect")
+parser.add_argument("auth_keys", true, "Authorized keys")
+parser.add_option("--port", false, true, "Port to connect").set_defaults("--port", 1024).set_option_alias("--port", "-p")
+
+var args = null
+try
+    args = parser.parse_args(context.cmd_args)
+catch e
+    system.out.println(e.what)
+    parser.print_help()
+    system.exit(0)
+end
+
+var c = new tls.client
+
+var ifs = iostream.ifstream(args.auth_keys)
+while ifs.good()
+    c.authorized_keys.insert(ifs.getline())
+end
+
+system.out.println("Connecting to " + args.addr + ":" + args.port)
+c.connect(args.addr, args.port as integer)
+system.out.println("Connection Established.")
+
+function stdio_worker(sock)
+    loop
+        var input = runtime.await(system.in.getline)
+        if input.toupper() == "EXIT"
+            sock.close()
+            break
+        end
+        if input == ""
+            continue
+        end
+        sock.send(input)
+    end
+end
+
+var stdio_co = fiber.create(stdio_worker, c)
+
+loop
+    stdio_co.resume()
+    if !c.is_open()
+        system.out.println("Connection Closed.")
+        break
+    end
+    c.sync()
+    while c.available()
+        system.out.println("Receive: " + c.receive_some())
+    end
+end

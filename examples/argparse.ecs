@@ -1,0 +1,231 @@
+package argparse
+
+class KeyStore
+    var key = null
+    var store = null
+    var default_val = null
+    var required = null
+    var help_text = null
+    var value = null
+    function construct(...args)
+        (key, default_val, store, required, help_text) = args
+    end
+end
+
+function filter(str, cond)
+    var _s = ""
+    foreach ch in str
+        if cond(ch)
+            _s += ch
+        end
+    end
+    return move(_s)
+end
+
+function remove_prefix(str)
+    var idx = 0
+    while idx < str.size && str[idx] == '-'
+        ++idx
+    end
+    return str.substr(idx, str.size)
+end
+
+function pad_str(n)
+    var str = new string
+    foreach _ in range(n) do str += " "
+    return str
+end
+
+class ArgumentParser
+    var program_name = "PROGRAM"
+    var description = null
+    var indent = 4
+    var args_arr = new array
+    var opts_map = new hash_map
+    var alias_map = new hash_map
+    function initialize()
+        this.add_option("--help", true, false, "Show help message")
+        this.set_option_alias("--help", "-h")
+    end
+    function add_argument(key: string, required: boolean, help_text: string)
+        if key.find("-", 0) == 0
+            throw runtime.exception("ArgumentParser: arguments can not contains \"-\"")
+        end
+        args_arr.push_back(gcnew KeyStore{key, null, null, required, help_text})
+        return this
+    end
+    function add_option(key: string, store: boolean, required: boolean, help_text: string)
+        if key.find("-", 0) < 0
+            throw runtime.exception("ArgumentParser: options must contains \"-\"")
+        end
+        opts_map.insert(key, gcnew KeyStore{key, store ? false : null, store, required, help_text})
+        return this
+    end
+    function set_defaults(key: string, val)
+        if key.find("-", 0) == 0
+            if opts_map.exist(key)
+                opts_map[key]->default_val = val
+            end
+        else
+            foreach it in args_arr
+                if key == it->key
+                    it->default_val = val
+                end
+            end
+        end
+        return this
+    end
+    function set_option_alias(key: string, alias: string)
+        if key.find("-", 0) < 0
+            throw runtime.exception("ArgumentParser: options must contains \"-\"")
+        end
+        if opts_map.exist(key)
+            opts_map.insert(alias, opts_map[key])
+            alias_map.insert(key, alias)
+        end
+        return this
+    end
+    function print_help()
+        system.out.print("Usage: " + program_name + " ")
+        foreach it in args_arr
+            if it->required
+                system.out.print(it->key + " ")
+            else
+                system.out.print("[" + it->key + "=" + it->default_val + "] ")
+            end
+        end
+        var printed_opts = new hash_set
+        foreach it in opts_map
+            var key_name = it.second->key
+            if printed_opts.exist(key_name)
+                continue
+            end
+            printed_opts.insert(key_name)
+            if it.second->required
+                if it.second->store
+                    system.out.print(key_name + " ")
+                else
+                    system.out.print(key_name + " " + remove_prefix(it.second->key).toupper())
+                end
+            else
+                if it.second->store
+                    system.out.print("[" + key_name + "] ")
+                else
+                    system.out.print("[" + key_name + " " + it.second->default_val + "] ")
+                end
+            end
+        end
+        system.out.println("\n\nArguments:")
+        var lhs_texts = new array, rhs_texts = new array
+        foreach it in args_arr
+            if it->required
+                lhs_texts.push_back(it->key)
+                rhs_texts.push_back(it->help_text)
+            else
+                lhs_texts.push_back("[" + it->key + "=" + it->default_val + "]")
+                rhs_texts.push_back(it->help_text)
+            end
+        end
+        printed_opts = new hash_set
+        foreach it in opts_map
+            var key_name = it.second->key
+            if printed_opts.exist(key_name)
+                continue
+            end
+            printed_opts.insert(key_name)
+            if alias_map.exist(key_name)
+                key_name += ", " + alias_map[key_name]
+            end
+            if it.second->required
+                if it.second->store
+                    lhs_texts.push_back(key_name)
+                    rhs_texts.push_back(it.second->help_text)
+                else
+                    lhs_texts.push_back(key_name + " " + remove_prefix(it.second->key).toupper())
+                    rhs_texts.push_back(it.second->help_text)
+                end
+            else
+                if it.second->store
+                    lhs_texts.push_back("[" + key_name + "]")
+                    rhs_texts.push_back(it.second->help_text)
+                else
+                    lhs_texts.push_back("[" + key_name + " " + it.second->default_val + "]")
+                    rhs_texts.push_back(it.second->help_text)
+                end
+            end
+        end
+        var max_length = 0
+        foreach it in lhs_texts
+            max_length = it.size > max_length ? it.size : max_length
+        end
+        max_length += indent
+        foreach i in range(lhs_texts.size)
+            system.out.print(pad_str(indent) + lhs_texts[i])
+            system.out.println(pad_str(max_length - lhs_texts[i].size) + rhs_texts[i])
+        end
+        if description not null
+            system.out.println("\n" + description)
+        else
+            system.out.println("")
+        end
+    end
+    function reset()
+        foreach it in args_arr
+            it->value = it->default_val
+        end
+        foreach it in opts_map
+            it.second->value = it.second->default_val
+        end
+    end
+    function parse_args(args: array)
+        reset()
+        # Skip first element
+        var read_val = false
+        var args_idx = 0
+        var key = null
+        for idx = 1; idx < args.size; ++idx
+            if !read_val
+                if args[idx].find("-", 0) == 0
+                    key = filter(args[idx], [](ch)->(!ch.isspace()&&!ch.iscntrl()))
+                    if !opts_map.exist(key)
+                        throw runtime.exception("ArgumentParser: option \"" + key + "\" not supported.")
+                    end
+                    var opt = opts_map[key]
+                    if opt->store
+                        opt->value = !opt->default_val
+                    else
+                        read_val = true
+                    end
+                else
+                    if args_idx >= args_arr.size
+                        throw runtime.exception("ArgumentParser: too much arguments.")
+                    end
+                    args_arr[args_idx++]->value = args[idx]
+                end
+            else
+                opts_map[key]->value = args[idx]
+                read_val = false
+            end
+        end
+        var result_map = new hash_map
+        foreach it in args_arr
+            if it->required && it->value is null
+                throw runtime.exception("ArgumentParser: argument \"" + it->key + "\" required.")
+            else
+                result_map.insert(it->key, it->value)
+            end
+        end
+        foreach it in opts_map
+            if it.second->required && it.second->value is null
+                throw runtime.exception("ArgumentParser: option \"" + it.second->key + "\" required.")
+            else
+                result_map.insert(remove_prefix(it.second->key), it.second->value)
+            end
+        end
+        if result_map.help
+            print_help()
+            system.exit(0)
+        end
+        return result_map
+    end
+end
