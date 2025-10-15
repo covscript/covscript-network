@@ -8,8 +8,8 @@ constant server_version = "1.2.0"
 
 # Internal Functions
 
-var request_line_reg = regex.build("^([A-Z]+) ([^ ?]+)(?:\\?([^ ]*))? HTTP/([0-9.]+)$")
-var request_header_reg = regex.build("^([^:]*): ?(.*)$")
+var request_line_reg = regex.build_optimize("^([A-Z]+) ([^ ?]+)(?:\\?([^ ]*))? HTTP/([0-9.]+)$")
+var request_header_reg = regex.build_optimize("^([^:]*): ?(.*)$")
 
 namespace state_codes
     constant code_200 = "200 OK"
@@ -116,22 +116,18 @@ end
 function read_file(path)
     var start_time = runtime.time()
     var ifs = iostream.fstream(path, iostream.openmode.bin_in)
-    var data = new iostream.char_buff
-    var ofs = data.get_ostream()
-    loop
-        var ch = ifs.get()
-        if ifs.good() && !ifs.eof()
-            ofs.put(ch)
-        else
-            break
-        end
+    var data = new string
+    while ifs.good()
+        data.append(ifs.read(8192))
         if runtime.time() - start_time > 100
             fiber.yield()
             start_time = runtime.time()
         end
     end
-    return data.get_string()
+    return move(data)
 end
+
+var path_extractor = regex.build_optimize("^([A-Za-z]:)")
 
 function path_normalize(path)
     if path == null || path.empty()
@@ -156,7 +152,7 @@ function path_normalize(path)
             is_unc = true
             path = path.substr(2, path.size - 2)
         else
-            var m = regex.build("^([A-Za-z]:)").match(path)
+            var m = path_extractor.match(path)
             if !m.empty()
                 drive_letter = m.str(1)
                 path = path.substr(drive_letter.size, path.size - drive_letter.size)
@@ -232,7 +228,6 @@ end
 
 class http_session
     var sock = null
-    var seq = 0
     var url = null
     var args = null
     var host = null
@@ -241,12 +236,12 @@ class http_session
     var connection = null
     var content_length = null
     var post_data = new string
-    var is_master = true
-    function construct(socket, seq_id, request_header)
+    var write_response = async.write
+    # for multi-node setup
+    var response = null
+    function construct(socket, request_header)
         sock = socket
-        seq = seq_id
-        var request_line = request_header.front
-        request_header.pop_front()
+        var request_line = request_header.pop_front()
         var match = request_line_reg.match(request_line)
         if !match.empty()
             method = match.str(1)
@@ -291,11 +286,7 @@ class http_session
         resp.append("Content-Type: " + type + "\r\n")
         resp.append("\r\n")
         resp.append(data)
-        if is_master
-            async.write(sock, resp)
-        else
-            send_content(sock, resp)
-        end
+        write_response(sock, resp)
     end
     function serialize()
         return json.to_string(json.from_var({
@@ -319,7 +310,7 @@ class http_session
         connection = obj["connection"]
         content_length = obj["content_length"]
         post_data = obj["post_data"]
-        is_master = false
+        write_response = send_content
     end
 end
 
@@ -331,21 +322,6 @@ struct worker_type
     # 0 = init, 1 = wait, 2 = busy
     var state = 0
     var server = null
-end
-
-function trim(str)
-    var beg = 0
-    var end = str.size - 1
-    while beg <= end && (str[beg].isspace() || str[beg].iscntrl())
-        ++beg
-    end
-    while end >= beg && (str[end].isspace() || str[end].iscntrl())
-        --end
-    end
-    if beg > end
-        return ""
-    end
-    return str.substr(beg, end - beg + 1)
 end
 
 function safe_shutdown(sock)
@@ -403,7 +379,7 @@ function worker_main(self)
                     end
                     break
                 end
-                var line = trim(state.get_result())
+                var line = state.get_result().trim()
                 if line.empty()
                     break
                 end
@@ -420,7 +396,7 @@ function worker_main(self)
                 break
             end
             # Construct HTTP session
-            var session = new http_session{sock, 0, header}
+            var session = new http_session{sock, header}
             log("Received: Method = " + session.method + ", URL = " + session.url + ", Host = " + session.host + ", Connection = " + session.connection)
             if session.connection == "keep-alive"
                 sock.set_opt_keep_alive(true)
@@ -514,13 +490,10 @@ end
 struct http_conn
     var sock = null
     var state = 0
-    var seq_id = 0
+    var request_count = 0
     var last_request_time = 0
-    # slave -> master -> client
-    var arrival_idx = 0
-    var arrival_queue = new array
-    # client -> master -> slave
-    var departure_queue = new array
+    var request_idx = 0
+    var request_queue = new array
 end
 
 struct slave_node
@@ -545,34 +518,23 @@ function master_spawn_worker(self)
         var node = gcnew slave_node
         node->sock = sock
         if !self->server->deprecated_rank.empty()
-            node->rank = self->server->deprecated_rank.front
-            self->server->deprecated_rank.pop_front()
+            node->rank = self->server->deprecated_rank.pop_front()
         else
             node->rank = self->server->slave_list.size
         end
         log("Starting handshake with worker rank " + node->rank)
         # Start handshake
-        send_content(sock, "SERVER " + server_version)
+        var rank_str = to_string(node->rank)
+        send_content(sock, {"SERVER", server_version, rank_str}.join(" "))
         var error_code = null, response = null
         (error_code, response) = receive_content_s(sock, self->server->slave_spawn_timeout)
         if error_code != null
-            log("Handshake stage 1 timeout or error.")
+            log("Handshake timeout or error.")
             continue
         end
         var header = response.split({' '})
-        if header.size != 2 || header[0] != "WORKER" || header[1] != server_version
-            log("Handshake stage 1 error: Invalid response: " + header)
-            continue
-        end
-        send_content(sock, "RANK " + to_string(node->rank))
-        (error_code, response) = receive_content_s(sock, self->server->slave_spawn_timeout)
-        if error_code != null
-            log("Handshake stage 2 timeout or error.")
-            continue
-        end
-        var rank = response.split({' '})
-        if rank.size != 2 || rank[0] != "RANK" || rank[1] != to_string(node->rank)
-            log("Handshake stage 2 error: Invalid response: " + rank)
+        if header.size != 3 || header[0] != "WORKER" || header[1] != server_version || header[2] != rank_str
+            log("Handshake error: Invalid response: " + header)
             continue
         end
         node->state = 1
@@ -652,7 +614,7 @@ function master_request_worker(self)
                 end
                 break
             end
-            var line = trim(state.get_result())
+            var line = state.get_result().trim()
             if line.empty()
                 break
             end
@@ -671,8 +633,8 @@ function master_request_worker(self)
             continue
         end
         # Construct HTTP session
-        var session = new http_session{null, conn->seq_id, header}
-        log("Received: Method = " + session.method + ", URL = " + session.url + ", Host = " + session.host + ", Connection = " + session.connection + ", Sequence ID = " + session.seq)
+        var session = new http_session{null, header}
+        log("Received: Method = " + session.method + ", URL = " + session.url + ", Host = " + session.host + ", Connection = " + session.connection)
         if session.connection == "keep-alive"
             sock.set_opt_keep_alive(true)
         end
@@ -722,16 +684,13 @@ function master_request_worker(self)
             conn->state = -1
             continue
         end
-        if ++conn->seq_id >= self->server->max_keep_alive
+        if ++conn->request_count >= self->server->max_keep_alive
             log("Keep-alive exceeded max request count.")
             async.write(sock, compose_response(state_codes.code_408))
             safe_shutdown(sock)
             conn->state = -1
             continue
         end
-        # Placeholder
-        conn->arrival_queue.push_back(null)
-        conn->departure_queue.push_back(session)
         conn->last_request_time = runtime.time()
         # Keep-Alive check
         if session.connection == "close"
@@ -739,6 +698,7 @@ function master_request_worker(self)
         else
             conn->state = 0
         end
+        conn->request_queue.push_back(move(session))
     end
 end
 
@@ -749,17 +709,17 @@ function master_response_worker(self)
             continue
         end
         foreach conn in self->server->conn_list
-            while !conn->arrival_queue.empty()
-                var response = conn->arrival_queue.front
+            while !conn->request_queue.empty()
+                var response = conn->request_queue.front.response
                 if response != null
-                    ++conn->arrival_idx
-                    conn->arrival_queue.pop_front()
+                    async.write(conn->sock, response)
+                    conn->request_queue.pop_front()
+                    --conn->request_idx
                 else
                     break
                 end
-                async.write(conn->sock, response)
             end
-            if conn->arrival_queue.empty() && conn->state == -1
+            if conn->request_queue.empty() && conn->state == -1
                 log("Active safe shutdown socket")
                 safe_shutdown(conn->sock)
             end
@@ -794,7 +754,7 @@ function master_dispatch_worker(self)
         end
         var conn = null
         foreach it in self->server->conn_list
-            if !it->departure_queue.empty()
+            if it->request_idx < it->request_queue.size
                 conn = it
                 break
             end
@@ -820,19 +780,18 @@ function master_dispatch_worker(self)
         else
             # Departure queue not empty, send request
             node->state = 2
-            var session = conn->departure_queue.front
-            conn->departure_queue.pop_front()
+            link session = conn->request_queue[conn->request_idx++]
             send_content(node->sock, session.serialize())
             log("Request dispatched to worker rank " + node->rank + ", waiting for response...")
             var (error_code, response) = receive_content_s(node->sock, timeout)
             if error_code == null
                 log("Read response success for worker rank " + node->rank)
-                swap(conn->arrival_queue[session.seq - conn->arrival_idx], response)
+                session.response = response
                 node->last_conn_time = runtime.time()
                 node->state = 1
             else
                 log("Read response failed for worker rank " + node->rank)
-                swap(conn->arrival_queue[session.seq - conn->arrival_idx], compose_response(error_code))
+                session.response = compose_response(error_code)
                 node->state = -1
             end
         end
@@ -854,18 +813,12 @@ function slave_worker(self)
         sock.set_opt_keep_alive(true)
         # Start handshake
         var header = receive_content(sock).split({' '})
-        if header.size != 2 || header[0] != "SERVER" || header[1] != server_version
+        if header.size != 3 || header[0] != "SERVER" || header[1] != server_version
             log("Handshake error: Invalid response: " + header)
             continue
         end
-        send_content(sock, "WORKER " + server_version)
-        var rank = receive_content(sock).split({' '})
-        if rank.size != 2 || rank[0] != "RANK"
-            log("Handshake error: Invalid response: " + rank)
-            continue
-        end
-        self->rank = rank[1] as integer
-        send_content(sock, "RANK " + rank[1])
+        self->rank = header[2] as integer
+        send_content(sock, {"WORKER", server_version, header[2]}.join(" "))
         log("Slave handshake success, rank = " + to_string(self->rank))
         self->state = 2
         var error_code = null
@@ -922,7 +875,7 @@ function slave_worker(self)
                 if url_map.exist(error_code)
                     url_map[error_code](*self->server, session)
                 else
-                    async.write(sock, compose_response(error_code))
+                    send_content(sock, compose_response(error_code))
                 end
             end
             last_request_time = runtime.time()
@@ -952,7 +905,7 @@ function http_get(url)
     if low_speed_limit != null
         session.set_low_speed_limit(low_speed_limit)
     end
-    if session.perform()
+    if runtime.await(session.perform)
         return buff.get_string()
     else
         return null
@@ -979,7 +932,7 @@ function http_post(url, post_fields)
     if low_speed_limit != null
         session.set_low_speed_limit(low_speed_limit)
     end
-    if session.perform()
+    if runtime.await(session.perform)
         return buff.get_string()
     else
         return null
@@ -1031,7 +984,7 @@ class http_server
             mtime_map.insert(path, system.file.mtime(path))
         end
         var data = global.read_file(path)
-        content_map.insert(path, move(data))
+        content_map.insert(path, data)
         return data
     end
     function add_worker(func)
@@ -1097,14 +1050,14 @@ class http_server
     end
     function bind_page(url, path, state_code)
         var normalized_path = path_normalize((wwwroot_path != null ? wwwroot_path + "/" + path : path))
-        url_map.insert(url, [normalized_path, state_code](server, session, post_data){
+        url_map.insert(url, [normalized_path, state_code](server, session){
             session.send_response(state_code, server.read_file(normalized_path), get_mime(normalized_path))
         })
         return this
     end
     function bind_code(state_code, path)
         var normalized_path = path_normalize((wwwroot_path != null ? wwwroot_path + "/" + path : path))
-        url_map.insert(state_code, [normalized_path, state_code](server, session, post_data){
+        url_map.insert(state_code, [normalized_path, state_code](server, session){
             session.send_response(state_code, server.read_file(normalized_path), get_mime(normalized_path))
         })
         return this
