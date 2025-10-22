@@ -1,5 +1,6 @@
 package netutils
 
+import codec.json.value as json_value
 import network.*, regex, curl
 import codec.json
 
@@ -234,8 +235,8 @@ class http_session
     var method = null
     var version = null
     var connection = null
+    var post_data = null
     var content_length = null
-    var post_data = new string
     var write_response = async.write
     # for multi-node setup
     var response = null
@@ -244,7 +245,7 @@ class http_session
         var request_line = request_header.pop_front()
         var match = request_line_reg.match(request_line)
         if !match.empty()
-            method = match.str(1)
+            method = match.str(1).toupper()
             url = match.str(2)
             args = match.str(3)
             version = match.str(4)
@@ -289,27 +290,31 @@ class http_session
         write_response(sock, resp)
     end
     function serialize()
-        return json.to_string(json.from_var({
-            "url": url,
-            "args": args,
-            "host": host,
-            "method": method,
-            "version": version,
-            "connection": connection,
-            "content_length": content_length,
-            "post_data": post_data
-        } as hash_map))
+        var obj = json_value.make_object()
+        obj.set_member("url", json_value.make_string(url))
+        obj.set_member("args", json_value.make_string(args))
+        obj.set_member("host", json_value.make_string(host))
+        obj.set_member("method", json_value.make_string(method))
+        obj.set_member("version", json_value.make_string(version))
+        obj.set_member("connection", json_value.make_string(connection))
+        if method == "POST"
+            obj.set_member("post_data", json_value.make_string(post_data))
+            obj.set_member("content_length", json_value.make_int(content_length))
+        end
+        return json.to_string(obj)
     end
     function deserialize(data)
-        var obj = json.to_var(json.from_string(data))
-        url = obj["url"]
-        args = obj["args"]
-        host = obj["host"]
-        method = obj["method"]
-        version = obj["version"]
-        connection = obj["connection"]
-        content_length = obj["content_length"]
-        post_data = obj["post_data"]
+        var obj = json.from_string(data)
+        url = obj.get_member("url").as_string()
+        args = obj.get_member("args").as_string()
+        host = obj.get_member("host").as_string()
+        method = obj.get_member("method").as_string()
+        version = obj.get_member("version").as_string()
+        connection = obj.get_member("connection").as_string()
+        if method == "POST"
+            post_data = obj.get_member("post_data").as_string()
+            content_length = obj.get_member("content_length").as_int()
+        end
         write_response = send_content
     end
 end
@@ -566,11 +571,11 @@ function master_accept_worker(self)
 end
 
 function master_request_worker(self)
+    link clist = self->server->conn_list
     loop
         var conn = null
-        link clist = self->server->conn_list
         for it = clist.begin, it != clist.end, null
-            link c = it.data
+            var c = it.data
             if c->state == -1 || !c->sock.is_open()
                 it = clist.erase(it)
                 continue
@@ -694,7 +699,7 @@ function master_request_worker(self)
         conn->last_request_time = runtime.time()
         # Keep-Alive check
         if session.connection == "close"
-            conn->state = -1
+            conn->state = 2
         else
             conn->state = 0
         end
@@ -703,37 +708,48 @@ function master_request_worker(self)
 end
 
 function master_response_worker(self)
+    link clist = self->server->conn_list
     loop
-        if self->server->conn_list.empty()
+        if clist.empty()
             fiber.yield()
             continue
         end
-        foreach conn in self->server->conn_list
-            while !conn->request_queue.empty()
-                var response = conn->request_queue.front.response
-                if response != null
-                    async.write(conn->sock, response)
-                    conn->request_queue.pop_front()
-                    --conn->request_idx
-                else
-                    break
-                end
+        var conn = null
+        foreach it in self->server->conn_list
+            if !it->request_queue.empty()
+                conn = it
+                break
             end
-            if conn->request_queue.empty() && conn->state == -1
-                log("Active safe shutdown socket")
-                safe_shutdown(conn->sock)
-            end
-            fiber.yield()
         end
+        if conn == null
+            fiber.yield()
+            continue
+        end
+        while !conn->request_queue.empty()
+            var response = conn->request_queue.front.response
+            if response != null
+                async.write(conn->sock, response)
+                conn->request_queue.pop_front()
+                --conn->request_idx
+            else
+                break
+            end
+        end
+        if conn->request_queue.empty() && conn->state == 2
+            log("Active safe shutdown socket for close connection")
+            safe_shutdown(conn->sock)
+            conn->state = -1
+        end
+        fiber.yield()
     end
 end
 
 function master_dispatch_worker(self)
+    link slist = self->server->slave_list
     loop
         var node = null
-        link slist = self->server->slave_list
         for it = slist.begin, it != slist.end, null
-            link n = it.data
+            var n = it.data
             if n->state == -1
                 self->server->deprecated_rank.push_back(n->rank)
                 it = slist.erase(it)
@@ -775,8 +791,6 @@ function master_dispatch_worker(self)
                     node->state = -1  
                 end
             end
-            fiber.yield()
-            continue
         else
             # Departure queue not empty, send request
             node->state = 2
@@ -795,6 +809,7 @@ function master_dispatch_worker(self)
                 node->state = -1
             end
         end
+        fiber.yield()
     end
 end
 
@@ -884,6 +899,99 @@ function slave_worker(self)
 end
 
 # Public Interfaces
+
+function hex_char_to_int(c)
+    if c >= "0" && c <= "9"
+        return to_integer(c[0]) - to_integer('0')
+    end
+    if c >= "a" && c <= "f"
+        return to_integer(c[0]) - to_integer('a') + 10
+    end
+    if c >= "A" && c <= "F"
+        return to_integer(c[0]) - to_integer('A') + 10
+    end
+    return -1
+end
+
+function hex_to_int(s)
+    var val = 0
+    foreach i in range(s.size)
+        var d = hex_char_to_int(s.substr(i, 1))
+        if d < 0
+            return 0
+        end
+        val = val * 16 + d
+    end
+    return val
+end
+
+function url_decode(s)
+    var out = ""
+    var i = 0
+    var n = s.size
+    while i < n
+        var ch = s.substr(i, 1)
+        if ch == "+"
+            out += " "
+            i += 1
+        else if ch == "%" && i + 2 < n
+            var hx = s.substr(i + 1, 2)
+            var byte = hex_to_int(hx)
+            out += char.from_ascii(byte)
+            i += 3
+        else
+            out += ch
+            i += 1
+        end
+    end
+    return out
+end
+
+function parse_http_args(input)
+    var qs = input
+    var qpos = input.find("?", 0)
+    if qpos != -1
+        qs = input.substr(qpos + 1, input.size)
+    end
+
+    var result = new hash_map
+    if qs == "" || qs == null
+        return result
+    end
+
+    var parts = qs.split({'&'})
+    foreach p in parts
+        if p == ""
+            continue
+        end
+        var eq = p.find("=", 0)
+        var key = ""
+        var val = ""
+        if eq == -1
+            key = url_decode(p)
+            val = ""
+        else
+            key = url_decode(p.substr(0, eq))
+            val = url_decode(p.substr(eq + 1, p.size))
+        end
+
+        if !result.exist(key)
+            result[key] = val
+        else
+            var cur = result[key]
+            if typeid cur != typeid array
+                var v = new array
+                v.push_back(cur)
+                v.push_back(val)
+                result[key] = v
+            else
+                cur.push_back(val)
+                result[key] = cur
+            end
+        end
+    end
+    return result
+end
 
 var proxy = null, timeout_ms = null, low_speed_limit = null
 

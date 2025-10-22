@@ -45,99 +45,6 @@ end
 var get_stmt = db.prepare("SELECT * FROM NETUTILS_TEST WHERE ID=?")
 var set_stmt = db.prepare("REPLACE INTO NETUTILS_TEST (ID, VAL) VALUES (?, ?)")
 
-function hex_char_to_int(c)
-    if c >= "0" && c <= "9"
-        return to_integer(c[0]) - to_integer('0')
-    end
-    if c >= "a" && c <= "f"
-        return to_integer(c[0]) - to_integer('a') + 10
-    end
-    if c >= "A" && c <= "F"
-        return to_integer(c[0]) - to_integer('A') + 10
-    end
-    return -1
-end
-
-function hex_to_int(s)
-    var val = 0
-    foreach i in range(s.size)
-        var d = hex_char_to_int(s.substr(i, 1))
-        if d < 0
-            return 0
-        end
-        val = val * 16 + d
-    end
-    return val
-end
-
-function url_decode(s)
-    var out = ""
-    var i = 0
-    var n = s.size
-    while i < n
-        var ch = s.substr(i, 1)
-        if ch == "+"
-            out += " "
-            i += 1
-        else if ch == "%" && i + 2 < n
-            var hx = s.substr(i + 1, 2)
-            var byte = hex_to_int(hx)
-            out += char.from_ascii(byte)
-            i += 3
-        else
-            out += ch
-            i += 1
-        end
-    end
-    return out
-end
-
-function parse_get_args(input)
-    var qs = input
-    var qpos = input.find("?", 0)
-    if qpos != -1
-        qs = input.substr(qpos + 1, input.size)
-    end
-
-    var result = new hash_map
-    if qs == "" || qs == null
-        return result
-    end
-
-    var parts = qs.split({'&'})
-    foreach p in parts
-        if p == ""
-            continue
-        end
-        var eq = p.find("=", 0)
-        var key = ""
-        var val = ""
-        if eq == -1
-            key = url_decode(p)
-            val = ""
-        else
-            key = url_decode(p.substr(0, eq))
-            val = url_decode(p.substr(eq + 1, p.size))
-        end
-
-        if !result.exist(key)
-            result[key] = val
-        else
-            var cur = result[key]
-            if typeid cur != typeid array
-                var v = new array
-                v.push_back(cur)
-                v.push_back(val)
-                result[key] = v
-            else
-                cur.push_back(val)
-                result[key] = cur
-            end
-        end
-    end
-    return result
-end
-
 function fiber_delay(period)
     var time = runtime.time()
     while runtime.time() - time < period
@@ -151,7 +58,7 @@ var server = (new netutils.http_server)
     .bind_func("/get", [](server, session){
         # DB query
         if session.method != "POST"
-            var args = parse_get_args(session.args)
+            var args = netutils.parse_http_args(session.args)
             get_stmt.bind(0, args.id)
         else
             session.send_response(netutils.state_codes.code_403, "Please use GET method.", "text/plain")
