@@ -572,7 +572,7 @@ namespace network_cs_ext {
 		{
 			asio::io_context &io = cs_impl::network::get_io_context();
 			while (true) {
-				io.poll_one();
+				io.poll();
 				if (state->has_done.load(std::memory_order_acquire))
 					return !state->ec;
 #if COVSCRIPT_ABI_VERSION >= 250908
@@ -592,7 +592,7 @@ namespace network_cs_ext {
 			auto start = std::chrono::steady_clock::now();
 			std::chrono::milliseconds timeout_duration(timeout_ms);
 			while (true) {
-				io.poll_one();
+				io.poll();
 				if (state->has_done.load(std::memory_order_acquire))
 					return !state->ec;
 				auto now = std::chrono::steady_clock::now();

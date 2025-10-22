@@ -222,55 +222,58 @@ function get_mime(path)
     end
 end
 
+function create_http_session(request_header)
+    var session = new http_session
+    var request_line = request_header.pop_front()
+    var match = request_line_reg.match(request_line)
+    if !match.empty()
+        session.method = match.str(1)
+        session.url = match.str(2)
+        session.args = match.str(3)
+        session.version = match.str(4)
+    else
+        return null
+    end
+    if session.url.empty()
+        session.url = "/"
+    end
+    foreach line in request_header
+        var match = request_header_reg.match(line)
+        if !match.empty()
+            switch match.str(1).tolower()
+                case "host"
+                    session.host = match.str(2)
+                end
+                case "connection"
+                    session.connection = match.str(2).tolower()
+                end
+                case "content-length"
+                    session.content_length = match.str(2) as integer
+                end
+            end
+        end
+    end
+    if session.connection == null || session.connection.empty()
+        session.connection = (session.version <= "1.0" ? "close" : "keep-alive")
+    end
+    return move(session)
+end
+
 class http_session
-    var sock = null
     var url = null
     var args = null
     var host = null
     var method = null
     var version = null
     var connection = null
+    # POST data
     var post_data = null
     var content_length = null
+    # for handler
+    var sock = null
     var write_response = async.write
     # for multi-node setup
     var response = null
-    function construct(socket, request_header)
-        sock = socket
-        var request_line = request_header.pop_front()
-        var match = request_line_reg.match(request_line)
-        if !match.empty()
-            method = match.str(1).toupper()
-            url = match.str(2)
-            args = match.str(3)
-            version = match.str(4)
-        else
-            async.write(sock, compose_response(state_codes.code_400))
-            return
-        end
-        if url.empty()
-            url = "/"
-        end
-        foreach line in request_header
-            var match = request_header_reg.match(line)
-            if !match.empty()
-                switch match.str(1).tolower()
-                    case "host"
-                        host = match.str(2)
-                    end
-                    case "connection"
-                        connection = match.str(2).tolower()
-                    end
-                    case "content-length"
-                        content_length = match.str(2) as integer
-                    end
-                end
-            end
-        end
-        if connection == null || connection.empty()
-            connection = (version <= "1.0" ? "close" : "keep-alive")
-        end
-    end
     function send_response(code, data, type)
         var content_len = to_string(data.size)
         var resp = new string
@@ -293,7 +296,6 @@ class http_session
         obj.set_member("version", json_value.make_string(version))
         obj.set_member("connection", json_value.make_string(connection))
         if method == "POST"
-            obj.set_member("post_data", json_value.make_string(post_data))
             obj.set_member("content_length", json_value.make_int(content_length))
         end
         return json.to_string(obj)
@@ -307,7 +309,6 @@ class http_session
         version = obj.get_member("version").as_string()
         connection = obj.get_member("connection").as_string()
         if method == "POST"
-            post_data = obj.get_member("post_data").as_string()
             content_length = obj.get_member("content_length").as_int()
         end
         write_response = send_content
@@ -322,6 +323,144 @@ struct worker_type
     # 0 = init, 1 = wait, 2 = busy
     var state = 0
     var server = null
+end
+
+function read_http_header(sock, keep_alive_timeout)
+    # Read HTTP headers
+    var header = new array
+    var error_code = null
+    var state = new async.state
+    loop
+        async.read_until(sock, state, "\r\n")
+        var timeout = keep_alive_timeout - runtime.time()
+        if timeout <= 0
+            error_code = state_codes.code_408
+            break
+        end
+        if !state.wait_for(timeout)
+            if state.has_done()
+                if state.eof()
+                    log("Read request header: End of file")
+                    error_code = state_codes.code_eof
+                else
+                    log("Read request header error: " + state.get_error())
+                    error_code = state_codes.code_500
+                end
+            else
+                log("Read request header error: Keep-alive timeout.")
+                error_code = state_codes.code_408
+            end
+            break
+        end
+        var line = state.get_result().trim()
+        if line.empty()
+            break
+        end
+        header.push_back(move(line))
+    end
+    if error_code == null && header.empty()
+        log("Read request header error: Empty request.")
+        error_code = state_codes.code_400
+    end
+    if error_code != null
+        if error_code != state_codes.code_eof
+            async.write(sock, compose_response(error_code))
+        end
+        return null
+    end
+    # Construct HTTP session
+    var session = create_http_session(header)
+    if session == null
+        log("Parse request header error.")
+        async.write(sock, compose_response(state_codes.code_400))
+        return null
+    end
+    log("Received: Method = " + session.method + ", URL = " + session.url + ", Host = " + session.host + ", Connection = " + session.connection)
+    if session.connection == "keep-alive"
+        sock.set_opt_keep_alive(true)
+    end
+    # Read POST data if needed
+    if session.method == "POST"
+        session.post_data = state.get_buffer(session.content_length)
+        var remaining = session.content_length - session.post_data.size
+        while remaining > 0
+            state = async.read(sock, remaining)
+            var timeout = keep_alive_timeout - runtime.time()
+            if timeout <= 0
+                error_code = state_codes.code_408
+                break
+            end
+            if !state.wait_for(timeout)
+                if state.has_done()
+                    if state.eof()
+                        log("Read POST body: End of file")
+                        error_code = state_codes.code_eof
+                    else
+                        log("Read POST body error: " + state.get_error())
+                        error_code = state_codes.code_500
+                    end
+                else
+                    log("Read POST body error: Keep-alive timeout.")
+                    error_code = state_codes.code_408
+                end
+                break
+            end
+            session.post_data.append(state.get_result())
+            remaining = session.content_length - session.post_data.size
+        end
+        if error_code != null
+            if error_code != state_codes.code_eof
+                async.write(sock, compose_response(error_code))
+            end
+            return null
+        end
+    end
+    return move(session)
+end
+
+function call_http_handler(session, server)
+    var error_code = null
+    if server->url_map.exist(session.url)
+        server->url_map[session.url](*server, session)
+    else if server->wwwroot_path != null
+        var base_path = server->wwwroot_path
+        var full_path = path_normalize(base_path + "/" + session.url)
+        log("Resolved path: " + full_path)
+        if full_path.find(base_path, 0) == 0
+            if system.path.is_directory(full_path)
+                if full_path[-1] != '/'
+                    full_path.append('/')
+                end
+                full_path.append("index.html")
+                log("Directory request, try to serve: " + full_path)
+            end
+            if system.path.is_file(full_path) && system.file.can_read(full_path)
+                log("Serving file: " + full_path)
+                session.send_response(state_codes.code_200, server->read_file(full_path), get_mime(full_path))
+            else
+                if system.file.exist(full_path)
+                    error_code = state_codes.code_403
+                else
+                    error_code = state_codes.code_404
+                end
+            end
+        else
+            error_code = state_codes.code_403
+        end
+    else
+        error_code = state_codes.code_403
+    end
+    if error_code != null
+        log("Resolving resource error: " + error_code)
+        if server->url_map.exist(error_code)
+            server->url_map[error_code](*server, session)
+        else
+            async.write(sock, compose_response(error_code))
+        end
+        return false
+    else
+        return true
+    end
 end
 
 function safe_shutdown(sock)
@@ -353,129 +492,14 @@ function worker_main(self)
                 async.write(sock, compose_response(state_codes.code_408))
                 break
             end
-            # Read HTTP headers
-            var header = new array
-            var error_code = null
-            state = new async.state
-            loop
-                async.read_until(sock, state, "\r\n")
-                var timeout = last_request_time + self->server->keep_alive_timeout - runtime.time()
-                if timeout <= 0
-                    error_code = state_codes.code_408
-                    break
-                end
-                if !state.wait_for(timeout)
-                    if state.has_done()
-                        if state.eof()
-                            log("Read request header: End of file")
-                            error_code = state_codes.code_eof
-                        else
-                            log("Read request header error: " + state.get_error())
-                            error_code = state_codes.code_500
-                        end
-                    else
-                        log("Read request header error: Keep-alive timeout.")
-                        error_code = state_codes.code_408
-                    end
-                    break
-                end
-                var line = state.get_result().trim()
-                if line.empty()
-                    break
-                end
-                header.push_back(move(line))
-            end
-            if error_code == null && header.empty()
-                log("Read request header error: Empty request.")
-                error_code = state_codes.code_400
-            end
-            if error_code != null
-                if error_code != state_codes.code_eof
-                    async.write(sock, compose_response(error_code))
-                end
+            var session = read_http_header(sock, last_request_time + self->server->keep_alive_timeout)
+            if session == null
                 break
             end
-            # Construct HTTP session
-            var session = new http_session{sock, header}
-            log("Received: Method = " + session.method + ", URL = " + session.url + ", Host = " + session.host + ", Connection = " + session.connection)
-            if session.connection == "keep-alive"
-                sock.set_opt_keep_alive(true)
-            end
-            # Read POST data if needed
-            if session.method == "POST"
-                session.post_data = state.get_buffer(session.content_length)
-                var remaining = session.content_length - session.post_data.size
-                while remaining > 0
-                    state = async.read(sock, remaining)
-                    var timeout = last_request_time + self->server->keep_alive_timeout - runtime.time()
-                    if timeout <= 0
-                        error_code = state_codes.code_408
-                        break
-                    end
-                    if !state.wait_for(timeout)
-                        if state.has_done()
-                            if state.eof()
-                                log("Read POST body: End of file")
-                                error_code = state_codes.code_eof
-                            else
-                                log("Read POST body error: " + state.get_error())
-                                error_code = state_codes.code_500
-                            end
-                        else
-                            log("Read POST body error: Keep-alive timeout.")
-                            error_code = state_codes.code_408
-                        end
-                        break
-                    end
-                    session.post_data.append(state.get_result())
-                    remaining = session.content_length - session.post_data.size
-                end
-                if error_code != null
-                    if error_code != state_codes.code_eof
-                        async.write(sock, compose_response(error_code))
-                    end
-                    break
-                end
-            end
             # Call handler
-            link url_map = self->server->url_map
-            if url_map.exist(session.url)
-                url_map[session.url](*self->server, session)
-            else if self->server->wwwroot_path != null
-                var base_path = self->server->wwwroot_path
-                var full_path = path_normalize(base_path + "/" + session.url)
-                log("Resolved path: " + full_path)
-                if full_path.find(base_path, 0) == 0
-                    if system.path.is_directory(full_path)
-                        if full_path[-1] != '/'
-                            full_path.append('/')
-                        end
-                        full_path.append("index.html")
-                        log("Directory request, try to serve: " + full_path)
-                    end
-                    if system.path.is_file(full_path) && system.file.can_read(full_path)
-                        log("Serving file: " + full_path)
-                        session.send_response(state_codes.code_200, self->server->read_file(full_path), get_mime(full_path))
-                    else
-                        if system.file.exist(full_path)
-                            error_code = state_codes.code_403
-                        else
-                            error_code = state_codes.code_404
-                        end
-                    end
-                else
-                    error_code = state_codes.code_403
-                end
-            else
-                error_code = state_codes.code_403
-            end
-            if error_code != null
-                log("Resolving resource error: " + error_code)
-                if url_map.exist(error_code)
-                    url_map[error_code](*self->server, session)
-                else
-                    async.write(sock, compose_response(error_code))
-                end
+            session.sock = sock
+            if !call_http_handler(session, self->server)
+                break
             end
             last_request_time = runtime.time()
             # Keep-Alive check
@@ -587,94 +611,11 @@ function master_request_worker(self)
             continue
         end
         var sock = conn->sock
-        # Read HTTP headers
-        log("Receiving HTTP request..")
-        var header = new array
-        var error_code = null
-        var state = new async.state
-        loop
-            async.read_until(sock, state, "\r\n")
-            var timeout = conn->last_request_time + self->server->keep_alive_timeout - runtime.time()
-            if timeout <= 0
-                error_code = state_codes.code_408
-                break
-            end
-            if !state.wait_for(timeout)
-                if state.has_done()
-                    if state.eof()
-                        log("Read request header: End of file")
-                        error_code = state_codes.code_eof
-                    else
-                        log("Read request header error: " + state.get_error())
-                        error_code = state_codes.code_500
-                    end
-                else
-                    log("Read request header error: Keep-alive timeout.")
-                    error_code = state_codes.code_408
-                end
-                break
-            end
-            var line = state.get_result().trim()
-            if line.empty()
-                break
-            end
-            header.push_back(move(line))
-        end
-        if error_code == null && header.empty()
-            log("Read request header error: Empty request.")
-            error_code = state_codes.code_400
-        end
-        if error_code != null
-            if error_code != state_codes.code_eof
-                async.write(sock, compose_response(error_code))
-            end
+        var session = read_http_header(sock, conn->last_request_time + self->server->keep_alive_timeout)
+        if session == null
             safe_shutdown(sock)
             conn->state = -1
             continue
-        end
-        # Construct HTTP session
-        var session = new http_session{null, header}
-        log("Received: Method = " + session.method + ", URL = " + session.url + ", Host = " + session.host + ", Connection = " + session.connection)
-        if session.connection == "keep-alive"
-            sock.set_opt_keep_alive(true)
-        end
-        # Read POST data if needed
-        if session.method == "POST"
-            session.post_data = state.get_buffer(session.content_length)
-            var remaining = session.content_length - session.post_data.size
-            while remaining > 0
-                state = async.read(sock, remaining)
-                var timeout = conn->last_request_time + self->server->keep_alive_timeout - runtime.time()
-                if timeout <= 0
-                    error_code = state_codes.code_408
-                    break
-                end
-                if !state.wait_for(timeout)
-                    if state.has_done()
-                        if state.eof()
-                            log("Read POST body: End of file")
-                            error_code = state_codes.code_eof
-                        else
-                            log("Read POST body error: " + state.get_error())
-                            error_code = state_codes.code_500
-                        end
-                    else
-                        log("Read POST body error: Keep-alive timeout.")
-                        error_code = state_codes.code_408
-                    end
-                    break
-                end
-                session.post_data.append(state.get_result())
-                remaining = session.content_length - session.post_data.size
-            end
-            if error_code != null
-                if error_code != state_codes.code_eof
-                    async.write(sock, compose_response(error_code))
-                end
-                safe_shutdown(sock)
-                conn->state = -1
-                continue
-            end
         end
         # Check keep-alive
         if runtime.time() - conn->last_request_time >= self->server->keep_alive_timeout
@@ -793,6 +734,9 @@ function master_dispatch_worker(self)
             node->state = 2
             link session = conn->request_queue[conn->request_idx++]
             send_content(node->sock, session.serialize())
+            if session.method == "POST"
+                async.write(node->sock, session.post_data)
+            end
             log("Request dispatched to worker rank " + node->rank + ", waiting for response...")
             var (error_code, response) = receive_content_s(node->sock, timeout)
             if error_code == null
@@ -832,62 +776,41 @@ function slave_worker(self)
         send_content(sock, {"WORKER", server_version, header[2]}.join(" "))
         log("Slave handshake success, rank = " + to_string(self->rank))
         self->state = 2
-        var error_code = null
         var last_request_time = runtime.time()
         loop
-            var context = receive_content(sock)
-            if context == null
+            var timeout = last_request_time + self->server->slave_keep_alive_timeout - runtime.time()
+            if timeout <= 0
                 break
             end
-            if context == "SLAVE_HEALTH_QUERY"
+            var (error_code, data) = receive_content_s(sock, timeout)
+            if error_code != null
+                break
+            end
+            if data == "SLAVE_HEALTH_QUERY"
                 send_content(sock, "SLAVE_HEALTH_CONFIRM")
                 log("Rank " + self->rank + ": Heartbeat from server")
                 last_request_time = runtime.time()
                 continue
             end
             var session = new http_session
-            session.deserialize(context)
-            session.sock = sock
+            session.deserialize(data)
+            if session.method == "POST"
+                timeout = last_request_time + self->server->slave_keep_alive_timeout - runtime.time()
+                if timeout <= 0
+                    break
+                end
+                var state = async.read(sock, session.content_length)
+                if !state.wait_for(timeout)
+                    log("Error when receiving POST data")
+                    break
+                end
+                session.post_data = state.get_result()
+            end
             log("Received: Method = " + session.method + ", URL = " + session.url + ", Host = " + session.host)
             # Call handler
-            link url_map = self->server->url_map
-            if url_map.exist(session.url)
-                url_map[session.url](*self->server, session)
-            else if self->server->wwwroot_path != null
-                var base_path = self->server->wwwroot_path
-                var full_path = path_normalize(base_path + "/" + session.url)
-                log("Resolved path: " + full_path)
-                if full_path.find(base_path, 0) == 0
-                    if system.path.is_directory(full_path)
-                        if full_path[-1] != '/'
-                            full_path.append('/')
-                        end
-                        full_path.append("index.html")
-                        log("Directory request, try to serve: " + full_path)
-                    end
-                    if system.path.is_file(full_path) && system.file.can_read(full_path)
-                        log("Serving file: " + full_path)
-                        session.send_response(state_codes.code_200, self->server->read_file(full_path), get_mime(full_path))
-                    else
-                        if system.file.exist(full_path)
-                            error_code = state_codes.code_403
-                        else
-                            error_code = state_codes.code_404
-                        end
-                    end
-                else
-                    error_code = state_codes.code_403
-                end
-            else
-                error_code = state_codes.code_403
-            end
-            if error_code != null
-                log("Resolving resource error: " + error_code)
-                if url_map.exist(error_code)
-                    url_map[error_code](*self->server, session)
-                else
-                    send_content(sock, compose_response(error_code))
-                end
+            session.sock = sock
+            if !call_http_handler(session, self->server)
+                continue
             end
             last_request_time = runtime.time()
         end
@@ -949,12 +872,10 @@ function parse_http_args(input)
     if qpos != -1
         qs = input.substr(qpos + 1, input.size)
     end
-
     var result = new hash_map
     if qs == "" || qs == null
         return result
     end
-
     var parts = qs.split({'&'})
     foreach p in parts
         if p == ""
@@ -970,7 +891,6 @@ function parse_http_args(input)
             key = url_decode(p.substr(0, eq))
             val = url_decode(p.substr(eq + 1, p.size))
         end
-
         if !result.exist(key)
             result[key] = val
         else
