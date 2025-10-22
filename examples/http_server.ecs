@@ -73,7 +73,7 @@ var server = (new netutils.http_server)
     .bind_func("/set", [](server, session){
         # DB insert
         if session.method != "POST"
-            var args = parse_get_args(session.args)
+            var args = netutils.parse_http_args(session.args)
             set_stmt.bind(0, args.id)
             set_stmt.bind(1, args.val)
         else
