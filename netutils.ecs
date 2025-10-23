@@ -88,8 +88,8 @@ function receive_content(sock)
 end
 
 function receive_content_s(sock, timeout)
+    var start_time = runtime.time()
     var state = async.read(sock, 16)
-    var time = runtime.time()
     if !state.wait_for(timeout)
         if state.has_done()
             log("Read content header failed: " + state.get_error())
@@ -101,8 +101,12 @@ function receive_content_s(sock, timeout)
     end
     var size = from_fixed_hex(state.get_result())
     state = async.read(sock, size)
-    var remain = timeout - (runtime.time() - time)
-    if time > 0 && !state.wait_for(remain)
+    var remain = timeout - (runtime.time() - start_time)
+    if remain <= 0
+        log("Read content body failed: Timeout")
+        return {state_codes.code_408, null}
+    end
+    if !state.wait_for(remain)
         if state.has_done()
             log("Read content body failed: " + state.get_error())
             return {state_codes.code_500, null}
@@ -222,43 +226,6 @@ function get_mime(path)
     end
 end
 
-function create_http_session(request_header)
-    var session = new http_session
-    var request_line = request_header.pop_front()
-    var match = request_line_reg.match(request_line)
-    if !match.empty()
-        session.method = match.str(1)
-        session.url = match.str(2)
-        session.args = match.str(3)
-        session.version = match.str(4)
-    else
-        return null
-    end
-    if session.url.empty()
-        session.url = "/"
-    end
-    foreach line in request_header
-        var match = request_header_reg.match(line)
-        if !match.empty()
-            switch match.str(1).tolower()
-                case "host"
-                    session.host = match.str(2)
-                end
-                case "connection"
-                    session.connection = match.str(2).tolower()
-                end
-                case "content-length"
-                    session.content_length = match.str(2) as integer
-                end
-            end
-        end
-    end
-    if session.connection == null || session.connection.empty()
-        session.connection = (session.version <= "1.0" ? "close" : "keep-alive")
-    end
-    return move(session)
-end
-
 class http_session
     var url = null
     var args = null
@@ -315,14 +282,41 @@ class http_session
     end
 end
 
-# Workers
-
-struct worker_type
-    var co = null
-    var rank = 0
-    # 0 = init, 1 = wait, 2 = busy
-    var state = 0
-    var server = null
+function create_http_session(request_header)
+    var session = new http_session
+    var request_line = request_header.pop_front()
+    var match = request_line_reg.match(request_line)
+    if !match.empty()
+        session.method = match.str(1)
+        session.url = match.str(2)
+        session.args = match.str(3)
+        session.version = match.str(4)
+    else
+        return null
+    end
+    if session.url.empty()
+        session.url = "/"
+    end
+    foreach line in request_header
+        var match = request_header_reg.match(line)
+        if !match.empty()
+            switch match.str(1).tolower()
+                case "host"
+                    session.host = match.str(2)
+                end
+                case "connection"
+                    session.connection = match.str(2).tolower()
+                end
+                case "content-length"
+                    session.content_length = match.str(2) as integer
+                end
+            end
+        end
+    end
+    if session.connection == null || session.connection.empty()
+        session.connection = (session.version <= "1.0" ? "close" : "keep-alive")
+    end
+    return move(session)
 end
 
 function read_http_header(sock, keep_alive_timeout)
@@ -472,7 +466,17 @@ function safe_shutdown(sock)
     end
 end
 
-function worker_main(self)
+# Workers
+
+struct worker_type
+    var co = null
+    var rank = 0
+    # -1 = error, 0 = ready, 1 = wait, 2 = busy
+    var state = 0
+    var server = null
+end
+
+function simple_worker(self)
     loop
         self->state = 1
         # Accept new connection
@@ -513,7 +517,10 @@ end
 
 struct http_conn
     var sock = null
+    # -1 = close, 0 = established, 1 = busy
     var state = 0
+    var close = false
+    var keep_alive = true
     var request_count = 0
     var last_request_time = 0
     var request_idx = 0
@@ -524,6 +531,7 @@ struct slave_node
     var last_conn_time = null
     var sock = null
     var rank = null
+    # -1 = error, 0 = ready, 1 = busy
     var state = 0
 end
 
@@ -561,7 +569,6 @@ function master_spawn_worker(self)
             log("Handshake error: Invalid response: " + header)
             continue
         end
-        node->state = 1
         node->last_conn_time = runtime.time()
         self->server->slave_list.push_back(node)
         log("Worker rank " + to_string(node->rank) + " connected, total workers = " + to_string(self->server->slave_list.size))
@@ -599,8 +606,9 @@ function master_request_worker(self)
                 it = clist.erase(it)
                 continue
             end
-            if c->state == 0
-                c->state = 1
+            if c->state == 0 && c->keep_alive
+                clist.erase(it)
+                clist.push_back(c)
                 conn = c
                 break
             end
@@ -610,6 +618,7 @@ function master_request_worker(self)
             fiber.yield()
             continue
         end
+        conn->state = 1
         var sock = conn->sock
         var session = read_http_header(sock, conn->last_request_time + self->server->keep_alive_timeout)
         if session == null
@@ -620,26 +629,19 @@ function master_request_worker(self)
         # Check keep-alive
         if runtime.time() - conn->last_request_time >= self->server->keep_alive_timeout
             log("Keep-alive exceeded timeout limit.")
-            async.write(sock, compose_response(state_codes.code_408))
-            safe_shutdown(sock)
-            conn->state = -1
-            continue
-        end
-        if ++conn->request_count >= self->server->max_keep_alive
+            conn->keep_alive = false
+        else if ++conn->request_count >= self->server->max_keep_alive
             log("Keep-alive exceeded max request count.")
-            async.write(sock, compose_response(state_codes.code_408))
-            safe_shutdown(sock)
-            conn->state = -1
-            continue
+            conn->keep_alive = false
         end
         conn->last_request_time = runtime.time()
-        # Keep-Alive check
+        # Check connection type
         if session.connection == "close"
-            conn->state = 2
-        else
-            conn->state = 0
+            conn->keep_alive = false
+            conn->close = true
         end
         conn->request_queue.push_back(move(session))
+        conn->state = 0
     end
 end
 
@@ -651,7 +653,7 @@ function master_response_worker(self)
             continue
         end
         var conn = null
-        foreach it in self->server->conn_list
+        foreach it in clist
             if !it->request_queue.empty()
                 conn = it
                 break
@@ -662,9 +664,9 @@ function master_response_worker(self)
             continue
         end
         while !conn->request_queue.empty()
-            var response = conn->request_queue.front.response
-            if response != null
-                async.write(conn->sock, response)
+            link session = conn->request_queue.front
+            if session != null && session.response != null
+                async.write(conn->sock, session.response)
                 conn->request_queue.pop_front()
                 --conn->request_idx
             else
@@ -672,8 +674,10 @@ function master_response_worker(self)
                 break
             end
         end
-        if conn->request_queue.empty() && conn->state == 2
-            log("Active safe shutdown socket for close connection")
+        if conn->request_queue.empty() && !conn->keep_alive
+            if !conn->close
+                async.write(conn->sock, compose_response(state_codes.code_408))
+            end
             safe_shutdown(conn->sock)
             conn->state = -1
         end
@@ -691,7 +695,9 @@ function master_dispatch_worker(self)
                 it = slist.erase(it)
                 continue
             end
-            if n->state == 1
+            if n->state == 0
+                slist.erase(it)
+                slist.push_back(n)
                 node = n
                 break
             else
@@ -712,26 +718,28 @@ function master_dispatch_worker(self)
             end
         end
         var timeout = node->last_conn_time + self->server->slave_keep_alive_timeout - runtime.time()
+        if timeout <= 0
+            timeout = self->server->slave_keep_alive_timeout
+        end
         if conn == null
             # Departure queue empty, send heartbeat
             if runtime.time() - node->last_conn_time >= self->server->heartbeat_interval
-                node->state = 2
+                node->state = 1
                 send_content(node->sock, "SLAVE_HEALTH_QUERY")
                 var (error_code, response) = receive_content_s(node->sock, timeout)
                 if error_code == null && response == "SLAVE_HEALTH_CONFIRM"
                     log("Heartbeat success for worker rank " + node->rank)
                     node->last_conn_time = runtime.time()
-                    node->state = 1
+                    node->state = 0
                 else
                     log("Heartbeat failed for worker rank " + node->rank)
+                    safe_shutdown(node->sock)
                     node->state = -1  
                 end
-            else
-                fiber.yield()
             end
         else
             # Departure queue not empty, send request
-            node->state = 2
+            node->state = 1
             link session = conn->request_queue[conn->request_idx++]
             send_content(node->sock, session.serialize())
             if session.method == "POST"
@@ -743,13 +751,15 @@ function master_dispatch_worker(self)
                 log("Read response success for worker rank " + node->rank)
                 session.response = response
                 node->last_conn_time = runtime.time()
-                node->state = 1
+                node->state = 0
             else
                 log("Read response failed for worker rank " + node->rank)
                 session.response = compose_response(error_code)
+                safe_shutdown(node->sock)
                 node->state = -1
             end
         end
+        fiber.yield()
     end
 end
 
@@ -814,6 +824,8 @@ function slave_worker(self)
             end
             last_request_time = runtime.time()
         end
+        # delay before error recovery
+        runtime.delay(100)
     end
 end
 
@@ -1041,14 +1053,14 @@ class http_server
             end
         else
             log("Running in single-process mode.")
-            worker_func = worker_main
+            worker_func = simple_worker
         end
         foreach it in range(worker_count)
             add_worker(worker_func)
         end
     end
     # public functions
-    function set_wwwroot(path)
+    function set_wwwroot(path : string)
         if system.path.is_directory(path)
             wwwroot_path = path_normalize(path)
             if wwwroot_path[-1] == '/'
@@ -1058,15 +1070,12 @@ class http_server
         end
         return this
     end
-    function set_config(conf)
+    function set_config(conf : hash_map)
         if conf.exist("wwwroot")
             set_wwwroot(conf["wwwroot"])
         end
         if conf.exist("worker_count")
             worker_count = conf["worker_count"] as integer
-        end
-        if conf.exist("master_worker_count")
-            master_worker_count = conf["master_worker_count"] as integer
         end
         if conf.exist("max_keep_alive")
             max_keep_alive = conf["max_keep_alive"] as integer
@@ -1074,23 +1083,38 @@ class http_server
         if conf.exist("keep_alive_timeout")
             keep_alive_timeout = conf["keep_alive_timeout"] as integer
         end
+        if conf.exist("master_worker_count")
+            master_worker_count = conf["master_worker_count"] as integer
+        end
+        if conf.exist("max_connections")
+            max_connections = conf["max_connections"] as integer
+        end
+        if conf.exist("heartbeat_interval")
+            heartbeat_interval = conf["heartbeat_interval"] as integer
+        end
+        if conf.exist("slave_spawn_timeout")
+            slave_spawn_timeout = conf["slave_spawn_timeout"] as integer
+        end
+        if conf.exist("slave_keep_alive_timeout")
+            slave_keep_alive_timeout = conf["slave_keep_alive_timeout"] as integer
+        end
         return this
     end
-    function bind_page(url, path, state_code)
+    function bind_page(url : string, path : string)
         var normalized_path = path_normalize((wwwroot_path != null ? wwwroot_path + "/" + path : path))
-        url_map.insert(url, [normalized_path, state_code](server, session){
-            session.send_response(state_code, server.read_file(normalized_path), get_mime(normalized_path))
+        url_map.insert(url, [normalized_path](server, session){
+            session.send_response(state_codes.code_200, server.read_file(normalized_path), get_mime(normalized_path))
         })
         return this
     end
-    function bind_code(state_code, path)
+    function bind_code(state_code : string, path : string)
         var normalized_path = path_normalize((wwwroot_path != null ? wwwroot_path + "/" + path : path))
         url_map.insert(state_code, [normalized_path, state_code](server, session){
             session.send_response(state_code, server.read_file(normalized_path), get_mime(normalized_path))
         })
         return this
     end
-    function bind_func(url, func : function)
+    function bind_func(url : string, func : function)
         url_map.insert(url, func)
         return this
     end
