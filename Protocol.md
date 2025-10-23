@@ -345,28 +345,33 @@ slave.set_slave("127.0.0.1", 9000)
 ```mermaid
 sequenceDiagram
     participant C as 客户端(Client)
-    participant M as 主进程(Master)
-    participant S as 从进程(Slave)
+    participant M as Master
+    participant S as Slave
     participant H as Handler / File I/O
 
-    C->>M: 建立 TCP 连接 (connect)
+    C->>M: 建立 TCP 连接
     M->>M: 创建 http_conn 对象<br/>state=0, request_queue=[]
-    loop 请求循环 (Keep-Alive)
+    loop Keep-Alive 请求循环
         C->>M: 发送 HTTP 请求 (Header + Body)
-        M->>M: 解析 Header → 生成 http_session<br/>入队 request_queue
-        M->>M: request_idx++ 标记为“待派发”
-        M->>S: send_content(session.serialize())
-        alt POST 请求
-            M->>S: async.write(session.post_data)
+        M->>M: Request Worker 解析 Header → 生成 http_session
+        M->>M: 入队 request_queue & request_idx++
+        M->>M: Dispatch Worker 检查空闲 Slave
+        alt 有空闲 Slave
+            M->>S: send_content(session.serialize())
+            alt POST 请求
+                M->>S: async.write(session.post_data)
+            end
+        else 无空闲 Slave
+            M->>M: 等待 / 心跳检测 Slave 状态
         end
-        S->>S: receive_content_s() 读取 JSON<br/>反序列化为 http_session
-        S->>S: 若 method=POST → 读取 POST 数据
+        S->>S: Slave Worker receive_content_s() 读取 JSON
+        S->>S: 若 POST → 读取 POST 数据
         S->>H: call_http_handler(session, server)
-        H-->>S: 生成响应字符串 session.response
+        H-->>S: 返回 session.response
         S->>M: send_content(session.response)
-        M->>M: receive_content_s() 接收响应
-        M->>C: async.write(conn.sock, session.response)
-        M->>M: conn.request_queue.pop_front()<br/>--conn.request_idx
+        M->>M: Response Worker receive_content_s()
+        M->>C: async.write(response)
+        M->>M: conn.request_queue.pop_front() & --request_idx
     end
     C-->>M: 关闭连接或超时 (Connection: close)
     M-->>C: compose_response(408 / 500)
@@ -377,23 +382,48 @@ sequenceDiagram
 
 ```mermaid
 flowchart TD
-    A[客户端请求到达 Master] --> B[解析 HTTP Header]
-    B --> C[生成 http_session 并加入 conn.request_queue]
-    C --> D{是否有空闲 Slave?}
-    D -- 否 --> D1[等待 / 心跳检测 Slave 状态]
-    D -- 是 --> E[选取空闲 Slave]
-    E --> F[发送 JSON]
-    F --> G{POST 请求?}
-    G -- 是 --> H[发送 POST 数据]
-    G -- 否 --> I[等待 Slave 执行]
-    H --> I
-    I --> J[Slave 调用 call_http_handler]
-    J --> K[生成 session response]
-    K --> L[Slave send_content response]
-    L --> M[Master receive_content_s]
-    M --> N[async.write 响应到客户端]
-    N --> O[pop_front & --request_idx]
-    O --> P{keep-alive 超时?}
-    P -- 否 --> C
-    P -- 是 --> Q[关闭连接]
+    %% Master Accept Worker
+    subgraph Accept
+        A[接收客户端 TCP 连接] --> B[创建 http_conn 并加入 conn_list]
+    end
+
+    %% Master Request Worker
+    subgraph Request
+        B --> C{conn 是否有请求?}
+        C -- 是 --> D[解析 HTTP Header & 生成 http_session, 加入 request_queue]
+        C -- 否 --> B1[等待新连接或请求]
+    end
+
+    %% Master Dispatch Worker
+    subgraph Dispatch
+        D --> E{是否有空闲 Slave?}
+        E -- 否 --> E1[等待 / 心跳检测 Slave]
+        E -- 是 --> F[选取空闲 Slave]
+        F --> G{request_queue 是否为空?}
+        G -- 否 --> H[发送 session JSON 到 Slave]
+        H --> I{POST 请求?}
+        I -- 是 --> I1[发送 POST 数据到 Slave]
+        I -- 否 --> J[等待 Slave 执行请求]
+        G -- 是 --> E1
+        I1 --> J
+    end
+
+    %% Slave Worker
+    subgraph Slave
+        J --> K{是否 Heartbeat 请求?}
+        K -- 是 --> K1[生成 Heartbeat Response]
+        K -- 否 --> K2[调用 Handler / 读取文件生成 HTTP Response]
+        K1 --> L[send_content 返回 Master]
+        K2 --> L
+    end
+
+    %% Master Response Worker
+    subgraph Response
+        L --> M[Master receive_content_s 接收响应]
+        M --> N[async.write 响应到客户端]
+        N --> O[pop_front & --request_idx]
+        O --> P{keep-alive 超时?}
+        P -- 否 --> D
+        P -- 是 --> Q[关闭连接并清理 http_conn]
+    end
 ```
