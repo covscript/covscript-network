@@ -344,38 +344,59 @@ slave.set_slave("127.0.0.1", 9000)
 
 ```mermaid
 sequenceDiagram
-    participant C as 客户端(Client)
-    participant M as Master
-    participant S as Slave
-    participant H as Handler / File I/O
+    participant C as HTTP 客户端
+    participant M as Master 节点
+    participant S as Slave 节点
+    participant H as Handler / 文件 I/O
 
+    %% Slave 节点启动与握手
+    S->>M: 发起到 Master 的 TCP 连接
+    M->>M: 接收来自 Slave 的传入连接
+    M-->>S: 握手报文 (包含 Rank)
+    S-->>M: 握手回复报文
+    M->>M: 协议握手成功<br/>初始化 Slave 节点
+    M->>M: 加入 Slave 节点队列 (slave_queue)
+
+    %% 客户端连接与 HTTP 初始化
     C->>M: 建立 TCP 连接
-    M->>M: 创建 http_conn 对象<br/>state=0, request_queue=[]
+    M->>M: 创建 http_conn 对象<br/>state=0, request_queue={}
+    M->>M: 加入 HTTP 连接队列 (conn_queue)
+
     loop Keep-Alive 请求循环
         C->>M: 发送 HTTP 请求 (Header + Body)
-        M->>M: Request Worker 解析 Header → 生成 http_session
-        M->>M: 入队 request_queue & request_idx++
-        M->>M: Dispatch Worker 检查空闲 Slave
-        alt 有空闲 Slave
-            M->>S: send_content(session.serialize())
-            alt POST 请求
-                M->>S: async.write(session.post_data)
+        M->>M: Request Worker 解析 Header<br/>初始化 http_session
+        M->>M: 加入 HTTP 会话队列 (session_queue)
+
+        %% Master 分发阶段
+        M->>M: Dispatch Worker 检查可用 HTTP 会话
+        alt 有可用 HTTP 会话
+            M->>S: 发送 IPC 报文 (序列化的 HTTP 会话)
+            opt POST 请求
+                M->>S: 发送 POST 数据
             end
-        else 无空闲 Slave
-            M->>M: 等待 / 心跳检测 Slave 状态
+        else 无可用 HTTP 会话
+            M->>M: 定时发送 Heartbeat
+            M->>S: 发送 IPC 报文 (定时 Heartbeat)
         end
-        S->>S: Slave Worker receive_content_s() 读取 JSON
-        S->>S: 若 POST → 读取 POST 数据
-        S->>H: call_http_handler(session, server)
-        H-->>S: 返回 session.response
-        S->>M: send_content(session.response)
-        M->>M: Response Worker receive_content_s()
-        M->>C: async.write(response)
-        M->>M: conn.request_queue.pop_front() & --request_idx
+
+        %% Slave 处理阶段
+        S->>S: 解析 IPC 报文<br/>反序列化为 http_session
+        alt Heartbeat 报文
+            S->>S: 生成 Heartbeat 回复
+        else 普通 HTTP 请求
+            opt POST 请求
+                S->>S: 读取 POST 数据
+            end
+            S->>H: 调用 Handler 或读取文件
+            H-->>S: 返回 HTTP 回复内容
+            S->>S: 序列化为 IPC 回复
+        end
+        S-->>M: 回复 IPC 报文
+
+        %% Master 回复阶段
+        M->>M: Response Worker 读取 IPC 报文
+        M->>C: 返回 HTTP 回复
     end
-    C-->>M: 关闭连接或超时 (Connection: close)
-    M-->>C: compose_response(408 / 500)
-    M->>M: 清理连接 (state=-1)
 ```
 
 ## 16. 请求调度与队列管理流程图
