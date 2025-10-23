@@ -351,51 +351,49 @@ sequenceDiagram
 
     %% Slave 节点启动与握手
     S->>M: 发起到 Master 的 TCP 连接
-    M->>M: 接收来自 Slave 的传入连接
     M-->>S: 握手报文 (包含 Rank)
     S-->>M: 握手回复报文
-    M->>M: 协议握手成功<br/>初始化 Slave 节点
-    M->>M: 加入 Slave 节点队列 (slave_queue)
+    M->>M: 协议握手成功<br/>初始化 Slave 节点<br/>加入 Slave 节点队列
 
     %% 客户端连接与 HTTP 初始化
-    C->>M: 建立 TCP 连接
-    M->>M: 创建 http_conn 对象<br/>state=0, request_queue={}
-    M->>M: 加入 HTTP 连接队列 (conn_queue)
+    C->>M: 发起到 Master 的 TCP 连接
+    M->>M: 初始化 HTTP 连接<br/>加入 HTTP 连接队列
 
     loop Keep-Alive 请求循环
         C->>M: 发送 HTTP 请求 (Header + Body)
-        M->>M: Request Worker 解析 Header<br/>初始化 http_session
-        M->>M: 加入 HTTP 会话队列 (session_queue)
+        M->>M: 读取和解析 HTTP 请求头<br/>初始化 HTTP 会话<br/>加入 HTTP 会话队列
 
         %% Master 分发阶段
-        M->>M: Dispatch Worker 检查可用 HTTP 会话
-        alt 有可用 HTTP 会话
+        alt HTTP 会话队列不为空
             M->>S: 发送 IPC 报文 (序列化的 HTTP 会话)
             opt POST 请求
                 M->>S: 发送 POST 数据
             end
-        else 无可用 HTTP 会话
-            M->>M: 定时发送 Heartbeat
+        else HTTP 会话队列为空
             M->>S: 发送 IPC 报文 (定时 Heartbeat)
         end
 
         %% Slave 处理阶段
-        S->>S: 解析 IPC 报文<br/>反序列化为 http_session
-        alt Heartbeat 报文
+        S->>S: 解析 IPC 报文
+        alt Heartbeat 请求
             S->>S: 生成 Heartbeat 回复
         else 普通 HTTP 请求
+            S->>S: 反序列化 HTTP 会话
             opt POST 请求
                 S->>S: 读取 POST 数据
             end
             S->>H: 调用 Handler 或读取文件
-            H-->>S: 返回 HTTP 回复内容
-            S->>S: 序列化为 IPC 回复
+            H-->>S: 生成 HTTP 回复
         end
-        S-->>M: 回复 IPC 报文
+        S-->>M: 发回 IPC 报文
 
         %% Master 回复阶段
-        M->>M: Response Worker 读取 IPC 报文
-        M->>C: 返回 HTTP 回复
+        M->>M: 读取 IPC 报文<br/>写回 HTTP 会话队列
+        M->>C: 发回 HTTP 回复
+    end
+
+    opt 超出 Keep-alive 限制
+        M->>C: 发回 HTTP 回复（408）
     end
 ```
 
@@ -474,7 +472,7 @@ flowchart TD
         F3 --> G1
         E6 --> G1
         G1[/等待 IPC 报文/] --> G2
-        G2{{是否为 Heatbeat 报文}}
+        G2{{是否为 Heatbeat 请求}}
         G2 -- 是 --> G3[生成
         Heatbeat 回复] --> G5
         G2 -- 否 --> G4[读取文件或
