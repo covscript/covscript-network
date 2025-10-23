@@ -49,4 +49,10 @@ cmake-build/
 *.orig
 .ecs_output/
 
-tests/netutils.*
+examples/netutils.*
+examples/*.csp
+examples/*.csc
+*.pem
+*.log
+*.db
+authorized_keys

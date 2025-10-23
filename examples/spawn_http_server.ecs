@@ -1,0 +1,63 @@
+import codec.json
+import argparse
+import process
+
+var parser = new argparse.ArgumentParser
+parser.program_name = "ecs spawn_http_server.ecs"
+parser.description = "Distributed HTTP Server Spawner"
+parser.add_argument("config", true, "Configure JSON file")
+parser.add_option("--log", true, false, "Log file").set_defaults("--log", false)
+parser.add_option("--dir", false, false, "Work directory").set_defaults("--dir", ".")
+
+var args = null
+try
+    args = parser.parse_args(context.cmd_args)
+catch e
+    system.out.println(e.what)
+    parser.print_help()
+    system.exit(0)
+end
+
+var config = json.to_var(json.from_stream(iostream.ifstream(args.config)))
+
+var pwd = args.dir == "." ? runtime.get_current_dir() : args.dir
+
+system.run("ecs -f -o \"" + pwd + "\" \"" + pwd + system.path.separator + "http_server.ecs\"")
+
+function build_process(role, workers)
+    var b = new process.builder
+    b.dir(pwd).cmd("cs")
+    if args.log
+        b.arg({pwd + system.path.separator + "http_server.csc", args.config, "--role", role, "--dir", pwd, "--log", pwd + system.path.separator + "netutils_" + role + ".log"})
+    else
+        b.arg({pwd + system.path.separator + "http_server.csc", args.config, "--role", role, "--dir", pwd})
+    end
+    return b.start()
+end
+
+var master_process = build_process("master", to_string(config.slave_count * config.worker_count))
+var worker_list = new array
+
+foreach it in range(config.slave_count)
+    worker_list.push_back(build_process("slave_" + to_string(it), to_string(config.worker_count)))
+end
+
+system.out.println(master_process.out().getline())
+system.out.println("Press Q to exit. DO NOT Ctrl+C DIRECTLY!!!")
+loop
+    if system.console.kbhit() && system.console.getch().tolower() == 'q'
+        break
+    end
+    if master_process.has_exited()
+        system.out.println("Master process exited.")
+        break
+    end
+    runtime.delay(100)
+end
+
+system.out.println("Cleaning process...")
+master_process.kill(true)
+foreach it in worker_list
+    it.kill(true)
+end
+system.file.remove(pwd + system.path.separator + "http_server.csc")

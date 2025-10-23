@@ -3,11 +3,12 @@
     "Name": "netutils",
     "Info": "Network Utilities",
     "Author": "CovScript Organization",
-    "Version": "1.1.3",
+    "Version": "1.2.0",
     "Target": "netutils.csp",
     "Dependencies": [
         "network",
         "regex",
+        "codec",
         "curl"
     ]
 }

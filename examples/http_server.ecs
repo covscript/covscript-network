@@ -1,0 +1,114 @@
+import netutils
+import argparse
+import codec.json
+import csdbc
+import csdbc_sqlite
+
+var parser = new argparse.ArgumentParser
+parser.program_name = "ecs http_server.ecs"
+parser.description = "HTTP Server based on NetUtils"
+parser.add_argument("config", true, "Configure JSON file")
+parser.add_option("--dir", false, false, "Work directory").set_defaults("--dir", ".")
+parser.add_option("--log", false, false, "Log file").set_defaults("--log", null)
+parser.add_option("--role", false, false, "Work role, expected simple, master or slave_N").set_defaults("--role", "simple")
+
+var args = null
+try
+    args = parser.parse_args(context.cmd_args)
+catch e
+    system.out.println(e.what)
+    parser.print_help()
+    system.exit(0)
+end
+
+if args.dir == "."
+    args.dir = runtime.get_current_dir()
+end
+
+var config = json.to_var(json.from_stream(iostream.ifstream(args.config)))
+
+if args.log != null
+    netutils.log_stream = iostream.ofstream(args.log)
+    if netutils.log_stream.good()
+        netutils.log("Log started for role: " + args.role)
+    else
+        netutils.log_stream = null
+    end
+end
+
+var db = csdbc_sqlite.open(config.database)
+
+if !(db.table_list() as hash_set).exist("NETUTILS_TEST")
+    db.just_exec("CREATE TABLE NETUTILS_TEST (ID " + db.typenames_full[csdbc.sql_text] + " PRIMARY KEY, VAL " + db.typenames_full[csdbc.sql_text] + ")")
+end
+
+var get_stmt = db.prepare("SELECT * FROM NETUTILS_TEST WHERE ID=?")
+var set_stmt = db.prepare("REPLACE INTO NETUTILS_TEST (ID, VAL) VALUES (?, ?)")
+
+function fiber_delay(period)
+    var time = runtime.time()
+    while runtime.time() - time < period
+        fiber.yield()
+    end
+end
+
+var server = (new netutils.http_server)
+    .set_config(config)
+    .bind_code(netutils.state_codes.code_404, "404.html")
+    .bind_func("/get", [](server, session){
+        # DB query
+        if session.method != "POST"
+            var args = netutils.parse_http_args(session.args)
+            get_stmt.bind(0, args.id)
+        else
+            session.send_response(netutils.state_codes.code_403, "Please use GET method.", "text/plain")
+        end
+        var result = get_stmt.exec()
+        if result.size != 1
+            session.send_response(netutils.state_codes.code_403, "Record not existed.", "text/plain")
+        else
+            session.send_response(netutils.state_codes.code_200, result[0][1].data, "text/plain")
+        end
+    })
+    .bind_func("/set", [](server, session){
+        # DB insert
+        if session.method != "POST"
+            var args = netutils.parse_http_args(session.args)
+            set_stmt.bind(0, args.id)
+            set_stmt.bind(1, args.val)
+        else
+            session.send_response(netutils.state_codes.code_403, "Please use GET method.", "text/plain")
+        end
+        var result = set_stmt.just_exec()
+        session.send_response(netutils.state_codes.code_200, "OK", "text/plain")
+    })
+    .bind_func("/block", [](server, session){
+        # Test for block API
+        fiber_delay(50)
+        session.send_response(netutils.state_codes.code_200, "OK", "text/plain")
+    })
+    .bind_func("/test", [](server, session){
+        # Simple ECHO Server
+        if session.method != "POST"
+            session.send_response(netutils.state_codes.code_400, "Please use POST method. Data = " + session.args, "text/plain")
+        else
+            session.send_response(netutils.state_codes.code_200, session.post_data, "text/plain")
+        end
+    })
+
+# multi-node setup
+switch args.role
+    case "simple"
+        server.listen(config.port)
+        system.out.println("Starting Simple HTTP server at http://" + netutils.local_addr() + ":" + config.port + "/")
+    end
+    case "master"
+        server.set_master(config.master_port as integer).listen(config.port)
+        system.out.println("Starting Distributed HTTP server at http://" + netutils.local_addr() + ":" + config.port + "/")
+    end
+    default
+        server.set_slave(config.master_addr, config.master_port as integer)
+    end
+end
+
+server.run()

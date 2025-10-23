@@ -1,0 +1,13 @@
+{
+    "keep_alive_timeout": 5000,
+    "max_keep_alive": 100,
+    "max_connections": 64,
+    "worker_count": 4,
+    "master_worker_count": 4,
+    "master_addr": "127.0.0.1",
+    "master_port": 54321,
+    "slave_count": 4,
+    "wwwroot": "wwwroot",
+    "port": 8088,
+    "database": "http_server.db"
+}
