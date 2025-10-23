@@ -382,16 +382,16 @@ flowchart TD
     C --> D{是否有空闲 Slave?}
     D -- 否 --> D1[等待 / 心跳检测 Slave 状态]
     D -- 是 --> E[选取空闲 Slave]
-    E --> F[send_content(JSON)]
+    E --> F[发送 JSON]
     F --> G{POST 请求?}
     G -- 是 --> H[发送 POST 数据]
     G -- 否 --> I[等待 Slave 执行]
     H --> I
-    I --> J[Slave 调用 call_http_handler()]
-    J --> K[生成 session.response]
-    K --> L[Slave send_content(response)]
-    L --> M[Master receive_content_s()]
-    M --> N[async.write(response→客户端)]
+    I --> J[Slave 调用 call_http_handler]
+    J --> K[生成 session response]
+    K --> L[Slave send_content response]
+    L --> M[Master receive_content_s]
+    M --> N[async.write 响应到客户端]
     N --> O[pop_front & --request_idx]
     O --> P{keep-alive 超时?}
     P -- 否 --> C
