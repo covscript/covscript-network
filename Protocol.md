@@ -382,48 +382,83 @@ sequenceDiagram
 
 ```mermaid
 flowchart TD
-    %% Master Accept Worker
-    subgraph Accept
-        A[接收客户端 TCP 连接] --> B[创建 http_conn 并加入 conn_list]
+    X0([HTTP 客户端])
+    X1[[Slave 节点队列]]
+    X2[[HTTP 连接队列]]
+    X3[[HTTP 会话队列
+    （每个连接独立）]]
+    subgraph Master 节点生成
+        A1{{接收来自 Slave 的传入连接}} --> A2
+        A2[TCP 握手成功
+          分配 Rank] --> A3
+        A3[/发送握手报文
+        等待 Slave 回复/]
+        A3 --> A4[协议握手成功
+          初始化 Slave 节点]
+        A4 --> X1
+        A3 -. 失败/超时 .-> A1
     end
 
-    %% Master Request Worker
-    subgraph Request
-        B --> C{conn 是否有请求?}
-        C -- 是 --> D[解析 HTTP Header & 生成 http_session, 加入 request_queue]
-        C -- 否 --> B1[等待新连接或请求]
+    subgraph Master 接收请求
+        X0 --> B1
+        B1{{接收来自客户端的传入连接}} --> B2
+        B2[TCP 握手成功
+          初始化 HTTP 连接] --> X2
     end
 
-    %% Master Dispatch Worker
-    subgraph Dispatch
-        D --> E{是否有空闲 Slave?}
-        E -- 否 --> E1[等待 / 心跳检测 Slave]
-        E -- 是 --> F[选取空闲 Slave]
-        F --> G{request_queue 是否为空?}
-        G -- 否 --> H[发送 session JSON 到 Slave]
-        H --> I{POST 请求?}
-        I -- 是 --> I1[发送 POST 数据到 Slave]
-        I -- 否 --> J[等待 Slave 执行请求]
-        G -- 是 --> E1
-        I1 --> J
+    subgraph Master 处理请求
+        X2 --> C1
+        X0 -. Keep-alive .-> C1
+        C1[/选取可用的传入连接/] --> C2
+        C2[读取和解析 HTTP 请求头
+        初始化 HTTP 会话]
+        C2 -. 失败/超时 .-> X0
     end
 
-    %% Slave Worker
-    subgraph Slave
-        J --> K{是否 Heartbeat 请求?}
-        K -- 是 --> K1[生成 Heartbeat Response]
-        K -- 否 --> K2[调用 Handler / 读取文件生成 HTTP Response]
-        K1 --> L[send_content 返回 Master]
-        K2 --> L
+    subgraph Master 回复请求
+        X3 --> D1[/等待队首可用的 Response/]
+        D1 --> D2[取出 HTTP 回复]
+        D2 --> D3[超出 Keep-alive 限制
+        或 Connection: Close]
+        D3 -. 超时/关闭 .-> X0
+        D2 -- 发回 --> X0
     end
 
-    %% Master Response Worker
-    subgraph Response
-        L --> M[Master receive_content_s 接收响应]
-        M --> N[async.write 响应到客户端]
-        N --> O[pop_front & --request_idx]
-        O --> P{keep-alive 超时?}
-        P -- 否 --> D
-        P -- 是 --> Q[关闭连接并清理 http_conn]
+    subgraph Master 分发请求
+        X1 --> E1[/选取可用的 Slave 节点/]
+        X2 --> E2[/选取可用的传入连接/]
+        E3{{HTTP 会话队列
+        是否为空}}
+        E3 --  是 --> E4[定时
+        Heatbeat] --> E6
+        E3 --  否 --> E5[序列化
+        HTTP 会话] --> E6
+        E1 --> E3
+        E2 --> E3
+        E6[/发送 IPC 报文
+        等待 Slave 回复/]
+        E6 -- 写回 --> X3
+        C2 --> X3
+    end
+
+    subgraph Slave 连接和握手
+        F1([发起到 Master 的连接]) --> A1
+        F1 --> F2
+        A3 <--> F2{{接收握手报文
+        回复报文到 Master}} --> F3
+        F3[协议握手成功]
+    end
+
+    subgraph Slave 处理 Master 报文
+        F3 --> G1
+        E6 --> G1
+        G1[/等待 IPC 报文/] --> G2
+        G2{{是否为 Heatbeat 报文}}
+        G2 -- 是 --> G3[生成
+        Heatbeat 回复] --> G5
+        G2 -- 否 --> G4[读取文件或
+          调用 Handler
+          生成 HTTP 回复] --> G5
+        G5[发回 IPC 报文] --> E6
     end
 ```
