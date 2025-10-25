@@ -5,7 +5,7 @@ import network.*, regex, curl
 import codec.json
 
 constant server_name = "CovScript-NetUtils"
-constant server_version = "1.2.0"
+constant server_version = "1.2.1"
 
 # Internal Functions
 
@@ -122,7 +122,8 @@ function read_file(path)
     var ifs = iostream.fstream(path, iostream.openmode.bin_in)
     var data = new string
     while ifs.good()
-        data.append(ifs.read(8192))
+        # Read 256KB per iteration
+        data.append(runtime.await(ifs.read, 262144))
     end
     return move(data)
 end
@@ -457,15 +458,6 @@ function call_http_handler(session, server)
     end
 end
 
-function safe_shutdown(sock)
-    if sock.is_open()
-        while async.poll()
-            fiber.yield()
-        end
-        sock.close()
-    end
-end
-
 # Workers
 
 struct worker_type
@@ -511,7 +503,7 @@ function simple_worker(self)
                 break
             end
         end
-        safe_shutdown(sock)
+        sock.safe_shutdown()
     end
 end
 
@@ -622,7 +614,7 @@ function master_request_worker(self)
         var sock = conn->sock
         var session = read_http_header(sock, conn->last_request_time + self->server->keep_alive_timeout)
         if session == null
-            safe_shutdown(sock)
+            sock.safe_shutdown()
             conn->state = -1
             continue
         end
@@ -678,7 +670,7 @@ function master_response_worker(self)
             if !conn->close
                 async.write(conn->sock, compose_response(state_codes.code_408))
             end
-            safe_shutdown(conn->sock)
+            conn->sock.safe_shutdown()
             conn->state = -1
         end
     end
@@ -733,8 +725,8 @@ function master_dispatch_worker(self)
                     node->state = 0
                 else
                     log("Heartbeat failed for worker rank " + node->rank)
-                    safe_shutdown(node->sock)
-                    node->state = -1  
+                    node->sock.safe_shutdown()
+                    node->state = -1
                 end
             end
         else
@@ -755,7 +747,7 @@ function master_dispatch_worker(self)
             else
                 log("Read response failed for worker rank " + node->rank)
                 session.response = compose_response(error_code)
-                safe_shutdown(node->sock)
+                node->sock.safe_shutdown()
                 node->state = -1
             end
         end
@@ -988,6 +980,8 @@ class http_server
     var async_guard = null
     var wwwroot_path = null
     var url_map = new hash_map
+    var thread_pool = null
+    var thread_count = 4
     var worker_list = null
     var worker_count = 4
     var max_keep_alive = 100
@@ -1034,6 +1028,10 @@ class http_server
     function init()
         # Init workers
         async_guard = new async.work_guard
+        thread_pool = new array
+        foreach i in range(thread_count)
+            thread_pool.push_back(new async.thread_worker)
+        end
         worker_list = new array
         var worker_func = null
         # Init multi-process
@@ -1073,6 +1071,9 @@ class http_server
     function set_config(conf : hash_map)
         if conf.exist("wwwroot")
             set_wwwroot(conf["wwwroot"])
+        end
+        if conf.exist("thread_count")
+            thread_count = conf["thread_count"] as integer
         end
         if conf.exist("worker_count")
             worker_count = conf["worker_count"] as integer

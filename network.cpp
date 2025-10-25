@@ -24,9 +24,20 @@
 #include <covscript/dll.hpp>
 #include <covscript/cni.hpp>
 #include <thread>
-#include <atomic>
 #include <memory>
 #include <regex>
+
+inline void cs_runtime_yield()
+{
+#if COVSCRIPT_ABI_VERSION >= 250908
+	if (cs::current_process->fiber_stack.empty())
+		std::this_thread::sleep_for(std::chrono::milliseconds(1));
+	else
+		cs::fiber::yield();
+#else
+	std::this_thread::sleep_for(std::chrono::milliseconds(1));
+#endif
+}
 
 namespace network_cs_ext {
 	using namespace cs;
@@ -228,6 +239,8 @@ namespace network_cs_ext {
 				}
 			}
 
+			bool safe_shutdown(socket_t &);
+
 			endpoint_t local_endpoint(socket_t &sock)
 			{
 				try {
@@ -379,6 +392,8 @@ namespace network_cs_ext {
 				}
 			}
 
+			bool safe_close(socket_t &);
+
 			bool is_open(socket_t &sock)
 			{
 				return sock->is_open();
@@ -477,6 +492,56 @@ namespace network_cs_ext {
 	// Asynchronous
 
 	namespace async {
+		class global_settings_type {
+			friend global_settings_type &get_global_settings();
+			global_settings_type() = default;
+
+		public:
+			asio::io_context &io = cs_impl::network::get_io_context();
+			std::atomic<std::size_t> thread_executors{0};
+
+			inline std::size_t poll()
+			{
+				if (thread_executors.load(std::memory_order_acquire) == 0)
+					return io.poll();
+				else
+					return 0;
+			}
+
+			inline std::size_t poll_one()
+			{
+				if (thread_executors.load(std::memory_order_acquire) == 0)
+					return io.poll_one();
+				else
+					return 0;
+			}
+		};
+
+		global_settings_type &get_global_settings()
+		{
+			static global_settings_type settings;
+			return settings;
+		}
+
+		class thread_executor_type {
+			std::thread worker;
+
+		public:
+			static void executor()
+			{
+				cs_impl::network::get_io_context().run();
+			}
+			thread_executor_type() : worker(thread_executor_type::executor)
+			{
+				get_global_settings().thread_executors.fetch_add(1, std::memory_order_relaxed);
+			}
+			~thread_executor_type()
+			{
+				worker.join();
+				get_global_settings().thread_executors.fetch_sub(1, std::memory_order_relaxed);
+			}
+		};
+
 		struct state_type {
 			bool init = false;
 			bool is_udp = false;
@@ -570,42 +635,26 @@ namespace network_cs_ext {
 
 		bool wait(const state_t &state)
 		{
-			asio::io_context &io = cs_impl::network::get_io_context();
 			while (true) {
-				io.poll();
+				get_global_settings().poll();
 				if (state->has_done.load(std::memory_order_acquire))
 					return !state->ec;
-#if COVSCRIPT_ABI_VERSION >= 250908
-				if (cs::current_process->fiber_stack.empty())
-					std::this_thread::sleep_for(std::chrono::milliseconds(1));
-				else
-					cs::fiber::yield();
-#else
-				std::this_thread::sleep_for(std::chrono::milliseconds(1));
-#endif
+				cs_runtime_yield();
 			}
 		}
 
 		bool wait_for(const state_t &state, std::size_t timeout_ms)
 		{
-			asio::io_context &io = cs_impl::network::get_io_context();
 			auto start = std::chrono::steady_clock::now();
 			std::chrono::milliseconds timeout_duration(timeout_ms);
 			while (true) {
-				io.poll();
+				get_global_settings().poll();
 				if (state->has_done.load(std::memory_order_acquire))
 					return !state->ec;
 				auto now = std::chrono::steady_clock::now();
 				if (now - start >= timeout_duration)
 					return state->has_done.load(std::memory_order_acquire) && !state->ec;
-#if COVSCRIPT_ABI_VERSION >= 250908
-				if (cs::current_process->fiber_stack.empty())
-					std::this_thread::sleep_for(std::chrono::milliseconds(1));
-				else
-					cs::fiber::yield();
-#else
-				std::this_thread::sleep_for(std::chrono::milliseconds(1));
-#endif
+				cs_runtime_yield();
 			}
 		}
 
@@ -615,9 +664,11 @@ namespace network_cs_ext {
 		{
 			state_t state = std::make_shared<state_type>();
 			state->init = true;
-			acceptor->async_accept(sock->get_raw(), [state](const asio::error_code &ec) {
+			sock->async_jobs.fetch_add(1, std::memory_order_relaxed);
+			acceptor->async_accept(sock->get_raw(), [sock, state](const asio::error_code &ec) {
 				state->ec = ec;
 				state->has_done.store(true, std::memory_order_release);
+				sock->async_jobs.fetch_sub(1, std::memory_order_relaxed);
 			});
 			return state;
 		}
@@ -626,34 +677,14 @@ namespace network_cs_ext {
 		{
 			state_t state = std::make_shared<state_type>();
 			state->init = true;
-			sock->get_raw().async_connect(ep, [state](const asio::error_code &ec) {
+			sock->async_jobs.fetch_add(1, std::memory_order_relaxed);
+			sock->get_raw().async_connect(ep, [sock, state](const asio::error_code &ec) {
 				state->ec = ec;
 				state->has_done.store(true, std::memory_order_release);
+				sock->async_jobs.fetch_sub(1, std::memory_order_relaxed);
 			});
 			return state;
 		}
-
-		struct regex_match_condition {
-			using iterator = asio::buffers_iterator<asio::streambuf::const_buffers_type>;
-			using result_type = std::pair<iterator, bool>;
-
-			std::regex pattern;
-
-			regex_match_condition(const std::string &p) : pattern(p) {}
-
-			template <typename Iterator>
-			result_type operator()(Iterator begin, Iterator end) const
-			{
-				if (begin == end)
-					return {end, false};
-				std::match_results<Iterator> m;
-				if (std::regex_search(begin, end, m, pattern)) {
-					auto match_end = begin + m.position() + m.length();
-					return {match_end, true};
-				}
-				return {end, false};
-			}
-		};
 
 		void read_until(tcp::socket_t &sock, state_t &state, const std::string &pattern)
 		{
@@ -666,12 +697,14 @@ namespace network_cs_ext {
 				throw cs::lang_error("Last asynchronous operation have not done yet.");
 			state->has_done = false;
 			state->ec.clear();
-			asio::async_read_until(sock->get_raw(), state->buffer, regex_match_condition(pattern),
-			[state](const asio::error_code &ec, std::size_t bytes) {
+			sock->async_jobs.fetch_add(1, std::memory_order_relaxed);
+			asio::async_read_until(sock->get_raw(), state->buffer, pattern,
+			[sock, state](const asio::error_code &ec, std::size_t bytes) {
 				state->buffer.commit(bytes);
 				state->bytes_transferred = bytes;
 				state->ec = ec;
 				state->has_done.store(true, std::memory_order_release);
+				sock->async_jobs.fetch_sub(1, std::memory_order_relaxed);
 			});
 		}
 
@@ -680,11 +713,14 @@ namespace network_cs_ext {
 			state_t state = std::make_shared<state_type>();
 			state->init = true;
 			state->is_read = true;
-			asio::async_read(sock->get_raw(), state->buffer.prepare(n), [state](const asio::error_code &ec, std::size_t bytes) {
+			sock->async_jobs.fetch_add(1, std::memory_order_relaxed);
+			asio::async_read(sock->get_raw(), state->buffer.prepare(n),
+			[sock, state](const asio::error_code &ec, std::size_t bytes) {
 				state->buffer.commit(bytes);
 				state->bytes_transferred = bytes;
 				state->ec = ec;
 				state->has_done.store(true, std::memory_order_release);
+				sock->async_jobs.fetch_sub(1, std::memory_order_relaxed);
 			});
 			return state;
 		}
@@ -695,11 +731,14 @@ namespace network_cs_ext {
 			state->init = true;
 			std::ostream os(&state->buffer);
 			os.write(data.data(), data.size());
-			asio::async_write(sock->get_raw(), state->buffer, [state](const asio::error_code &ec, std::size_t bytes) {
+			sock->async_jobs.fetch_add(1, std::memory_order_relaxed);
+			asio::async_write(sock->get_raw(), state->buffer,
+			[sock, state](const asio::error_code &ec, std::size_t bytes) {
 				state->buffer.consume(bytes);
 				state->bytes_transferred = bytes;
 				state->ec = ec;
 				state->has_done.store(true, std::memory_order_release);
+				sock->async_jobs.fetch_sub(1, std::memory_order_relaxed);
 			});
 			return state;
 		}
@@ -710,11 +749,14 @@ namespace network_cs_ext {
 			state->init = true;
 			state->is_udp = true;
 			state->is_read = true;
-			sock->get_raw().async_receive_from(state->buffer.prepare(n), state->udp_endpoint, [state](const asio::error_code &ec, std::size_t bytes) {
+			sock->async_jobs.fetch_add(1, std::memory_order_relaxed);
+			sock->get_raw().async_receive_from(state->buffer.prepare(n), state->udp_endpoint,
+			[sock, state](const asio::error_code &ec, std::size_t bytes) {
 				state->buffer.commit(bytes);
 				state->bytes_transferred = bytes;
 				state->ec = ec;
 				state->has_done.store(true, std::memory_order_release);
+				sock->async_jobs.fetch_sub(1, std::memory_order_relaxed);
 			});
 			return state;
 		}
@@ -727,23 +769,26 @@ namespace network_cs_ext {
 			state->udp_endpoint = ep;
 			std::ostream os(&state->buffer);
 			os.write(data.data(), data.size());
-			sock->get_raw().async_send_to(asio::buffer(state->buffer.data(), state->buffer.size()), state->udp_endpoint, [state](const asio::error_code &ec, std::size_t bytes) {
+			sock->async_jobs.fetch_add(1, std::memory_order_relaxed);
+			sock->get_raw().async_send_to(asio::buffer(state->buffer.data(), state->buffer.size()), state->udp_endpoint,
+			[sock, state](const asio::error_code &ec, std::size_t bytes) {
 				state->buffer.consume(bytes);
 				state->bytes_transferred = bytes;
 				state->ec = ec;
 				state->has_done.store(true, std::memory_order_release);
+				sock->async_jobs.fetch_sub(1, std::memory_order_relaxed);
 			});
 			return state;
 		}
 
 		bool poll()
 		{
-			return cs_impl::network::get_io_context().poll() > 0;
+			return get_global_settings().poll() > 0;
 		}
 
 		bool poll_once()
 		{
-			return cs_impl::network::get_io_context().poll_one() > 0;
+			return get_global_settings().poll_one() > 0;
 		}
 
 		bool stopped()
@@ -763,6 +808,13 @@ namespace network_cs_ext {
 			if (stopped())
 				restart();
 			return var::make<work_guard_t>(cs_impl::network::get_io_context().get_executor());
+		}
+
+		using thread_executor_t = std::shared_ptr<thread_executor_type>;
+
+		thread_executor_t thread_worker()
+		{
+			return std::make_shared<thread_executor_type>();
 		}
 	}
 
@@ -798,7 +850,8 @@ namespace network_cs_ext {
 		.add_var("poll_once", make_cni(async::poll_once))
 		.add_var("stopped", make_cni(async::stopped))
 		.add_var("restart", make_cni(async::restart))
-		.add_var("work_guard", var::make_constant<type_t>(async::work_guard, type_id(typeid(async::work_guard_t))));
+		.add_var("work_guard", var::make_constant<type_t>(async::work_guard, type_id(typeid(async::work_guard_t))))
+		.add_var("thread_worker", var::make_constant<type_t>(async::thread_worker, type_id(typeid(async::thread_executor_t))));
 		(*tcp::tcp_ext)
 		.add_var("socket", var::make_constant<type_t>(tcp::socket::socket, type_id(typeid(tcp::socket_t)), tcp::socket::socket_ext))
 		.add_var("acceptor", make_cni(tcp::acceptor, true))
@@ -820,6 +873,7 @@ namespace network_cs_ext {
 		.add_var("send", make_cni(tcp::socket::send))
 		.add_var("write", make_cni(tcp::socket::write))
 		.add_var("shutdown", make_cni(tcp::socket::shutdown))
+		.add_var("safe_shutdown", make_cni(tcp::socket::safe_shutdown))
 		.add_var("local_endpoint", make_cni(tcp::socket::local_endpoint))
 		.add_var("remote_endpoint", make_cni(tcp::socket::remote_endpoint));
 		(*tcp::ep::ep_ext)
@@ -840,6 +894,7 @@ namespace network_cs_ext {
 		.add_var("bind", make_cni(udp::socket::bind))
 		.add_var("connect", make_cni(udp::socket::connect))
 		.add_var("close", make_cni(udp::socket::close))
+		.add_var("safe_close", make_cni(udp::socket::safe_close))
 		.add_var("is_open", make_cni(udp::socket::is_open))
 		.add_var("set_opt_reuse_address", make_cni(udp::socket::set_opt_reuse_address))
 		.add_var("set_opt_broadcast", make_cni(udp::socket::set_opt_broadcast))
@@ -854,6 +909,33 @@ namespace network_cs_ext {
 		.add_var("is_v6", make_cni(udp::ep::is_v6, true))
 		.add_var("port", make_cni(udp::ep::port, true));
 	}
+}
+
+bool network_cs_ext::tcp::socket::safe_shutdown(socket_t &sock)
+{
+	if (!sock->get_raw().is_open())
+		return true;
+	while (sock->async_jobs.load(std::memory_order_acquire) > 0) {
+		network_cs_ext::async::get_global_settings().poll();
+		cs_runtime_yield();
+	}
+	asio::error_code shutdown_ec, close_ec;
+	sock->get_raw().shutdown(asio::ip::tcp::socket::shutdown_both, shutdown_ec);
+	sock->get_raw().close(close_ec);
+	return !static_cast<bool>(shutdown_ec) && !static_cast<bool>(close_ec);
+}
+
+bool network_cs_ext::udp::socket::safe_close(socket_t &sock)
+{
+	if (!sock->get_raw().is_open())
+		return true;
+	while (sock->async_jobs.load(std::memory_order_acquire) > 0) {
+		network_cs_ext::async::get_global_settings().poll();
+		cs_runtime_yield();
+	}
+	asio::error_code ec;
+	sock->get_raw().close(ec);
+	return !static_cast<bool>(ec);
 }
 
 namespace cs_impl {
@@ -927,6 +1009,12 @@ namespace cs_impl {
 	constexpr const char *get_name_of_type<network_cs_ext::async::work_guard_t>()
 	{
 		return "cs::network::async::work_guard";
+	}
+
+	template <>
+	constexpr const char *get_name_of_type<network_cs_ext::async::thread_executor_t>()
+	{
+		return "cs::network::async::thread_executor";
 	}
 }
 

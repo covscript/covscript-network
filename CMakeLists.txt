@@ -17,19 +17,23 @@ endif ()
 set(CMAKE_CXX_STANDARD 14)
 
 if (MSVC)
-    set(CMAKE_CXX_FLAGS "/O2 /EHsc /utf-8 /w")
+    # MSVC Windows
+    set(CMAKE_CXX_FLAGS "/O2 /EHsc /utf-8 /DNDEBUG /Zc:__cplusplus /MP /w")
     set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
-elseif (CMAKE_COMPILER_IS_GNUCXX)
+    set(CMAKE_RC_FLAGS "/nologo /c65001")
+elseif (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    # Common flags for GCC/Clang
+    set(CMAKE_CXX_FLAGS "-O2 -DNDEBUG -fPIC")
     if (WIN32)
-        set(CMAKE_C_FLAGS "--static -fPIC -s -O3")
-        set(CMAKE_CXX_FLAGS "--static -fPIC -s -O3")
-    else ()
-        set(CMAKE_C_FLAGS "-fPIC -s -O3")
-        set(CMAKE_CXX_FLAGS "-fPIC -s -O3")
+        # MinGW or Clang on Windows
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --static")
+    elseif (UNIX AND NOT APPLE)
+        # Linux
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-plt")
+    elseif (APPLE)
+        # macOS
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
     endif ()
-else ()
-    set(CMAKE_C_FLAGS "-fPIC -O3")
-    set(CMAKE_CXX_FLAGS "-fPIC -O3")
 endif ()
 
 add_library(network SHARED network.cpp)

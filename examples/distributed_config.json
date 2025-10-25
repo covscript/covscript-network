@@ -1,7 +1,8 @@
 {
     "keep_alive_timeout": 5000,
     "max_keep_alive": 100,
-    "max_connections": 64,
+    "max_connections": 128,
+    "thread_count": 4,
     "worker_count": 4,
     "master_worker_count": 4,
     "master_addr": "127.0.0.1",

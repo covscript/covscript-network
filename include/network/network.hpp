@@ -29,6 +29,7 @@
 #include "asio.hpp"
 #include <covscript/covscript.hpp>
 #include <string>
+#include <atomic>
 
 namespace cs_impl {
 	namespace network {
@@ -65,6 +66,8 @@ namespace cs_impl {
 				tcp::socket sock;
 
 			public:
+				std::atomic<std::size_t> async_jobs{0};
+
 				socket() : sock(get_io_context()) {}
 
 				socket(const socket &) = delete;
@@ -168,6 +171,8 @@ namespace cs_impl {
 				udp::socket sock;
 
 			public:
+				std::atomic<std::size_t> async_jobs{0};
+
 				socket() : sock(get_io_context()) {}
 
 				socket(const socket &) = delete;
