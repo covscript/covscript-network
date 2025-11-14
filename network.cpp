@@ -801,13 +801,13 @@ namespace network_cs_ext {
 			cs_impl::network::get_io_context().restart();
 		}
 
-		using work_guard_t = asio::executor_work_guard<asio::io_context::executor_type>;
+		using work_guard_t = std::shared_ptr<asio::executor_work_guard<asio::io_context::executor_type>>;
 
 		var work_guard()
 		{
 			if (stopped())
 				restart();
-			return var::make<work_guard_t>(cs_impl::network::get_io_context().get_executor());
+			return std::make_shared<asio::executor_work_guard<asio::io_context::executor_type>>(cs_impl::network::get_io_context().get_executor());
 		}
 
 		using thread_executor_t = std::shared_ptr<thread_executor_type>;
