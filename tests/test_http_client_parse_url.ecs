@@ -1,0 +1,33 @@
+import netutils
+
+function assert_true(cond, msg)
+    if !cond
+        system.out.println("FAIL: " + msg)
+        system.exit(-1)
+    end
+end
+
+var client = new netutils.http_client
+
+var u1 = client.parse_url("https://api.openai.com/v1")
+assert_true(u1 != null, "u1 should not be null")
+assert_true(u1["scheme"] == "https", "u1 scheme")
+assert_true(u1["host"] == "api.openai.com", "u1 host")
+assert_true(u1["port"] == 443, "u1 default https port")
+assert_true(u1["path"] == "/v1", "u1 path")
+
+var u2 = client.parse_url("http://127.0.0.1:8080/test?a=1")
+assert_true(u2 != null, "u2 should not be null")
+assert_true(u2["scheme"] == "http", "u2 scheme")
+assert_true(u2["host"] == "127.0.0.1", "u2 host")
+assert_true(u2["port"] == 8080, "u2 explicit port")
+assert_true(u2["path"] == "/test?a=1", "u2 path")
+
+var u3 = client.parse_url("https://example.com")
+assert_true(u3 != null, "u3 should not be null")
+assert_true(u3["path"] == "/", "u3 default path")
+
+var u4 = client.parse_url("not_a_url")
+assert_true(u4 == null, "invalid url should return null")
+
+system.out.println("PASS: test_http_client_parse_url")

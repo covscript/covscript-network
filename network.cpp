@@ -20,9 +20,9 @@
  * Website: http://covscript.org.cn
  */
 
-#include <network/network.hpp>
 #include <covscript/dll.hpp>
 #include <covscript/cni.hpp>
+#include <network.hpp>
 #include <thread>
 #include <memory>
 #include <regex>
@@ -42,6 +42,87 @@ inline void cs_runtime_yield()
 namespace network_cs_ext {
 	using namespace cs;
 
+	bool is_null_var(const var &v)
+	{
+		if (v.type() == typeid(void))
+			return true;
+		if (v.is_type_of<pointer>()) {
+			const auto &ptr = v.const_val<pointer>();
+			return !ptr.data.usable();
+		}
+		return false;
+	}
+
+	cs_impl::network::ssl_options parse_ssl_options(const var &options_var)
+	{
+		cs_impl::network::ssl_options options;
+		if (is_null_var(options_var))
+			return options;
+		if (!options_var.is_type_of<hash_map>())
+			throw lang_error("TLS options must be null or hash_map.");
+		const auto &options_map = options_var.const_val<hash_map>();
+		bool has_trust_mode = false;
+		for (const auto &entry : options_map) {
+			if (!entry.first.is_type_of<string>())
+				throw lang_error("TLS option keys must be strings.");
+			const auto &key = entry.first.const_val<string>();
+			const auto &value = entry.second;
+			if (key == "trust_mode") {
+				if (!value.is_type_of<string>())
+					throw lang_error("TLS option \"trust_mode\" must be string.");
+				const auto &mode = value.const_val<string>();
+				has_trust_mode = true;
+				if (mode == "auto")
+					options.trust_mode = cs_impl::network::ssl_trust_mode::auto_mode;
+				else if (mode == "openssl")
+					options.trust_mode = cs_impl::network::ssl_trust_mode::openssl;
+				else if (mode == "custom") {
+					options.trust_mode = cs_impl::network::ssl_trust_mode::custom;
+				}
+				else if (mode == "insecure") {
+					options.trust_mode = cs_impl::network::ssl_trust_mode::insecure;
+					options.verify_peer = false;
+					options.verify_host = false;
+				}
+				else
+					throw lang_error("Unsupported TLS trust_mode: " + mode);
+				continue;
+			}
+			if (key == "ca_file") {
+				if (is_null_var(value))
+					options.ca_file.clear();
+				else if (value.is_type_of<string>())
+					options.ca_file = value.const_val<string>();
+				else
+					throw lang_error("TLS option \"ca_file\" must be string or null.");
+				continue;
+			}
+			if (key == "ca_path") {
+				if (is_null_var(value))
+					options.ca_path.clear();
+				else if (value.is_type_of<string>())
+					options.ca_path = value.const_val<string>();
+				else
+					throw lang_error("TLS option \"ca_path\" must be string or null.");
+				continue;
+			}
+			if (key == "verify_peer" || key == "verify_host")
+				throw lang_error("TLS option \"" + key + "\" is not exposed through CNI.");
+			throw lang_error("Unknown TLS option: " + key);
+		}
+		if (!options.ca_file.empty() || !options.ca_path.empty()) {
+			if (!has_trust_mode)
+				throw lang_error("TLS options \"ca_file\" and \"ca_path\" require trust_mode=\"custom\".");
+			if (options.trust_mode != cs_impl::network::ssl_trust_mode::custom)
+				throw lang_error("TLS options \"ca_file\" and \"ca_path\" can only be used with trust_mode=\"custom\".");
+		}
+		if (options.trust_mode == cs_impl::network::ssl_trust_mode::custom && options.ca_file.empty() && options.ca_path.empty())
+			throw lang_error("TLS trust_mode \"custom\" requires ca_file or ca_path.");
+		if (options.trust_mode == cs_impl::network::ssl_trust_mode::insecure && (!options.ca_file.empty() || !options.ca_path.empty()))
+			throw lang_error("TLS trust_mode \"insecure\" can not be combined with ca_file or ca_path.");
+		return options;
+	}
+
 	std::string to_fixed_hex(const numeric &n)
 	{
 		numeric_integer val = n.as_integer();
@@ -60,6 +141,11 @@ namespace network_cs_ext {
 	string host_name()
 	{
 		return asio::ip::host_name();
+	}
+
+	string get_last_ssl_trust_report()
+	{
+		return cs_impl::network::detail::get_last_tls_trust_report();
 	}
 
 	namespace tcp {
@@ -113,6 +199,11 @@ namespace network_cs_ext {
 			}
 		}
 
+		string get_ssl_trust_report(socket_t &sock)
+		{
+			return sock->get_ssl_trust_report();
+		}
+
 		namespace socket {
 			static namespace_t socket_ext = make_shared_namespace<name_space>();
 
@@ -125,6 +216,16 @@ namespace network_cs_ext {
 			{
 				try {
 					sock->connect(ep);
+				}
+				catch (const std::exception &e) {
+					throw lang_error(e.what());
+				}
+			}
+
+			void connect_ssl(socket_t &sock, const string &host, const var &options)
+			{
+				try {
+					sock->connect_ssl(host, parse_ssl_options(options));
 				}
 				catch (const std::exception &e) {
 					throw lang_error(e.what());
@@ -154,6 +255,16 @@ namespace network_cs_ext {
 			bool is_open(socket_t &sock)
 			{
 				return sock->is_open();
+			}
+
+			bool is_ssl(socket_t &sock)
+			{
+				return sock->is_ssl();
+			}
+
+			string get_ssl_trust_report(socket_t &sock)
+			{
+				return sock->get_ssl_trust_report();
 			}
 
 			void set_opt_reuse_address(socket_t &sock, bool value)
@@ -686,6 +797,36 @@ namespace network_cs_ext {
 			return state;
 		}
 
+		state_t connect_ssl(tcp::socket_t &sock, const std::string &host, const cs::var &options)
+		{
+			state_t state = std::make_shared<state_type>();
+			state->init = true;
+			auto ssl_options = parse_ssl_options(options);
+			try {
+				sock->prepare_ssl(host, ssl_options);
+			}
+			catch (const std::exception &e) {
+				throw cs::lang_error(e.what());
+			}
+			sock->async_jobs.fetch_add(1, std::memory_order_relaxed);
+			try {
+				sock->get_tls_raw().async_handshake(asio::ssl::stream_base::client,
+				[sock, state](const asio::error_code &ec) {
+					if (ec)
+						sock->reset_ssl();
+					state->ec = ec;
+					state->has_done.store(true, std::memory_order_release);
+					sock->async_jobs.fetch_sub(1, std::memory_order_relaxed);
+				});
+			}
+			catch (const std::exception &e) {
+				sock->reset_ssl();
+				sock->async_jobs.fetch_sub(1, std::memory_order_relaxed);
+				throw cs::lang_error(e.what());
+			}
+			return state;
+		}
+
 		void read_until(tcp::socket_t &sock, state_t &state, const std::string &pattern)
 		{
 			if (!state->init) {
@@ -698,14 +839,17 @@ namespace network_cs_ext {
 			state->has_done = false;
 			state->ec.clear();
 			sock->async_jobs.fetch_add(1, std::memory_order_relaxed);
-			asio::async_read_until(sock->get_raw(), state->buffer, pattern,
-			[sock, state](const asio::error_code &ec, std::size_t bytes) {
+			auto on_done = [sock, state](const asio::error_code &ec, std::size_t bytes) {
 				state->buffer.commit(bytes);
 				state->bytes_transferred = bytes;
 				state->ec = ec;
 				state->has_done.store(true, std::memory_order_release);
 				sock->async_jobs.fetch_sub(1, std::memory_order_relaxed);
-			});
+			};
+			if (sock->is_ssl())
+				asio::async_read_until(sock->get_tls_raw(), state->buffer, pattern, on_done);
+			else
+				asio::async_read_until(sock->get_raw(), state->buffer, pattern, on_done);
 		}
 
 		state_t read(tcp::socket_t &sock, std::size_t n)
@@ -714,14 +858,17 @@ namespace network_cs_ext {
 			state->init = true;
 			state->is_read = true;
 			sock->async_jobs.fetch_add(1, std::memory_order_relaxed);
-			asio::async_read(sock->get_raw(), state->buffer.prepare(n),
-			[sock, state](const asio::error_code &ec, std::size_t bytes) {
+			auto on_done = [sock, state](const asio::error_code &ec, std::size_t bytes) {
 				state->buffer.commit(bytes);
 				state->bytes_transferred = bytes;
 				state->ec = ec;
 				state->has_done.store(true, std::memory_order_release);
 				sock->async_jobs.fetch_sub(1, std::memory_order_relaxed);
-			});
+			};
+			if (sock->is_ssl())
+				asio::async_read(sock->get_tls_raw(), state->buffer.prepare(n), on_done);
+			else
+				asio::async_read(sock->get_raw(), state->buffer.prepare(n), on_done);
 			return state;
 		}
 
@@ -732,14 +879,17 @@ namespace network_cs_ext {
 			std::ostream os(&state->buffer);
 			os.write(data.data(), data.size());
 			sock->async_jobs.fetch_add(1, std::memory_order_relaxed);
-			asio::async_write(sock->get_raw(), state->buffer,
-			[sock, state](const asio::error_code &ec, std::size_t bytes) {
+			auto on_done = [sock, state](const asio::error_code &ec, std::size_t bytes) {
 				state->buffer.consume(bytes);
 				state->bytes_transferred = bytes;
 				state->ec = ec;
 				state->has_done.store(true, std::memory_order_release);
 				sock->async_jobs.fetch_sub(1, std::memory_order_relaxed);
-			});
+			};
+			if (sock->is_ssl())
+				asio::async_write(sock->get_tls_raw(), state->buffer, on_done);
+			else
+				asio::async_write(sock->get_raw(), state->buffer, on_done);
 			return state;
 		}
 
@@ -824,6 +974,7 @@ namespace network_cs_ext {
 		.add_var("tcp", make_namespace(tcp::tcp_ext))
 		.add_var("udp", make_namespace(udp::udp_ext))
 		.add_var("host_name", make_cni(host_name))
+		.add_var("get_last_ssl_trust_report", make_cni(get_last_ssl_trust_report))
 		.add_var("to_fixed_hex", make_cni(to_fixed_hex))
 		.add_var("from_fixed_hex", make_cni(from_fixed_hex))
 		.add_var("async", make_namespace(async::async_ext));
@@ -841,6 +992,7 @@ namespace network_cs_ext {
 		.add_var("state", var::make_constant<type_t>(async::create_async_state, type_id(typeid(async::state_t)), async::state_ext))
 		.add_var("accept", make_cni(async::accept))
 		.add_var("connect", make_cni(async::connect))
+		.add_var("connect_ssl", make_cni(async::connect_ssl))
 		.add_var("read_until", make_cni(async::read_until))
 		.add_var("read", make_cni(async::read))
 		.add_var("write", make_cni(async::write))
@@ -858,12 +1010,16 @@ namespace network_cs_ext {
 		.add_var("endpoint", make_cni(tcp::endpoint, true))
 		.add_var("endpoint_v4", make_cni(tcp::endpoint_v4, true))
 		.add_var("endpoint_v6", make_cni(tcp::endpoint_v6, true))
-		.add_var("resolve", make_cni(tcp::resolve, true));
+		.add_var("resolve", make_cni(tcp::resolve, true))
+		.add_var("get_ssl_trust_report", make_cni(tcp::get_ssl_trust_report));
 		(*tcp::socket::socket_ext)
 		.add_var("connect", make_cni(tcp::socket::connect))
+		.add_var("connect_ssl", make_cni(tcp::socket::connect_ssl))
 		.add_var("accept", make_cni(tcp::socket::accept))
 		.add_var("close", make_cni(tcp::socket::close))
 		.add_var("is_open", make_cni(tcp::socket::is_open))
+		.add_var("is_ssl", make_cni(tcp::socket::is_ssl))
+		.add_var("get_ssl_trust_report", make_cni(tcp::socket::get_ssl_trust_report))
 		.add_var("set_opt_reuse_address", make_cni(tcp::socket::set_opt_reuse_address))
 		.add_var("set_opt_no_delay", make_cni(tcp::socket::set_opt_no_delay))
 		.add_var("set_opt_keep_alive", make_cni(tcp::socket::set_opt_keep_alive))
@@ -919,10 +1075,21 @@ bool network_cs_ext::tcp::socket::safe_shutdown(socket_t &sock)
 		network_cs_ext::async::get_global_settings().poll();
 		cs_runtime_yield();
 	}
-	asio::error_code shutdown_ec, close_ec;
-	sock->get_raw().shutdown(asio::ip::tcp::socket::shutdown_both, shutdown_ec);
-	sock->get_raw().close(close_ec);
-	return !static_cast<bool>(shutdown_ec) && !static_cast<bool>(close_ec);
+	bool shutdown_ok = true;
+	bool close_ok = true;
+	try {
+		sock->shutdown();
+	}
+	catch (...) {
+		shutdown_ok = false;
+	}
+	try {
+		sock->close();
+	}
+	catch (...) {
+		close_ok = false;
+	}
+	return shutdown_ok && close_ok;
 }
 
 bool network_cs_ext::udp::socket::safe_close(socket_t &sock)

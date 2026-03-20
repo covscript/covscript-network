@@ -915,6 +915,406 @@ end
 
 var proxy = null, timeout_ms = null, low_speed_limit = null
 
+# ===========================================================
+# OpenAI API Compatible Client
+# ===========================================================
+
+var http_url_reg = regex.build_optimize("^(https?)://([^/:]+)(?::([0-9]+))?(.*)$")
+var http_status_line_reg = regex.build_optimize("^HTTP/([0-9.]+) ([0-9]{3})(?: (.*))?$")
+var http_header_line_reg = regex.build_optimize("^([^:]+):\\s*(.*)$")
+var transfer_chunked_reg = regex.build_optimize(".*chunked.*")
+
+class http_client
+    var sock = null
+    var pending = ""
+    var tls_options = null
+
+    function set_tls_options(options)
+        tls_options = options
+    end
+
+    function close()
+        if sock != null && sock.is_open()
+            sock.close()
+        end
+    end
+
+    function parse_url(url)
+        var m = http_url_reg.match(url)
+        if m.empty()
+            return null
+        end
+        var scheme = m.str(1).tolower()
+        var host = m.str(2)
+        var port = (scheme == "http" ? 80 : 443)
+        var port_str = m.str(3)
+        if port_str != null && !port_str.empty()
+            port = port_str as integer
+        end
+        var path = m.str(4)
+        if path == null || path.empty()
+            path = "/"
+        end
+        return {
+            "scheme": scheme,
+            "host": host,
+            "port": port,
+            "path": path
+        }.to_hash_map()
+    end
+
+    function connect_target(target)
+        close()
+        sock = new tcp.socket
+        pending = ""
+        try
+            var host = target["host"]
+            var port = target["port"]
+            var endpoints = tcp.resolve(host, to_string(port))
+            var connected = false
+            foreach ep in endpoints
+                try
+                    sock.connect(ep)
+                    connected = true
+                    break
+                catch e
+                    null
+                end
+            end
+            if !connected
+                return false
+            end
+            if target["scheme"] == "https"
+                sock.connect_ssl(host, tls_options)
+            end
+            sock.set_opt_no_delay(true)
+            return true
+        catch e
+            log("HTTP connect error: " + e.what)
+            close()
+            return false
+        end
+    end
+
+    function read_until(delim)
+        loop
+            var pos = pending.find(delim, 0)
+            if pos != -1
+                var data = pending.substr(0, pos + delim.size)
+                pending = pending.substr(pos + delim.size, pending.size - pos - delim.size)
+                return data
+            end
+            var chunk = null
+            try
+                chunk = sock.receive(8192)
+            catch e
+                return null
+            end
+            if chunk == null || chunk.empty()
+                return null
+            end
+            pending.append(chunk)
+        end
+    end
+
+    function read_exact(total)
+        if total <= 0
+            return ""
+        end
+        var need = total
+        var out = new string
+        if pending.size > 0
+            var take = need
+            if pending.size < take
+                take = pending.size
+            end
+            out.append(pending.substr(0, take))
+            pending = pending.substr(take, pending.size - take)
+            need -= take
+        end
+        while need > 0
+            var step = need
+            if step > 8192
+                step = 8192
+            end
+            var chunk = null
+            try
+                chunk = sock.receive(step)
+            catch e
+                return null
+            end
+            if chunk == null || chunk.empty()
+                return null
+            end
+            out.append(chunk)
+            need -= chunk.size
+        end
+        return move(out)
+    end
+
+    function read_chunked_body()
+        var body = new string
+        loop
+            var line = read_until("\r\n")
+            if line == null
+                return null
+            end
+            var size_str = line.trim()
+            var sc = size_str.find(";", 0)
+            if sc != -1
+                size_str = size_str.substr(0, sc).trim()
+            end
+            var chunk_size = hex_to_int(size_str)
+            if chunk_size == 0
+                if read_until("\r\n") == null
+                    return null
+                end
+                break
+            end
+            var chunk = read_exact(chunk_size)
+            if chunk == null
+                return null
+            end
+            body.append(chunk)
+            if read_exact(2) == null
+                return null
+            end
+        end
+        return move(body)
+    end
+
+    function parse_response_headers(headers_raw)
+        var lines = headers_raw.split({'\n'})
+        if lines.empty()
+            return null
+        end
+        var status_line = lines[0].trim()
+        var sm = http_status_line_reg.match(status_line)
+        if sm.empty()
+            return null
+        end
+        var headers = new hash_map
+        foreach i in range(lines.size)
+            if i == 0
+                continue
+            end
+            var line = lines[i].trim()
+            if line.empty()
+                continue
+            end
+            var hm = http_header_line_reg.match(line)
+            if !hm.empty()
+                headers[hm.str(1).tolower()] = hm.str(2).trim()
+            end
+        end
+        var content_length = -1
+        if headers.exist("content-length")
+            try
+                content_length = headers["content-length"] as integer
+            catch e
+                content_length = -1
+            end
+        end
+        var is_chunked = false
+        if headers.exist("transfer-encoding")
+            if !transfer_chunked_reg.match(headers["transfer-encoding"].tolower()).empty()
+                is_chunked = true
+            end
+        end
+        return {
+            "status_code": sm.str(2) as integer,
+            "headers": headers,
+            "content_length": content_length,
+            "is_chunked": is_chunked
+        }.to_hash_map()
+    end
+
+    function read_body(meta)
+        var resp_body = ""
+        if meta["is_chunked"]
+            resp_body = read_chunked_body()
+        else
+            if meta["content_length"] > 0
+                resp_body = read_exact(meta["content_length"])
+            else
+                if meta["content_length"] == 0
+                    resp_body = ""
+                else
+                    var body_buf = new string
+                    body_buf.append(pending)
+                    pending = ""
+                    loop
+                        var chunk = null
+                        try
+                            chunk = sock.receive(8192)
+                        catch e
+                            break
+                        end
+                        if chunk == null || chunk.empty()
+                            break
+                        end
+                        body_buf.append(chunk)
+                    end
+                    resp_body = move(body_buf)
+                end
+            end
+        end
+        if resp_body == null
+            log("HTTP read body error.")
+            return null
+        end
+        return resp_body
+    end
+
+    function http_request(method, url, headers, body)
+        var target = parse_url(url)
+        if target == null
+            log("HTTP URL parse error: " + url)
+            return null
+        end
+        if !connect_target(target)
+            log("HTTP connect error: no reachable endpoint for " + target["host"] + ":" + to_string(target["port"]))
+            return null
+        end
+        var req_body = (body == null ? "" : body)
+        var host_header = target["host"]
+        if (target["scheme"] == "http" && target["port"] != 80) ||
+            (target["scheme"] == "https" && target["port"] != 443)
+            host_header = host_header + ":" + to_string(target["port"])
+        end
+        var req = method + " " + target["path"] + " HTTP/1.1\r\n"
+        req.append("Host: " + host_header + "\r\n")
+        foreach hdr in headers
+            req.append(hdr + "\r\n")
+        end
+        req.append("Content-Length: " + to_string(req_body.size) + "\r\n")
+        req.append("Connection: close\r\n")
+        req.append("\r\n")
+        req.append(req_body)
+        try
+            sock.write(req)
+        catch e
+            log("HTTP write error: " + e.what)
+            close()
+            return null
+        end
+
+        var headers_raw = read_until("\r\n\r\n")
+        if headers_raw == null
+            log("HTTP read headers error.")
+            close()
+            return null
+        end
+
+        var meta = parse_response_headers(headers_raw)
+        if meta == null
+            log("HTTP parse headers error.")
+            close()
+            return null
+        end
+
+        var resp_body = read_body(meta)
+        close()
+        if resp_body == null
+            return null
+        end
+        return {
+            "status_code": meta["status_code"],
+            "headers": meta["headers"],
+            "body": resp_body
+        }.to_hash_map()
+    end
+
+    function post(url, headers, body)
+        return http_request("POST", url, headers, body)
+    end
+end
+
+class openai_client extends http_client
+    var api_key = null
+    var api_base = "https://api.openai.com/v1"
+    var model = "gpt-4o-mini"
+
+    function set_api_key(key)
+        api_key = key
+    end
+
+    function set_base(url)
+        api_base = url
+    end
+
+    function set_model(name)
+        model = name
+    end
+
+    function message(role, content)
+        return {"role": role, "content": content}.to_hash_map()
+    end
+
+    function request(endpoint, payload)
+        if api_key == null || api_key.empty()
+            log("OpenAI: api_key not set. Call client.set_api_key() first.")
+            return null
+        end
+        var path_str = endpoint
+        if path_str == null || path_str.empty()
+            path_str = "/chat/completions"
+        else if path_str.find("/", 0) != 0
+            path_str = "/" + path_str
+        end
+
+        var base = api_base
+        if base == null || base.empty()
+            base = "https://api.openai.com/v1"
+        end
+        if base[-1] == '/'
+            base.cut(1)
+        end
+
+        var full_url = base + path_str
+        var headers = {
+            "Authorization: Bearer " + api_key,
+            "Content-Type: application/json",
+            "Accept: application/json"
+        }
+        var body = json.to_string(json.from_var(payload))
+        var resp = this.post(full_url, headers, body)
+        if resp == null
+            return null
+        end
+        var raw = resp["body"]
+        if raw == null || raw.empty()
+            return null
+        end
+        try
+            return json.to_var(json.from_string(raw))
+        catch e
+            log("OpenAI JSON parse error: " + e.what)
+            return null
+        end
+    end
+
+    function chat(messages)
+        var payload = {
+            "model": model,
+            "messages": messages
+        }.to_hash_map()
+        return request("/chat/completions", payload)
+    end
+
+    function chat_text(messages)
+        var response = chat(messages)
+        if response == null || !response.exist("choices") || response.choices.empty()
+            return null
+        end
+        var choice = response.choices[0]
+        if !choice.exist("message") || !choice.message.exist("content")
+            return null
+        end
+        return choice.message.content
+    end
+end
+
 function http_get(url)
     var buff = new iostream.char_buff
     var session = curl.make_session_os(buff.get_ostream())

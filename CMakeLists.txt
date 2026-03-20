@@ -12,12 +12,14 @@ else ()
     message(FATAL_ERROR "-- CovScript SDK not detected. Please set environment variable CS_DEV_PATH")
 endif ()
 
+find_package(OpenSSL REQUIRED)
+
 add_library(network SHARED network.cpp)
 
-target_link_libraries(network covscript)
+target_link_libraries(network covscript OpenSSL::SSL OpenSSL::Crypto)
 
 if (WIN32)
-    target_link_libraries(network ws2_32 wsock32)
+    target_link_libraries(network ws2_32 wsock32 bcrypt crypt32)
 else ()
     target_link_libraries(network pthread)
 endif ()

@@ -1,0 +1,37 @@
+import netutils
+
+function assert_true(cond, msg)
+    if !cond
+        system.out.println("FAIL: " + msg)
+        system.exit(-1)
+    end
+end
+
+function make_payload(client)
+    var m = client.message("user", "ping")
+    return {
+        "model": "dummy-model",
+        "messages": {m}
+    }.to_hash_map()
+end
+
+var client = new netutils.openai_client
+
+var msg = client.message("system", "hello")
+assert_true(msg["role"] == "system", "message role")
+assert_true(msg["content"] == "hello", "message content")
+
+var p1 = client.parse_url("https://example.com/v1")
+assert_true(p1 != null, "openai client inherits parse_url")
+assert_true(p1["scheme"] == "https", "inherited parse_url scheme")
+assert_true(p1["host"] == "example.com", "inherited parse_url host")
+
+var r1 = client.request("/chat/completions", make_payload(client))
+assert_true(r1 == null, "request without api_key should return null")
+
+client.set_api_key("dummy-key")
+client.set_base("invalid_base_url")
+var r2 = client.request("/chat/completions", make_payload(client))
+assert_true(r2 == null, "request with invalid base url should return null")
+
+system.out.println("PASS: test_openai_client_oop")

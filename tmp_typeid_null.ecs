@@ -1,0 +1,4 @@
+var x = null
+system.out.println("typeid null -> " + to_string(typeid x))
+var hm = new hash_map
+system.out.println("typeid hash_map -> " + to_string(typeid hm))
