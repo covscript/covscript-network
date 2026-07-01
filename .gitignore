@@ -56,3 +56,6 @@ examples/*.csc
 *.log
 *.db
 authorized_keys
+
+# Compiled CovScript output
+test_call_deepseek.csc
