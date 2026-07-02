@@ -1,15 +1,6 @@
 # CI for covscript-network extension.
 #
 # Matrix: 3 platforms x 2 covscript channels (release + nightly) = 6 jobs.
-#
-# Each job:
-#   1. Checks out this extension repo.
-#   2. Determines the covscript ref (tag from covscript/csbuild/release.txt, or master HEAD).
-#   3. Builds covscript from source (SDK ends up in covscript/csdev/).
-#   4. Builds the network extension against that SDK.
-#   5. Runs unit tests (no network required).
-#   6. Runs integration tests (TLS trust check against public servers).
-#   7. Runs DeepSeek test (only when DEEPSEEK_API_KEY secret is set).
 
 name: CI
 
@@ -41,32 +32,108 @@ jobs:
         uses: actions/checkout@v4
 
       # ------------------------------------------------------------------ #
-      # 2. Determine covscript checkout ref                                 #
+      # 2. Set platform identifiers                                         #
       # ------------------------------------------------------------------ #
-      - name: Determine covscript ref
-        id: cs-ref
+      - name: Set platform identifiers
+        id: platform
+        shell: bash
+        run: |
+          case "${{ runner.os }}" in
+            Linux)   echo "os=ubuntu" >> "$GITHUB_OUTPUT"
+                     echo "arch=x86_64" >> "$GITHUB_OUTPUT"
+                     echo "cspkg_arch=amd64" >> "$GITHUB_OUTPUT" ;;
+            macOS)   echo "os=macos" >> "$GITHUB_OUTPUT"
+                     echo "arch=arm64" >> "$GITHUB_OUTPUT"
+                     echo "cspkg_arch=arm64" >> "$GITHUB_OUTPUT" ;;
+            Windows) echo "os=windows" >> "$GITHUB_OUTPUT"
+                     echo "arch=x86_64" >> "$GITHUB_OUTPUT"
+                     echo "cspkg_arch=amd64" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      # ------------------------------------------------------------------ #
+      # 3. Determine csbuild release tag and asset suffix                   #
+      # ------------------------------------------------------------------ #
+      - name: Determine csbuild release
+        id: cs-release
         shell: bash
         run: |
           if [ "${{ matrix.cs-channel }}" = "release" ]; then
-            tag=$(curl -fsSL https://raw.githubusercontent.com/covscript/covscript/master/csbuild/release.txt | tr -d '[:space:]')
-            echo "ref=$tag" >> "$GITHUB_OUTPUT"
+            echo "tag=${{ steps.platform.outputs.os }}-schedule-release" >> "$GITHUB_OUTPUT"
+            echo "suffix=" >> "$GITHUB_OUTPUT"
           else
-            echo "ref=master" >> "$GITHUB_OUTPUT"
+            echo "tag=${{ steps.platform.outputs.os }}-schedule" >> "$GITHUB_OUTPUT"
+            echo "suffix=-nightly" >> "$GITHUB_OUTPUT"
           fi
 
       # ------------------------------------------------------------------ #
-      # 3. Check out covscript at the resolved ref                         #
+      # 4. Download and extract covscript SDK + cspkg repo                  #
       # ------------------------------------------------------------------ #
-      - name: Checkout covscript (${{ steps.cs-ref.outputs.ref }})
-        uses: actions/checkout@v4
-        with:
-          repository: covscript/covscript
-          ref: ${{ steps.cs-ref.outputs.ref }}
-          path: covscript
-          submodules: recursive
+      - name: Download covscript SDK
+        shell: bash
+        run: |
+          TAG="${{ steps.cs-release.outputs.tag }}"
+          ARCH="${{ steps.platform.outputs.arch }}"
+          OS="${{ steps.platform.outputs.os }}"
+          SUFFIX="${{ steps.cs-release.outputs.suffix }}"
+          BASE="https://github.com/covscript/csbuild/releases/download/${TAG}"
+
+          COV="covscript-${OS}-${ARCH}${SUFFIX}.7z"
+          PKG="cspkg-${OS}-${ARCH}${SUFFIX}.7z"
+
+          echo "Downloading ${COV}..."
+          curl -fsSL -o covscript.7z "${BASE}/${COV}"
+          echo "Downloading ${PKG}..."
+          curl -fsSL -o cspkg.7z "${BASE}/${PKG}"
+
+          mkdir -p covscript
+          7z x covscript.7z -ocovscript -y
+
+          mkdir -p cspkg-repo
+          7z x cspkg.7z -ocspkg-repo -y
+
+          echo "=== covscript structure ==="
+          find covscript -maxdepth 2 -type d 2>/dev/null || true
+          echo "=== cspkg-repo structure ==="
+          find cspkg-repo -maxdepth 2 -type d 2>/dev/null || true
 
       # ------------------------------------------------------------------ #
-      # 4a. Add MinGW-w64 to PATH (Windows only)                           #
+      # 5. Configure cspkg                                                  #
+      # ------------------------------------------------------------------ #
+      - name: Configure cspkg
+        shell: bash
+        run: |
+          CSPKG_HOME="$HOME/.cspkg"
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            CSPKG_HOME="$USERPROFILE/.cspkg"
+          fi
+          mkdir -p "$CSPKG_HOME"
+
+          cat > "$CSPKG_HOME/config.json" << EOF
+          {
+            "arch": "${{ steps.platform.outputs.cspkg_arch }}",
+            "home": "${{ github.workspace }}/covscript",
+            "source": "file://${{ github.workspace }}/cspkg-repo/",
+            "timeout_ms": "3000"
+          }
+          EOF
+
+          echo "=== cspkg config ==="
+          cat "$CSPKG_HOME/config.json"
+
+      # ------------------------------------------------------------------ #
+      # 6. Install local packages via cspkg                                 #
+      # ------------------------------------------------------------------ #
+      - name: Install packages via cspkg
+        shell: bash
+        run: |
+          CSPKG="${{ github.workspace }}/covscript/bin/cspkg"
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            CSPKG="${{ github.workspace }}/covscript/bin/cspkg.bat"
+          fi
+          "$CSPKG" -b . --install --yes
+
+      # ------------------------------------------------------------------ #
+      # 7. Add MinGW-w64 to PATH (Windows only)                            #
       # ------------------------------------------------------------------ #
       - name: Add MinGW to PATH
         if: runner.os == 'Windows'
@@ -74,25 +141,7 @@ jobs:
         run: echo "C:/mingw64/bin" >> "$GITHUB_PATH"
 
       # ------------------------------------------------------------------ #
-      # 4b. Build covscript (Linux / macOS)                                #
-      # ------------------------------------------------------------------ #
-      - name: Build covscript
-        if: runner.os != 'Windows'
-        working-directory: covscript
-        shell: bash
-        run: bash csbuild/make.sh
-
-      # ------------------------------------------------------------------ #
-      # 4c. Build covscript (Windows / MinGW)                              #
-      # ------------------------------------------------------------------ #
-      - name: Build covscript (Windows)
-        if: runner.os == 'Windows'
-        working-directory: covscript
-        shell: cmd
-        run: csbuild\make.bat
-
-      # ------------------------------------------------------------------ #
-      # 5a. Build extension (Linux / macOS)                                #
+      # 8a. Build extension (Linux / macOS)                                #
       # ------------------------------------------------------------------ #
       - name: Build extension
         if: runner.os != 'Windows'
@@ -104,11 +153,9 @@ jobs:
           cmake --build build --parallel 4
           mkdir -p build/imports
           cp build/*.cse build/imports/
-          cp netutils.csp netutils.csym netutils.ecs build/imports/ 2>/dev/null || true
-          cp argparse.csp argparse.csym argparse.ecs build/imports/ 2>/dev/null || true
 
       # ------------------------------------------------------------------ #
-      # 5b. Build extension (Windows / MinGW)                              #
+      # 8b. Build extension (Windows / MinGW)                              #
       # ------------------------------------------------------------------ #
       - name: Build extension (Windows)
         if: runner.os == 'Windows'
@@ -122,93 +169,102 @@ jobs:
           cd ..
           if not exist build\imports mkdir build\imports
           copy build\*.cse build\imports\
-          if exist netutils.csp copy netutils.csp build\imports\
-          if exist netutils.csym copy netutils.csym build\imports\
-          if exist netutils.ecs copy netutils.ecs build\imports\
-          if exist argparse.csp copy argparse.csp build\imports\
-          if exist argparse.csym copy argparse.csym build\imports\
-          if exist argparse.ecs copy argparse.ecs build\imports\
 
       # ------------------------------------------------------------------ #
-      # 6a. Run unit tests (Linux / macOS)                                 #
+      # 9. Debug info                                                     #
+      # ------------------------------------------------------------------ #
+      - name: Debug info
+        shell: bash
+        run: |
+          CS="${{ github.workspace }}/covscript/bin/cs"
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            CS="${{ github.workspace }}/covscript/bin/cs.exe"
+          fi
+          echo "=== covscript version ==="
+          "$CS" --version
+          echo "=== covscript imports ==="
+          ls -la "${{ github.workspace }}/covscript/imports/" 2>/dev/null || echo "(not found)"
+
+      # ------------------------------------------------------------------ #
+      # 10a. Run unit tests (Linux / macOS)                                #
       # ------------------------------------------------------------------ #
       - name: Run unit tests
         if: runner.os != 'Windows'
         shell: bash
         run: |
           set -e
-          CS="${{ github.workspace }}/covscript/build/bin/cs"
-          export PATH="${{ github.workspace }}/covscript/build/bin:$PATH"
-          "$CS" -i build/imports tests/test_url_parse.csc
-          "$CS" -i build/imports tests/test_header_parser.csc
-          "$CS" -i build/imports tests/test_openai_client.csc
+          CS="${{ github.workspace }}/covscript/bin/cs"
+          export PATH="${{ github.workspace }}/covscript/bin:$PATH"
+          "$CS" tests/test_url_parse.csc
+          "$CS" tests/test_header_parser.csc
+          "$CS" tests/test_openai_client.csc
 
       # ------------------------------------------------------------------ #
-      # 6b. Run unit tests (Windows)                                       #
+      # 10b. Run unit tests (Windows)                                      #
       # ------------------------------------------------------------------ #
       - name: Run unit tests (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $cs = "${{ github.workspace }}\covscript\build\bin\cs.exe"
-          $env:Path = "${{ github.workspace }}\covscript\build\bin;$env:Path"
-          & $cs -i build\imports tests\test_url_parse.csc
+          $cs = "${{ github.workspace }}\covscript\bin\cs.exe"
+          $env:Path = "${{ github.workspace }}\covscript\bin;$env:Path"
+          & $cs tests\test_url_parse.csc
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          & $cs -i build\imports tests\test_header_parser.csc
+          & $cs tests\test_header_parser.csc
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          & $cs -i build\imports tests\test_openai_client.csc
+          & $cs tests\test_openai_client.csc
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       # ------------------------------------------------------------------ #
-      # 7a. Run async TCP test (Linux / macOS)                             #
+      # 11a. Run async TCP test (Linux / macOS)                            #
       # ------------------------------------------------------------------ #
       - name: Run async TCP test
         if: runner.os != 'Windows'
         shell: bash
         run: |
           set -e
-          CS="${{ github.workspace }}/covscript/build/bin/cs"
-          export PATH="${{ github.workspace }}/covscript/build/bin:$PATH"
-          "$CS" -i build/imports tests/test_async_tcp.csc
+          CS="${{ github.workspace }}/covscript/bin/cs"
+          export PATH="${{ github.workspace }}/covscript/bin:$PATH"
+          "$CS" tests/test_async_tcp.csc
 
       # ------------------------------------------------------------------ #
-      # 7b. Run async TCP test (Windows)                                   #
+      # 11b. Run async TCP test (Windows)                                  #
       # ------------------------------------------------------------------ #
       - name: Run async TCP test (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $cs = "${{ github.workspace }}\covscript\build\bin\cs.exe"
-          $env:Path = "${{ github.workspace }}\covscript\build\bin;$env:Path"
-          & $cs -i build\imports tests\test_async_tcp.csc
+          $cs = "${{ github.workspace }}\covscript\bin\cs.exe"
+          $env:Path = "${{ github.workspace }}\covscript\bin;$env:Path"
+          & $cs tests\test_async_tcp.csc
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       # ------------------------------------------------------------------ #
-      # 8a. Run integration tests (Linux / macOS)                          #
+      # 12a. Run integration tests (Linux / macOS)                         #
       # ------------------------------------------------------------------ #
       - name: Run integration tests
         if: runner.os != 'Windows'
         shell: bash
         run: |
           set -e
-          CS="${{ github.workspace }}/covscript/build/bin/cs"
-          export PATH="${{ github.workspace }}/covscript/build/bin:$PATH"
-          "$CS" -i build/imports tests/test_tls_trust.csc
+          CS="${{ github.workspace }}/covscript/bin/cs"
+          export PATH="${{ github.workspace }}/covscript/bin:$PATH"
+          "$CS" tests/test_tls_trust.csc
 
       # ------------------------------------------------------------------ #
-      # 8b. Run integration tests (Windows)                                #
+      # 12b. Run integration tests (Windows)                               #
       # ------------------------------------------------------------------ #
       - name: Run integration tests (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $cs = "${{ github.workspace }}\covscript\build\bin\cs.exe"
-          $env:Path = "${{ github.workspace }}\covscript\build\bin;$env:Path"
-          & $cs -i build\imports tests\test_tls_trust.csc
+          $cs = "${{ github.workspace }}\covscript\bin\cs.exe"
+          $env:Path = "${{ github.workspace }}\covscript\bin;$env:Path"
+          & $cs tests\test_tls_trust.csc
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       # ------------------------------------------------------------------ #
-      # 9a. Run DeepSeek test (only when API key is available)             #
+      # 13a. Run DeepSeek test (only when API key is available)            #
       # ------------------------------------------------------------------ #
       - name: Run DeepSeek test
         if: runner.os != 'Windows' && github.secrets.DEEPSEEK_API_KEY != ''
@@ -217,12 +273,12 @@ jobs:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
         run: |
           set -e
-          CS="${{ github.workspace }}/covscript/build/bin/cs"
-          export PATH="${{ github.workspace }}/covscript/build/bin:$PATH"
-          "$CS" -i build/imports tests/test_deepseek.csc
+          CS="${{ github.workspace }}/covscript/bin/cs"
+          export PATH="${{ github.workspace }}/covscript/bin:$PATH"
+          "$CS" tests/test_deepseek.csc
 
       # ------------------------------------------------------------------ #
-      # 9b. Run DeepSeek test (Windows, only when API key is available)    #
+      # 13b. Run DeepSeek test (Windows, only when API key is available)   #
       # ------------------------------------------------------------------ #
       - name: Run DeepSeek test (Windows)
         if: runner.os == 'Windows' && github.secrets.DEEPSEEK_API_KEY != ''
@@ -230,7 +286,7 @@ jobs:
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
         run: |
-          $cs = "${{ github.workspace }}\covscript\build\bin\cs.exe"
-          $env:Path = "${{ github.workspace }}\covscript\build\bin;$env:Path"
-          & $cs -i build\imports tests\test_deepseek.csc
+          $cs = "${{ github.workspace }}\covscript\bin\cs.exe"
+          $env:Path = "${{ github.workspace }}\covscript\bin;$env:Path"
+          & $cs tests\test_deepseek.csc
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
