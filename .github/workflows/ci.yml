@@ -1,6 +1,4 @@
 # CI for covscript-network extension.
-#
-# Matrix: 3 platforms x 2 covscript channels (release + nightly) = 6 jobs.
 
 name: CI
 
@@ -41,17 +39,20 @@ jobs:
           case "${{ runner.os }}" in
             Linux)   echo "os=ubuntu" >> "$GITHUB_OUTPUT"
                      echo "arch=x86_64" >> "$GITHUB_OUTPUT"
-                     echo "cspkg_arch=amd64" >> "$GITHUB_OUTPUT" ;;
+                     echo "cspkg_arch=amd64" >> "$GITHUB_OUTPUT"
+                     echo "cspkg_arch_dir=ubuntu/x86_64" >> "$GITHUB_OUTPUT" ;;
             macOS)   echo "os=macos" >> "$GITHUB_OUTPUT"
                      echo "arch=arm64" >> "$GITHUB_OUTPUT"
-                     echo "cspkg_arch=arm64" >> "$GITHUB_OUTPUT" ;;
+                     echo "cspkg_arch=arm64" >> "$GITHUB_OUTPUT"
+                     echo "cspkg_arch_dir=darwin/arm64" >> "$GITHUB_OUTPUT" ;;
             Windows) echo "os=windows" >> "$GITHUB_OUTPUT"
                      echo "arch=x86_64" >> "$GITHUB_OUTPUT"
-                     echo "cspkg_arch=amd64" >> "$GITHUB_OUTPUT" ;;
+                     echo "cspkg_arch=amd64" >> "$GITHUB_OUTPUT"
+                     echo "cspkg_arch_dir=windows-ucrt/amd64" >> "$GITHUB_OUTPUT" ;;
           esac
 
       # ------------------------------------------------------------------ #
-      # 3. Determine csbuild release tag and asset suffix                   #
+      # 3. Determine release tag                                            #
       # ------------------------------------------------------------------ #
       - name: Determine csbuild release
         id: cs-release
@@ -66,7 +67,7 @@ jobs:
           fi
 
       # ------------------------------------------------------------------ #
-      # 4. Download and extract covscript SDK + cspkg repo                  #
+      # 4. Download & extract covscript SDK + cspkg repo                    #
       # ------------------------------------------------------------------ #
       - name: Download covscript SDK
         shell: bash
@@ -76,7 +77,6 @@ jobs:
           OS="${{ steps.platform.outputs.os }}"
           SUFFIX="${{ steps.cs-release.outputs.suffix }}"
           BASE="https://github.com/covscript/csbuild/releases/download/${TAG}"
-
           COV="covscript-${OS}-${ARCH}${SUFFIX}.7z"
           PKG="cspkg-${OS}-${ARCH}${SUFFIX}.7z"
 
@@ -85,30 +85,52 @@ jobs:
           echo "Downloading ${PKG}..."
           curl -fsSL -o cspkg.7z "${BASE}/${PKG}"
 
-          mkdir -p covscript
+          mkdir -p covscript cspkg-repo
           7z x covscript.7z -ocovscript -y
-
-          mkdir -p cspkg-repo
           7z x cspkg.7z -ocspkg-repo -y
 
-          echo "=== covscript structure ==="
-          find covscript -maxdepth 2 -type d 2>/dev/null || true
-          echo "=== cspkg-repo structure ==="
-          find cspkg-repo -maxdepth 2 -type d 2>/dev/null || true
+          echo "=== covscript top-level ==="
+          ls -la covscript/
+          echo "=== covscript/bin ==="
+          ls -la covscript/bin/ 2>/dev/null || echo "(no bin/)"
 
       # ------------------------------------------------------------------ #
-      # 5. Configure cspkg                                                  #
+      # 5. Bootstrap imports (so cspkg can run)                             #
+      # ------------------------------------------------------------------ #
+      - name: Bootstrap imports
+        shell: bash
+        run: |
+          COVSCRIPT_HOME="${{ github.workspace }}/covscript"
+          CSPKG_REPO="${{ github.workspace }}/cspkg-repo"
+          ARCH_DIR="${{ steps.platform.outputs.cspkg_arch_dir }}"
+
+          # Create imports dir if needed
+          mkdir -p "$COVSCRIPT_HOME/imports"
+
+          # Copy .cse extensions so cspkg has its dependencies (codec, curl, regex)
+          cp "$CSPKG_REPO/$ARCH_DIR/"*.cse "$COVSCRIPT_HOME/imports/" 2>/dev/null || true
+
+          # Copy universal .csp packages so cspkg has ecs etc.
+          cp "$CSPKG_REPO/universal/"*.csp "$COVSCRIPT_HOME/imports/" 2>/dev/null || true
+          cp "$CSPKG_REPO/universal/"*.csym "$COVSCRIPT_HOME/imports/" 2>/dev/null || true
+
+          echo "=== covscript/imports ==="
+          ls -la "$COVSCRIPT_HOME/imports/"
+
+      # ------------------------------------------------------------------ #
+      # 6. Configure and run cspkg                                          #
       # ------------------------------------------------------------------ #
       - name: Configure cspkg
         shell: bash
         run: |
-          CSPKG_HOME="$HOME/.cspkg"
           if [ "${{ runner.os }}" = "Windows" ]; then
-            CSPKG_HOME="$USERPROFILE/.cspkg"
+            CSPKG_CONF="$USERPROFILE/.cspkg"
+          else
+            CSPKG_CONF="$HOME/.cspkg"
           fi
-          mkdir -p "$CSPKG_HOME"
+          mkdir -p "$CSPKG_CONF"
 
-          cat > "$CSPKG_HOME/config.json" << EOF
+          cat > "$CSPKG_CONF/config.json" << EOF
           {
             "arch": "${{ steps.platform.outputs.cspkg_arch }}",
             "home": "${{ github.workspace }}/covscript",
@@ -118,22 +140,33 @@ jobs:
           EOF
 
           echo "=== cspkg config ==="
-          cat "$CSPKG_HOME/config.json"
+          cat "$CSPKG_CONF/config.json"
 
       # ------------------------------------------------------------------ #
-      # 6. Install local packages via cspkg                                 #
+      # 7. Run cspkg install --fix                                           #
       # ------------------------------------------------------------------ #
-      - name: Install packages via cspkg
+      - name: Run cspkg install
         shell: bash
         run: |
-          CSPKG="${{ github.workspace }}/covscript/bin/cspkg"
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            CSPKG="${{ github.workspace }}/covscript/bin/cspkg.bat"
+          export COVSCRIPT_HOME="${{ github.workspace }}/covscript"
+          export PATH="$COVSCRIPT_HOME/bin:$PATH"
+
+          # Find cspkg launcher
+          CSPKG=$(find "$COVSCRIPT_HOME" -name "cspkg" -type f 2>/dev/null | head -1)
+          if [ -z "$CSPKG" ]; then
+            # Fallback: run cspkg.csp directly with cs
+            CSPKG_SCRIPT="${{ github.workspace }}/cspkg-repo/universal/cspkg.csp"
+            CS="$COVSCRIPT_HOME/bin/cs"
+            if [ "${{ runner.os }}" = "Windows" ]; then
+              CS="$COVSCRIPT_HOME/bin/cs.exe"
+            fi
+            "$CS" "$CSPKG_SCRIPT" -- install --fix --yes
+          else
+            "$CSPKG" install --fix --yes
           fi
-          "$CSPKG" -b . --install --yes
 
       # ------------------------------------------------------------------ #
-      # 7. Add MinGW-w64 to PATH (Windows only)                            #
+      # 8. Add MinGW-w64 to PATH (Windows only)                            #
       # ------------------------------------------------------------------ #
       - name: Add MinGW to PATH
         if: runner.os == 'Windows'
@@ -141,7 +174,7 @@ jobs:
         run: echo "C:/mingw64/bin" >> "$GITHUB_PATH"
 
       # ------------------------------------------------------------------ #
-      # 8a. Build extension (Linux / macOS)                                #
+      # 9a. Build extension (Linux / macOS)                                #
       # ------------------------------------------------------------------ #
       - name: Build extension
         if: runner.os != 'Windows'
@@ -151,11 +184,9 @@ jobs:
         run: |
           cmake -G "Unix Makefiles" -S . -B build -DCMAKE_BUILD_TYPE=Release
           cmake --build build --parallel 4
-          mkdir -p build/imports
-          cp build/*.cse build/imports/
 
       # ------------------------------------------------------------------ #
-      # 8b. Build extension (Windows / MinGW)                              #
+      # 9b. Build extension (Windows / MinGW)                              #
       # ------------------------------------------------------------------ #
       - name: Build extension (Windows)
         if: runner.os == 'Windows'
@@ -167,47 +198,47 @@ jobs:
           cmake -G "MinGW Makefiles" .. -DCMAKE_BUILD_TYPE=Release
           cmake --build . --parallel 4
           cd ..
-          if not exist build\imports mkdir build\imports
-          copy build\*.cse build\imports\
 
       # ------------------------------------------------------------------ #
-      # 9. Debug info                                                     #
+      # 10. Install built extension + packages                              #
       # ------------------------------------------------------------------ #
-      - name: Debug info
+      - name: Install local build
         shell: bash
         run: |
-          CS="${{ github.workspace }}/covscript/bin/cs"
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            CS="${{ github.workspace }}/covscript/bin/cs.exe"
-          fi
-          echo "=== covscript version ==="
-          "$CS" --version
-          echo "=== covscript imports ==="
-          ls -la "${{ github.workspace }}/covscript/imports/" 2>/dev/null || echo "(not found)"
+          COVSCRIPT_HOME="${{ github.workspace }}/covscript"
+          # Copy built network.cse over the pre-built one
+          cp build/*.cse "$COVSCRIPT_HOME/imports/" 2>/dev/null || true
+          # Copy our netutils.csp and argparse.csp
+          cp netutils.csp netutils.csym "$COVSCRIPT_HOME/imports/" 2>/dev/null || true
+          cp argparse.csp argparse.csym "$COVSCRIPT_HOME/imports/" 2>/dev/null || true
+
+          echo "=== final imports ==="
+          ls -la "$COVSCRIPT_HOME/imports/"
 
       # ------------------------------------------------------------------ #
-      # 10a. Run unit tests (Linux / macOS)                                #
+      # 11a. Run unit tests (Linux / macOS)                                #
       # ------------------------------------------------------------------ #
       - name: Run unit tests
         if: runner.os != 'Windows'
         shell: bash
         run: |
           set -e
-          CS="${{ github.workspace }}/covscript/bin/cs"
-          export PATH="${{ github.workspace }}/covscript/bin:$PATH"
-          "$CS" tests/test_url_parse.csc
-          "$CS" tests/test_header_parser.csc
-          "$CS" tests/test_openai_client.csc
+          export COVSCRIPT_HOME="${{ github.workspace }}/covscript"
+          export PATH="$COVSCRIPT_HOME/bin:$PATH"
+          cs tests/test_url_parse.csc
+          cs tests/test_header_parser.csc
+          cs tests/test_openai_client.csc
 
       # ------------------------------------------------------------------ #
-      # 10b. Run unit tests (Windows)                                      #
+      # 11b. Run unit tests (Windows)                                      #
       # ------------------------------------------------------------------ #
       - name: Run unit tests (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $cs = "${{ github.workspace }}\covscript\bin\cs.exe"
+          $env:COVSCRIPT_HOME = "${{ github.workspace }}\covscript"
           $env:Path = "${{ github.workspace }}\covscript\bin;$env:Path"
+          $cs = "${{ github.workspace }}\covscript\bin\cs.exe"
           & $cs tests\test_url_parse.csc
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & $cs tests\test_header_parser.csc
@@ -216,55 +247,55 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       # ------------------------------------------------------------------ #
-      # 11a. Run async TCP test (Linux / macOS)                            #
+      # 12a. Run async TCP test (Linux / macOS)                            #
       # ------------------------------------------------------------------ #
       - name: Run async TCP test
         if: runner.os != 'Windows'
         shell: bash
         run: |
           set -e
-          CS="${{ github.workspace }}/covscript/bin/cs"
-          export PATH="${{ github.workspace }}/covscript/bin:$PATH"
-          "$CS" tests/test_async_tcp.csc
+          export COVSCRIPT_HOME="${{ github.workspace }}/covscript"
+          export PATH="$COVSCRIPT_HOME/bin:$PATH"
+          cs tests/test_async_tcp.csc
 
       # ------------------------------------------------------------------ #
-      # 11b. Run async TCP test (Windows)                                  #
+      # 12b. Run async TCP test (Windows)                                  #
       # ------------------------------------------------------------------ #
       - name: Run async TCP test (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $cs = "${{ github.workspace }}\covscript\bin\cs.exe"
+          $env:COVSCRIPT_HOME = "${{ github.workspace }}\covscript"
           $env:Path = "${{ github.workspace }}\covscript\bin;$env:Path"
-          & $cs tests\test_async_tcp.csc
+          & "${{ github.workspace }}\covscript\bin\cs.exe" tests\test_async_tcp.csc
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       # ------------------------------------------------------------------ #
-      # 12a. Run integration tests (Linux / macOS)                         #
+      # 13a. Run integration tests (Linux / macOS)                         #
       # ------------------------------------------------------------------ #
       - name: Run integration tests
         if: runner.os != 'Windows'
         shell: bash
         run: |
           set -e
-          CS="${{ github.workspace }}/covscript/bin/cs"
-          export PATH="${{ github.workspace }}/covscript/bin:$PATH"
-          "$CS" tests/test_tls_trust.csc
+          export COVSCRIPT_HOME="${{ github.workspace }}/covscript"
+          export PATH="$COVSCRIPT_HOME/bin:$PATH"
+          cs tests/test_tls_trust.csc
 
       # ------------------------------------------------------------------ #
-      # 12b. Run integration tests (Windows)                               #
+      # 13b. Run integration tests (Windows)                               #
       # ------------------------------------------------------------------ #
       - name: Run integration tests (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $cs = "${{ github.workspace }}\covscript\bin\cs.exe"
+          $env:COVSCRIPT_HOME = "${{ github.workspace }}\covscript"
           $env:Path = "${{ github.workspace }}\covscript\bin;$env:Path"
-          & $cs tests\test_tls_trust.csc
+          & "${{ github.workspace }}\covscript\bin\cs.exe" tests\test_tls_trust.csc
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       # ------------------------------------------------------------------ #
-      # 13a. Run DeepSeek test (only when API key is available)            #
+      # 14a. Run DeepSeek test (only when API key is available)            #
       # ------------------------------------------------------------------ #
       - name: Run DeepSeek test
         if: runner.os != 'Windows' && github.secrets.DEEPSEEK_API_KEY != ''
@@ -273,12 +304,12 @@ jobs:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
         run: |
           set -e
-          CS="${{ github.workspace }}/covscript/bin/cs"
-          export PATH="${{ github.workspace }}/covscript/bin:$PATH"
-          "$CS" tests/test_deepseek.csc
+          export COVSCRIPT_HOME="${{ github.workspace }}/covscript"
+          export PATH="$COVSCRIPT_HOME/bin:$PATH"
+          cs tests/test_deepseek.csc
 
       # ------------------------------------------------------------------ #
-      # 13b. Run DeepSeek test (Windows, only when API key is available)   #
+      # 14b. Run DeepSeek test (Windows, only when API key is available)   #
       # ------------------------------------------------------------------ #
       - name: Run DeepSeek test (Windows)
         if: runner.os == 'Windows' && github.secrets.DEEPSEEK_API_KEY != ''
@@ -286,7 +317,7 @@ jobs:
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
         run: |
-          $cs = "${{ github.workspace }}\covscript\bin\cs.exe"
+          $env:COVSCRIPT_HOME = "${{ github.workspace }}\covscript"
           $env:Path = "${{ github.workspace }}\covscript\bin;$env:Path"
-          & $cs tests\test_deepseek.csc
+          & "${{ github.workspace }}\covscript\bin\cs.exe" tests\test_deepseek.csc
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
