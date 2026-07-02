@@ -104,7 +104,8 @@ jobs:
           cmake --build build --parallel 4
           mkdir -p build/imports
           cp build/*.cse build/imports/
-          cp netutils.csp netutils.csym build/imports/ 2>/dev/null || true
+          cp netutils.csp netutils.csym netutils.ecs build/imports/ 2>/dev/null || true
+          cp argparse.csp argparse.csym argparse.ecs build/imports/ 2>/dev/null || true
 
       # ------------------------------------------------------------------ #
       # 5b. Build extension (Windows / MinGW)                              #
@@ -123,6 +124,10 @@ jobs:
           copy build\*.cse build\imports\
           if exist netutils.csp copy netutils.csp build\imports\
           if exist netutils.csym copy netutils.csym build\imports\
+          if exist netutils.ecs copy netutils.ecs build\imports\
+          if exist argparse.csp copy argparse.csp build\imports\
+          if exist argparse.csym copy argparse.csym build\imports\
+          if exist argparse.ecs copy argparse.ecs build\imports\
 
       # ------------------------------------------------------------------ #
       # 6a. Run unit tests (Linux / macOS)                                 #
@@ -206,7 +211,7 @@ jobs:
       # 9a. Run DeepSeek test (only when API key is available)             #
       # ------------------------------------------------------------------ #
       - name: Run DeepSeek test
-        if: runner.os != 'Windows' && env.DEEPSEEK_API_KEY != ''
+        if: runner.os != 'Windows' && github.secrets.DEEPSEEK_API_KEY != ''
         shell: bash
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
@@ -220,7 +225,7 @@ jobs:
       # 9b. Run DeepSeek test (Windows, only when API key is available)    #
       # ------------------------------------------------------------------ #
       - name: Run DeepSeek test (Windows)
-        if: runner.os == 'Windows' && env.DEEPSEEK_API_KEY != ''
+        if: runner.os == 'Windows' && github.secrets.DEEPSEEK_API_KEY != ''
         shell: pwsh
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}

@@ -72,10 +72,10 @@ var r2 = client.request("/chat/completions", payload)
 check_null("O14: request with unreachable base returns null", r2)
 
 section("endpoint path normalization")
-client.set_base("https://api.openai.com/v1/")
+client.set_base("http://127.0.0.1:1/")
 client.set_api_key("dummy-key")
-# We can test the URL construction indirectly via parse_url on the full URL
-check("O15: base trailing slash handled", true)
+var r3 = client.request("/chat/completions", payload)
+check_null("O15: trailing-slash base strips correctly, request fails as expected", r3)
 
 section("chat_text with null response")
 var result = client.chat_text(null)

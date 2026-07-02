@@ -1,0 +1,11 @@
+{
+    "Type": "Package",
+    "Name": "argparse",
+    "Info": "Argument Parser",
+    "Author": "CovScript Organization",
+    "Version": "1.0",
+    "Target": "argparse.csp",
+    "Dependencies": [
+        "ecs"
+    ]
+}

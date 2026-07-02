@@ -119,7 +119,7 @@ namespace network_cs_ext {
 		if (options.trust_mode == cs_impl::network::ssl_trust_mode::custom && options.ca_file.empty() && options.ca_path.empty())
 			throw lang_error("TLS trust_mode \"custom\" requires ca_file or ca_path.");
 		if (options.trust_mode == cs_impl::network::ssl_trust_mode::insecure && (!options.ca_file.empty() || !options.ca_path.empty()))
-			throw lang_error("TLS trust_mode \"insecure\" can not be combined with ca_file or ca_path.");
+			throw lang_error("TLS trust_mode \"insecure\" cannot be combined with ca_file or ca_path.");
 		return options;
 	}
 
@@ -168,7 +168,7 @@ namespace network_cs_ext {
 		var endpoint(const string &host, number port)
 		{
 			if (port < 0)
-				throw lang_error("Port number can not under zero.");
+				throw lang_error("Port number cannot under zero.");
 			else
 				return var::make<endpoint_t>(cs_impl::network::tcp::endpoint(host, static_cast<unsigned short>(port)));
 		}
@@ -176,7 +176,7 @@ namespace network_cs_ext {
 		var endpoint_v4(number port)
 		{
 			if (port < 0)
-				throw lang_error("Port number can not under zero.");
+				throw lang_error("Port number cannot under zero.");
 			else
 				return var::make<endpoint_t>(asio::ip::tcp::v4(), static_cast<unsigned short>(port));
 		}
@@ -184,7 +184,7 @@ namespace network_cs_ext {
 		var endpoint_v6(number port)
 		{
 			if (port < 0)
-				throw lang_error("Port number can not under zero.");
+				throw lang_error("Port number cannot under zero.");
 			else
 				return var::make<endpoint_t>(asio::ip::tcp::v6(), static_cast<unsigned short>(port));
 		}
@@ -406,7 +406,7 @@ namespace network_cs_ext {
 		var endpoint(const string &host, number port)
 		{
 			if (port < 0)
-				throw lang_error("Port number can not under zero.");
+				throw lang_error("Port number cannot under zero.");
 			else
 				return var::make<endpoint_t>(cs_impl::network::udp::endpoint(host, static_cast<unsigned short>(port)));
 		}
@@ -414,7 +414,7 @@ namespace network_cs_ext {
 		var endpoint_v4(number port)
 		{
 			if (port < 0)
-				throw lang_error("Port number can not under zero.");
+				throw lang_error("Port number cannot under zero.");
 			else
 				return var::make<endpoint_t>(asio::ip::udp::v4(), static_cast<unsigned short>(port));
 		}
@@ -422,7 +422,7 @@ namespace network_cs_ext {
 		var endpoint_broadcast(number port)
 		{
 			if (port < 0)
-				throw lang_error("Port number can not under zero.");
+				throw lang_error("Port number cannot under zero.");
 			else
 				return var::make<endpoint_t>(asio::ip::address_v4::broadcast(), static_cast<unsigned short>(port));
 		}
@@ -430,7 +430,7 @@ namespace network_cs_ext {
 		var endpoint_v6(number port)
 		{
 			if (port < 0)
-				throw lang_error("Port number can not under zero.");
+				throw lang_error("Port number cannot under zero.");
 			else
 				return var::make<endpoint_t>(asio::ip::udp::v6(), static_cast<unsigned short>(port));
 		}
