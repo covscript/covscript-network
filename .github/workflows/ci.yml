@@ -194,6 +194,7 @@ jobs:
         shell: bash
         run: |
           set -e
+          cs -v
           cs tests/test_url_parse.csc
           cs tests/test_header_parser.csc
           cs tests/test_openai_client.csc
