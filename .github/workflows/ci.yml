@@ -97,29 +97,6 @@ jobs:
           ls -la cspkg-repo/
 
       # ------------------------------------------------------------------ #
-      # 5. Bootstrap imports (so cspkg can run)                             #
-      # ------------------------------------------------------------------ #
-      - name: Bootstrap imports
-        shell: bash
-        run: |
-          COVSCRIPT_HOME="${{ github.workspace }}/covscript-home"
-          CSPKG_REPO="${{ github.workspace }}/cspkg-repo"
-          ARCH_DIR="${{ steps.platform.outputs.cspkg_arch_dir }}"
-
-          # Create imports dir if needed
-          mkdir -p "$COVSCRIPT_HOME/imports"
-
-          # Copy .cse extensions so cspkg has its dependencies (codec, curl, regex)
-          cp "$CSPKG_REPO/$ARCH_DIR/"*.cse "$COVSCRIPT_HOME/imports/" 2>/dev/null || true
-
-          # Copy universal .csp packages so cspkg has ecs etc.
-          cp "$CSPKG_REPO/universal/"*.csp "$COVSCRIPT_HOME/imports/" 2>/dev/null || true
-          cp "$CSPKG_REPO/universal/"*.csym "$COVSCRIPT_HOME/imports/" 2>/dev/null || true
-
-          echo "=== covscript/imports ==="
-          ls -la "$COVSCRIPT_HOME/imports/"
-
-      # ------------------------------------------------------------------ #
       # 6. Configure and run cspkg                                          #
       # ------------------------------------------------------------------ #
       - name: Configure cspkg
@@ -145,7 +122,7 @@ jobs:
           cat "$CSPKG_CONF/config.json"
 
       # ------------------------------------------------------------------ #
-      # 7. Run cspkg install --fix                                           #
+      # 7. Run cspkg install --import                                        #
       # ------------------------------------------------------------------ #
       - name: Run cspkg install
         shell: bash
@@ -155,7 +132,9 @@ jobs:
 
           # Ensure all executables are runnable
           chmod -R +x "$COVSCRIPT_HOME/bin/"
-          cspkg install --fix --yes
+          cspkg install --import
+          cspkg version
+          cspkg list
 
       # ------------------------------------------------------------------ #
       # 8. Add MinGW-w64 to PATH (Windows only)                            #
@@ -174,8 +153,7 @@ jobs:
         env:
           CS_DEV_PATH: ${{ github.workspace }}/covscript-home/csdev
         run: |
-          cmake -G "Unix Makefiles" -S . -B build -DCMAKE_BUILD_TYPE=Release
-          cmake --build build --parallel 4
+          csbuild/make.sh
 
       # ------------------------------------------------------------------ #
       # 9b. Build extension (Windows / MinGW)                              #
@@ -185,11 +163,7 @@ jobs:
         shell: cmd
         run: |
           set CS_DEV_PATH=${{ github.workspace }}\covscript-home\csdev
-          if not exist build mkdir build
-          cd build
-          cmake -G "MinGW Makefiles" .. -DCMAKE_BUILD_TYPE=Release
-          cmake --build . --parallel 4
-          cd ..
+          csbuild\make.bat
 
       # ------------------------------------------------------------------ #
       # 10. Install built extension + packages                              #
@@ -197,15 +171,10 @@ jobs:
       - name: Install local build
         shell: bash
         run: |
-          COVSCRIPT_HOME="${{ github.workspace }}/covscript-home"
-          # Copy built network.cse over the pre-built one
-          cp build/*.cse "$COVSCRIPT_HOME/imports/" 2>/dev/null || true
-          # Copy our netutils.csp and argparse.csp
-          cp netutils.csp netutils.csym "$COVSCRIPT_HOME/imports/" 2>/dev/null || true
-          cp argparse.csp argparse.csym "$COVSCRIPT_HOME/imports/" 2>/dev/null || true
-
-          echo "=== final imports ==="
-          ls -la "$COVSCRIPT_HOME/imports/"
+          export COVSCRIPT_HOME="${{ github.workspace }}/covscript-home"
+          export PATH="$COVSCRIPT_HOME/bin:$PATH"
+          cspkg build . --install
+          cspkg list
 
       # ------------------------------------------------------------------ #
       # 11a. Run unit tests (Linux / macOS)                                #
