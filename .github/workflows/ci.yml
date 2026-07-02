@@ -156,21 +156,26 @@ jobs:
           cspkg list
 
       # ------------------------------------------------------------------ #
-      # 8. Setup MinGW-w64 (Windows only)                                  #
+      # 8. Setup MSYS2 + OpenSSL (Windows only)                            #
       # ------------------------------------------------------------------ #
-      - name: Download MinGW-w64
+      - name: Setup MSYS2
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-toolchain
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-make
+            mingw-w64-ucrt-x86_64-openssl
+
+      - name: Expose MSYS2 runtime
         if: runner.os == 'Windows'
         shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
-          gh release download 15.1.0.4 \
-            -R covscript-archives/mingw-w64 \
-            -p "gcc-15.1.0-mingw-w64ucrt-13.0.0-r4-covscript-org.zip" \
-            -O mingw64.zip
-          mkdir -p /c/mingw64-covscript
-          7z x mingw64.zip -o/c/mingw64-covscript -y
-          echo "C:/mingw64-covscript/mingw64/bin" >> "$GITHUB_PATH"
+          echo "C:/msys64/ucrt64/bin" >> "$GITHUB_PATH"
+          echo "C:/msys64/usr/bin" >> "$GITHUB_PATH"
 
       # ------------------------------------------------------------------ #
       # 9a. Build extension (Linux / macOS)                                #
@@ -183,14 +188,14 @@ jobs:
         run: bash csbuild/make.sh
 
       # ------------------------------------------------------------------ #
-      # 9b. Build extension (Windows / MinGW)                              #
+      # 9b. Build extension (Windows / MSYS2 UCRT64)                       #
       # ------------------------------------------------------------------ #
       - name: Build extension (Windows)
         if: runner.os == 'Windows'
-        shell: cmd
+        shell: msys2 {0}
         run: |
-          set CS_DEV_PATH=${{ steps.sdk.outputs.cs_home }}/
-          csbuild\make.bat
+          export CS_DEV_PATH="$(cygpath -u "${{ steps.sdk.outputs.cs_home }}")/"
+          bash csbuild/make.sh
 
       # ------------------------------------------------------------------ #
       # 10. Install built extension + packages                             #
