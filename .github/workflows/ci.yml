@@ -132,7 +132,7 @@ jobs:
 
           # Ensure all executables are runnable
           chmod -R +x "$COVSCRIPT_HOME/bin/"
-          cspkg install --import
+          cspkg install --import --yes
           cspkg version
           cspkg list
 
@@ -153,7 +153,7 @@ jobs:
         env:
           CS_DEV_PATH: ${{ github.workspace }}/covscript-home/csdev
         run: |
-          csbuild/make.sh
+          bash csbuild/make.sh
 
       # ------------------------------------------------------------------ #
       # 9b. Build extension (Windows / MinGW)                              #
