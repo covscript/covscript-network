@@ -27,7 +27,7 @@ jobs:
       # 1. Check out this extension repo                                    #
       # ------------------------------------------------------------------ #
       - name: Checkout extension
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       # ------------------------------------------------------------------ #
       # 2. Set platform identifiers                                         #
@@ -109,11 +109,15 @@ jobs:
           fi
           mkdir -p "$CSPKG_CONF"
 
+          # Normalize: home uses native path, source is a URL (forward slashes)
+          WS="${{ github.workspace }}"
+          WS_URL="${WS//\\//}"
+
           cat > "$CSPKG_CONF/config.json" << EOF
           {
             "arch": "${{ steps.platform.outputs.cspkg_arch }}",
-            "home": "${{ github.workspace }}/covscript-home",
-            "source": "file://${{ github.workspace }}/cspkg-repo/",
+            "home": "${WS}/covscript-home",
+            "source": "file://${WS_URL}/cspkg-repo/",
             "timeout_ms": "3000"
           }
           EOF
