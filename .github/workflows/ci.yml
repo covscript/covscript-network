@@ -91,9 +91,7 @@ jobs:
           7z x cspkg.7z -y
 
           CS_HOME="${{ github.workspace }}/covscript-home"
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            CS_HOME="${CS_HOME//\//\\}"
-          fi
+          CS_HOME="${CS_HOME//\\//}"
           echo "cs_home=${CS_HOME}" >> "$GITHUB_OUTPUT"
 
           echo "=== covscript-home ==="
@@ -112,16 +110,21 @@ jobs:
           mkdir -p "$HOME/.cspkg"
 
           CS_HOME="${{ steps.sdk.outputs.cs_home }}"
-          # Derive workspace root from CS_HOME: strip trailing \covscript-home or /covscript-home
-          WS="${CS_HOME%\\covscript-home}"
-          WS="${WS%/covscript-home}"
+          WS="${{ github.workspace }}"
+          WS="${WS//\\//}"
+
+          if [[ "$WS" =~ ^[A-Za-z]:/ ]]; then
+            SOURCE_URL="file:///${WS}/cspkg-repo/"
+          else
+            SOURCE_URL="file://${WS}/cspkg-repo/"
+          fi
 
           cat > "$HOME/.cspkg/config.json" << EOF
           {
             "arch": "${{ steps.platform.outputs.cspkg_arch }}",
-            "home": "${CS_HOME//\\/\\\\}",
-            "source": "file://${WS//\\//}/cspkg-repo/",
-            "timeout_ms": "3000"
+            "home": "${CS_HOME}",
+            "source": "${SOURCE_URL}",
+            "timeout_ms": 3000
           }
           EOF
 
@@ -144,19 +147,30 @@ jobs:
       - name: Run cspkg install
         shell: bash
         run: |
-          chmod -R +x "$COVSCRIPT_HOME/bin/"
+          if [ "${{ runner.os }}" != "Windows" ]; then
+            chmod -R +x "$COVSCRIPT_HOME/bin/"
+          fi
           cspkg install --import --yes
           cspkg install ecs_bootstrap --yes
           cspkg version
           cspkg list
 
       # ------------------------------------------------------------------ #
-      # 8. Add MinGW-w64 to PATH (Windows only)                            #
+      # 8. Setup MinGW-w64 (Windows only)                                  #
       # ------------------------------------------------------------------ #
-      - name: Add MinGW to PATH
+      - name: Download MinGW-w64
         if: runner.os == 'Windows'
         shell: bash
-        run: echo "C:/mingw64/bin" >> "$GITHUB_PATH"
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download 15.1.0.4 \
+            -R covscript-archives/mingw-w64 \
+            -p "gcc-15.1.0-mingw-w64ucrt-13.0.0-r4-covscript-org.zip" \
+            -O mingw64.zip
+          mkdir -p /c/mingw64-covscript
+          7z x mingw64.zip -o/c/mingw64-covscript -y
+          echo "C:/mingw64-covscript/mingw64/bin" >> "$GITHUB_PATH"
 
       # ------------------------------------------------------------------ #
       # 9a. Build extension (Linux / macOS)                                #
@@ -175,7 +189,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: cmd
         run: |
-          set CS_DEV_PATH=${{ steps.sdk.outputs.cs_home }}\
+          set CS_DEV_PATH=${{ steps.sdk.outputs.cs_home }}/
           csbuild\make.bat
 
       # ------------------------------------------------------------------ #
@@ -194,8 +208,6 @@ jobs:
         shell: bash
         run: |
           set -e
-          cs -v
-          ls $COVSCRIPT_HOME/imports
           cs tests/test_url_parse.csc
           cs tests/test_header_parser.csc
           cs tests/test_openai_client.csc
