@@ -90,8 +90,8 @@ jobs:
           mv build covscript-home
           7z x cspkg.7z -y
 
-          # Compute normalized paths (github.workspace has backslashes on Windows)
-          CS_HOME="${{ steps.sdk.outputs.cs_home }}"
+          # Compute normalized cs_home for later steps
+          CS_HOME="${{ github.workspace }}/covscript-home"
           if [ "${{ runner.os }}" = "Windows" ]; then
             CS_HOME="${CS_HOME//\//\\}"
           fi
