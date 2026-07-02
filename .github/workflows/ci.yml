@@ -195,6 +195,7 @@ jobs:
         run: |
           set -e
           cs -v
+          ls $COVSCRIPT_HOME/imports
           cs tests/test_url_parse.csc
           cs tests/test_header_parser.csc
           cs tests/test_openai_client.csc
