@@ -133,6 +133,7 @@ jobs:
           # Ensure all executables are runnable
           chmod -R +x "$COVSCRIPT_HOME/bin/"
           cspkg install --import --yes
+          cspkg install ecs_bootstrap --yes
           cspkg version
           cspkg list
 
@@ -151,7 +152,7 @@ jobs:
         if: runner.os != 'Windows'
         shell: bash
         env:
-          CS_DEV_PATH: ${{ github.workspace }}/covscript-home/csdev
+          CS_DEV_PATH: ${{ github.workspace }}/covscript-home/
         run: |
           bash csbuild/make.sh
 
@@ -162,7 +163,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: cmd
         run: |
-          set CS_DEV_PATH=${{ github.workspace }}\covscript-home\csdev
+          set CS_DEV_PATH=${{ github.workspace }}\covscript-home\
           csbuild\make.bat
 
       # ------------------------------------------------------------------ #
