@@ -90,7 +90,6 @@ jobs:
           mv build covscript-home
           7z x cspkg.7z -y
 
-          # Compute normalized cs_home for later steps
           CS_HOME="${{ github.workspace }}/covscript-home"
           if [ "${{ runner.os }}" = "Windows" ]; then
             CS_HOME="${CS_HOME//\//\\}"
@@ -105,7 +104,7 @@ jobs:
           ls -la cspkg-repo/
 
       # ------------------------------------------------------------------ #
-      # 6. Configure and run cspkg                                          #
+      # 5. Configure cspkg                                                  #
       # ------------------------------------------------------------------ #
       - name: Configure cspkg
         shell: bash
@@ -113,31 +112,38 @@ jobs:
           mkdir -p "$HOME/.cspkg"
 
           CS_HOME="${{ steps.sdk.outputs.cs_home }}"
-          CS_HOME_JSON="${CS_HOME//\\/\\\\}"   # escape backslashes for JSON
-          CS_HOME_URL="${CS_HOME//\\//}"       # forward slashes for file:// URL
+          # Derive workspace root from CS_HOME: strip trailing \covscript-home or /covscript-home
+          WS="${CS_HOME%\\covscript-home}"
+          WS="${WS%/covscript-home}"
 
           cat > "$HOME/.cspkg/config.json" << EOF
           {
             "arch": "${{ steps.platform.outputs.cspkg_arch }}",
-            "home": "${CS_HOME_JSON}",
-            "source": "file://${CS_HOME_URL}/../cspkg-repo/",
+            "home": "${CS_HOME//\\/\\\\}",
+            "source": "file://${WS//\\//}/cspkg-repo/",
             "timeout_ms": "3000"
           }
           EOF
 
           echo "=== cspkg config ==="
-          cat "$CSPKG_CONF/config.json"
+          cat "$HOME/.cspkg/config.json"
 
       # ------------------------------------------------------------------ #
-      # 7. Run cspkg install --import                                        #
+      # 6. Persist environment for later steps                              #
+      # ------------------------------------------------------------------ #
+      - name: Setup environment
+        shell: bash
+        run: |
+          CS_HOME="${{ steps.sdk.outputs.cs_home }}"
+          echo "COVSCRIPT_HOME=${CS_HOME}" >> "$GITHUB_ENV"
+          echo "${CS_HOME}/bin" >> "$GITHUB_PATH"
+
+      # ------------------------------------------------------------------ #
+      # 7. Run cspkg install                                                #
       # ------------------------------------------------------------------ #
       - name: Run cspkg install
         shell: bash
         run: |
-          export COVSCRIPT_HOME="${{ steps.sdk.outputs.cs_home }}"
-          export PATH="$COVSCRIPT_HOME/bin:$PATH"
-
-          # Ensure all executables are runnable
           chmod -R +x "$COVSCRIPT_HOME/bin/"
           cspkg install --import --yes
           cspkg install ecs_bootstrap --yes
@@ -160,8 +166,7 @@ jobs:
         shell: bash
         env:
           CS_DEV_PATH: ${{ steps.sdk.outputs.cs_home }}/
-        run: |
-          bash csbuild/make.sh
+        run: bash csbuild/make.sh
 
       # ------------------------------------------------------------------ #
       # 9b. Build extension (Windows / MinGW)                              #
@@ -174,13 +179,11 @@ jobs:
           csbuild\make.bat
 
       # ------------------------------------------------------------------ #
-      # 10. Install built extension + packages                              #
+      # 10. Install built extension + packages                             #
       # ------------------------------------------------------------------ #
       - name: Install local build
         shell: bash
         run: |
-          export COVSCRIPT_HOME="${{ steps.sdk.outputs.cs_home }}"
-          export PATH="$COVSCRIPT_HOME/bin:$PATH"
           cspkg build . --install
           cspkg list
 
@@ -191,8 +194,6 @@ jobs:
         shell: bash
         run: |
           set -e
-          export COVSCRIPT_HOME="${{ steps.sdk.outputs.cs_home }}"
-          export PATH="$COVSCRIPT_HOME/bin:$PATH"
           cs tests/test_url_parse.csc
           cs tests/test_header_parser.csc
           cs tests/test_openai_client.csc
@@ -204,8 +205,6 @@ jobs:
         shell: bash
         run: |
           set -e
-          export COVSCRIPT_HOME="${{ steps.sdk.outputs.cs_home }}"
-          export PATH="$COVSCRIPT_HOME/bin:$PATH"
           cs tests/test_async_tcp.csc
 
       # ------------------------------------------------------------------ #
@@ -215,20 +214,16 @@ jobs:
         shell: bash
         run: |
           set -e
-          export COVSCRIPT_HOME="${{ steps.sdk.outputs.cs_home }}"
-          export PATH="$COVSCRIPT_HOME/bin:$PATH"
           cs tests/test_tls_trust.csc
 
       # ------------------------------------------------------------------ #
       # 14. Run DeepSeek test (only when API key is available)            #
       # ------------------------------------------------------------------ #
       - name: Run DeepSeek test
-        if: github.secrets.DEEPSEEK_API_KEY != ''
+        if: secrets.DEEPSEEK_API_KEY != ''
         shell: bash
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
         run: |
           set -e
-          export COVSCRIPT_HOME="${{ steps.sdk.outputs.cs_home }}"
-          export PATH="$COVSCRIPT_HOME/bin:$PATH"
           cs tests/test_deepseek.csc
