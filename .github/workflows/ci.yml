@@ -220,7 +220,7 @@ jobs:
       # 14. Run DeepSeek test (only when API key is available)            #
       # ------------------------------------------------------------------ #
       - name: Run DeepSeek test
-        if: secrets.DEEPSEEK_API_KEY != ''
+        if: ${{ secrets.DEEPSEEK_API_KEY != '' }}
         shell: bash
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
