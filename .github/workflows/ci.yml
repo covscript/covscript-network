@@ -70,6 +70,7 @@ jobs:
       # 4. Download & extract covscript SDK + cspkg repo                    #
       # ------------------------------------------------------------------ #
       - name: Download covscript SDK
+        id: sdk
         shell: bash
         run: |
           TAG="${{ steps.cs-release.outputs.tag }}"
@@ -89,6 +90,13 @@ jobs:
           mv build covscript-home
           7z x cspkg.7z -y
 
+          # Compute normalized paths (github.workspace has backslashes on Windows)
+          CS_HOME="${{ steps.sdk.outputs.cs_home }}"
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            CS_HOME="${CS_HOME//\//\\}"
+          fi
+          echo "cs_home=${CS_HOME}" >> "$GITHUB_OUTPUT"
+
           echo "=== covscript-home ==="
           ls -la covscript-home/
           echo "=== covscript-home/bin ==="
@@ -102,23 +110,17 @@ jobs:
       - name: Configure cspkg
         shell: bash
         run: |
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            CSPKG_CONF="$USERPROFILE/.cspkg"
-          else
-            CSPKG_CONF="$HOME/.cspkg"
-          fi
-          mkdir -p "$CSPKG_CONF"
+          mkdir -p "$HOME/.cspkg"
 
-          # Normalize paths (github.workspace has backslashes on Windows)
-          WS="${{ github.workspace }}"
-          WS_URL="${WS//\\//}"           # source URL: forward slashes
-          WS_JSON="${WS//\\/\\\\}"       # home in JSON: escape backslashes
+          CS_HOME="${{ steps.sdk.outputs.cs_home }}"
+          CS_HOME_JSON="${CS_HOME//\\/\\\\}"   # escape backslashes for JSON
+          CS_HOME_URL="${CS_HOME//\\//}"       # forward slashes for file:// URL
 
-          cat > "$CSPKG_CONF/config.json" << EOF
+          cat > "$HOME/.cspkg/config.json" << EOF
           {
             "arch": "${{ steps.platform.outputs.cspkg_arch }}",
-            "home": "${WS_JSON}/covscript-home",
-            "source": "file://${WS_URL}/cspkg-repo/",
+            "home": "${CS_HOME_JSON}",
+            "source": "file://${CS_HOME_URL}/../cspkg-repo/",
             "timeout_ms": "3000"
           }
           EOF
@@ -132,7 +134,7 @@ jobs:
       - name: Run cspkg install
         shell: bash
         run: |
-          export COVSCRIPT_HOME="${{ github.workspace }}/covscript-home"
+          export COVSCRIPT_HOME="${{ steps.sdk.outputs.cs_home }}"
           export PATH="$COVSCRIPT_HOME/bin:$PATH"
 
           # Ensure all executables are runnable
@@ -157,7 +159,7 @@ jobs:
         if: runner.os != 'Windows'
         shell: bash
         env:
-          CS_DEV_PATH: ${{ github.workspace }}/covscript-home/
+          CS_DEV_PATH: ${{ steps.sdk.outputs.cs_home }}/
         run: |
           bash csbuild/make.sh
 
@@ -168,7 +170,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: cmd
         run: |
-          set CS_DEV_PATH=${{ github.workspace }}\covscript-home\
+          set CS_DEV_PATH=${{ steps.sdk.outputs.cs_home }}\
           csbuild\make.bat
 
       # ------------------------------------------------------------------ #
@@ -177,114 +179,56 @@ jobs:
       - name: Install local build
         shell: bash
         run: |
-          export COVSCRIPT_HOME="${{ github.workspace }}/covscript-home"
+          export COVSCRIPT_HOME="${{ steps.sdk.outputs.cs_home }}"
           export PATH="$COVSCRIPT_HOME/bin:$PATH"
           cspkg build . --install
           cspkg list
 
       # ------------------------------------------------------------------ #
-      # 11a. Run unit tests (Linux / macOS)                                #
+      # 11. Run unit tests                                                 #
       # ------------------------------------------------------------------ #
       - name: Run unit tests
-        if: runner.os != 'Windows'
         shell: bash
         run: |
           set -e
-          export COVSCRIPT_HOME="${{ github.workspace }}/covscript-home"
+          export COVSCRIPT_HOME="${{ steps.sdk.outputs.cs_home }}"
           export PATH="$COVSCRIPT_HOME/bin:$PATH"
           cs tests/test_url_parse.csc
           cs tests/test_header_parser.csc
           cs tests/test_openai_client.csc
 
       # ------------------------------------------------------------------ #
-      # 11b. Run unit tests (Windows)                                      #
-      # ------------------------------------------------------------------ #
-      - name: Run unit tests (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $env:COVSCRIPT_HOME = "${{ github.workspace }}\covscript-home"
-          $env:Path = "${{ github.workspace }}\covscript-home\bin;$env:Path"
-          $cs = "${{ github.workspace }}\covscript-home\bin\cs.exe"
-          & $cs tests\test_url_parse.csc
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          & $cs tests\test_header_parser.csc
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          & $cs tests\test_openai_client.csc
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-      # ------------------------------------------------------------------ #
-      # 12a. Run async TCP test (Linux / macOS)                            #
+      # 12. Run async TCP test                                            #
       # ------------------------------------------------------------------ #
       - name: Run async TCP test
-        if: runner.os != 'Windows'
         shell: bash
         run: |
           set -e
-          export COVSCRIPT_HOME="${{ github.workspace }}/covscript-home"
+          export COVSCRIPT_HOME="${{ steps.sdk.outputs.cs_home }}"
           export PATH="$COVSCRIPT_HOME/bin:$PATH"
           cs tests/test_async_tcp.csc
 
       # ------------------------------------------------------------------ #
-      # 12b. Run async TCP test (Windows)                                  #
-      # ------------------------------------------------------------------ #
-      - name: Run async TCP test (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $env:COVSCRIPT_HOME = "${{ github.workspace }}\covscript-home"
-          $env:Path = "${{ github.workspace }}\covscript-home\bin;$env:Path"
-          & "${{ github.workspace }}\covscript-home\bin\cs.exe" tests\test_async_tcp.csc
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-      # ------------------------------------------------------------------ #
-      # 13a. Run integration tests (Linux / macOS)                         #
+      # 13. Run integration tests                                         #
       # ------------------------------------------------------------------ #
       - name: Run integration tests
-        if: runner.os != 'Windows'
         shell: bash
         run: |
           set -e
-          export COVSCRIPT_HOME="${{ github.workspace }}/covscript-home"
+          export COVSCRIPT_HOME="${{ steps.sdk.outputs.cs_home }}"
           export PATH="$COVSCRIPT_HOME/bin:$PATH"
           cs tests/test_tls_trust.csc
 
       # ------------------------------------------------------------------ #
-      # 13b. Run integration tests (Windows)                               #
-      # ------------------------------------------------------------------ #
-      - name: Run integration tests (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $env:COVSCRIPT_HOME = "${{ github.workspace }}\covscript-home"
-          $env:Path = "${{ github.workspace }}\covscript-home\bin;$env:Path"
-          & "${{ github.workspace }}\covscript-home\bin\cs.exe" tests\test_tls_trust.csc
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-      # ------------------------------------------------------------------ #
-      # 14a. Run DeepSeek test (only when API key is available)            #
+      # 14. Run DeepSeek test (only when API key is available)            #
       # ------------------------------------------------------------------ #
       - name: Run DeepSeek test
-        if: runner.os != 'Windows' && github.secrets.DEEPSEEK_API_KEY != ''
+        if: github.secrets.DEEPSEEK_API_KEY != ''
         shell: bash
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
         run: |
           set -e
-          export COVSCRIPT_HOME="${{ github.workspace }}/covscript-home"
+          export COVSCRIPT_HOME="${{ steps.sdk.outputs.cs_home }}"
           export PATH="$COVSCRIPT_HOME/bin:$PATH"
           cs tests/test_deepseek.csc
-
-      # ------------------------------------------------------------------ #
-      # 14b. Run DeepSeek test (Windows, only when API key is available)   #
-      # ------------------------------------------------------------------ #
-      - name: Run DeepSeek test (Windows)
-        if: runner.os == 'Windows' && github.secrets.DEEPSEEK_API_KEY != ''
-        shell: pwsh
-        env:
-          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
-        run: |
-          $env:COVSCRIPT_HOME = "${{ github.workspace }}\covscript-home"
-          $env:Path = "${{ github.workspace }}\covscript-home\bin;$env:Path"
-          & "${{ github.workspace }}\covscript-home\bin\cs.exe" tests\test_deepseek.csc
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
