@@ -47,6 +47,9 @@ end
 # Decrypt and verify a message
 function decrypt_message(enc_key, mac_key, payload)
     var parts = payload.split({'|'})
+    if parts.size < 3
+        throw runtime.exception("TLS invalid encrypted message format")
+    end
     var iv = gmssl.hex_decode(gmssl.bytes_encode(parts[0]))
     var ciphertext = gmssl.hex_decode(gmssl.bytes_encode(parts[1]))
     var mac = gmssl.hex_decode(gmssl.bytes_encode(parts[2]))

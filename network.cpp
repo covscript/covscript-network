@@ -167,24 +167,24 @@ namespace network_cs_ext {
 
 		var endpoint(const string &host, number port)
 		{
-			if (port < 0)
-				throw lang_error("Port number cannot under zero.");
+			if (port < 0 || port > 65535)
+				throw lang_error("Port number must be in range [0, 65535].");
 			else
 				return var::make<endpoint_t>(cs_impl::network::tcp::endpoint(host, static_cast<unsigned short>(port)));
 		}
 
 		var endpoint_v4(number port)
 		{
-			if (port < 0)
-				throw lang_error("Port number cannot under zero.");
+			if (port < 0 || port > 65535)
+				throw lang_error("Port number must be in range [0, 65535].");
 			else
 				return var::make<endpoint_t>(asio::ip::tcp::v4(), static_cast<unsigned short>(port));
 		}
 
 		var endpoint_v6(number port)
 		{
-			if (port < 0)
-				throw lang_error("Port number cannot under zero.");
+			if (port < 0 || port > 65535)
+				throw lang_error("Port number must be in range [0, 65535].");
 			else
 				return var::make<endpoint_t>(asio::ip::tcp::v6(), static_cast<unsigned short>(port));
 		}
@@ -405,32 +405,32 @@ namespace network_cs_ext {
 
 		var endpoint(const string &host, number port)
 		{
-			if (port < 0)
-				throw lang_error("Port number cannot under zero.");
+			if (port < 0 || port > 65535)
+				throw lang_error("Port number must be in range [0, 65535].");
 			else
 				return var::make<endpoint_t>(cs_impl::network::udp::endpoint(host, static_cast<unsigned short>(port)));
 		}
 
 		var endpoint_v4(number port)
 		{
-			if (port < 0)
-				throw lang_error("Port number cannot under zero.");
+			if (port < 0 || port > 65535)
+				throw lang_error("Port number must be in range [0, 65535].");
 			else
 				return var::make<endpoint_t>(asio::ip::udp::v4(), static_cast<unsigned short>(port));
 		}
 
 		var endpoint_broadcast(number port)
 		{
-			if (port < 0)
-				throw lang_error("Port number cannot under zero.");
+			if (port < 0 || port > 65535)
+				throw lang_error("Port number must be in range [0, 65535].");
 			else
 				return var::make<endpoint_t>(asio::ip::address_v4::broadcast(), static_cast<unsigned short>(port));
 		}
 
 		var endpoint_v6(number port)
 		{
-			if (port < 0)
-				throw lang_error("Port number cannot under zero.");
+			if (port < 0 || port > 65535)
+				throw lang_error("Port number must be in range [0, 65535].");
 			else
 				return var::make<endpoint_t>(asio::ip::udp::v6(), static_cast<unsigned short>(port));
 		}
@@ -644,12 +644,12 @@ namespace network_cs_ext {
 			}
 			thread_executor_type() : worker(thread_executor_type::executor)
 			{
-				get_global_settings().thread_executors.fetch_add(1, std::memory_order_relaxed);
+				get_global_settings().thread_executors.fetch_add(1, std::memory_order_release);
 			}
 			~thread_executor_type()
 			{
 				worker.join();
-				get_global_settings().thread_executors.fetch_sub(1, std::memory_order_relaxed);
+				get_global_settings().thread_executors.fetch_sub(1, std::memory_order_release);
 			}
 		};
 
@@ -775,11 +775,11 @@ namespace network_cs_ext {
 		{
 			state_t state = std::make_shared<state_type>();
 			state->init = true;
-			sock->async_jobs.fetch_add(1, std::memory_order_relaxed);
+			sock->async_jobs.fetch_add(1, std::memory_order_release);
 			acceptor->async_accept(sock->get_raw(), [sock, state](const asio::error_code &ec) {
 				state->ec = ec;
 				state->has_done.store(true, std::memory_order_release);
-				sock->async_jobs.fetch_sub(1, std::memory_order_relaxed);
+				sock->async_jobs.fetch_sub(1, std::memory_order_release);
 			});
 			return state;
 		}
@@ -788,11 +788,11 @@ namespace network_cs_ext {
 		{
 			state_t state = std::make_shared<state_type>();
 			state->init = true;
-			sock->async_jobs.fetch_add(1, std::memory_order_relaxed);
+			sock->async_jobs.fetch_add(1, std::memory_order_release);
 			sock->get_raw().async_connect(ep, [sock, state](const asio::error_code &ec) {
 				state->ec = ec;
 				state->has_done.store(true, std::memory_order_release);
-				sock->async_jobs.fetch_sub(1, std::memory_order_relaxed);
+				sock->async_jobs.fetch_sub(1, std::memory_order_release);
 			});
 			return state;
 		}
@@ -808,7 +808,7 @@ namespace network_cs_ext {
 			catch (const std::exception &e) {
 				throw cs::lang_error(e.what());
 			}
-			sock->async_jobs.fetch_add(1, std::memory_order_relaxed);
+			sock->async_jobs.fetch_add(1, std::memory_order_release);
 			try {
 				sock->get_tls_raw().async_handshake(asio::ssl::stream_base::client,
 				[sock, state](const asio::error_code &ec) {
@@ -816,12 +816,12 @@ namespace network_cs_ext {
 						sock->reset_ssl();
 					state->ec = ec;
 					state->has_done.store(true, std::memory_order_release);
-					sock->async_jobs.fetch_sub(1, std::memory_order_relaxed);
+					sock->async_jobs.fetch_sub(1, std::memory_order_release);
 				});
 			}
 			catch (const std::exception &e) {
 				sock->reset_ssl();
-				sock->async_jobs.fetch_sub(1, std::memory_order_relaxed);
+				sock->async_jobs.fetch_sub(1, std::memory_order_release);
 				throw cs::lang_error(e.what());
 			}
 			return state;
@@ -838,13 +838,13 @@ namespace network_cs_ext {
 				throw cs::lang_error("Last asynchronous operation have not done yet.");
 			state->has_done = false;
 			state->ec.clear();
-			sock->async_jobs.fetch_add(1, std::memory_order_relaxed);
+			sock->async_jobs.fetch_add(1, std::memory_order_release);
 			auto on_done = [sock, state](const asio::error_code &ec, std::size_t bytes) {
 				state->buffer.commit(bytes);
 				state->bytes_transferred = bytes;
 				state->ec = ec;
 				state->has_done.store(true, std::memory_order_release);
-				sock->async_jobs.fetch_sub(1, std::memory_order_relaxed);
+				sock->async_jobs.fetch_sub(1, std::memory_order_release);
 			};
 			if (sock->is_ssl())
 				asio::async_read_until(sock->get_tls_raw(), state->buffer, pattern, on_done);
@@ -857,13 +857,13 @@ namespace network_cs_ext {
 			state_t state = std::make_shared<state_type>();
 			state->init = true;
 			state->is_read = true;
-			sock->async_jobs.fetch_add(1, std::memory_order_relaxed);
+			sock->async_jobs.fetch_add(1, std::memory_order_release);
 			auto on_done = [sock, state](const asio::error_code &ec, std::size_t bytes) {
 				state->buffer.commit(bytes);
 				state->bytes_transferred = bytes;
 				state->ec = ec;
 				state->has_done.store(true, std::memory_order_release);
-				sock->async_jobs.fetch_sub(1, std::memory_order_relaxed);
+				sock->async_jobs.fetch_sub(1, std::memory_order_release);
 			};
 			if (sock->is_ssl())
 				asio::async_read(sock->get_tls_raw(), state->buffer.prepare(n), on_done);
@@ -878,13 +878,13 @@ namespace network_cs_ext {
 			state->init = true;
 			std::ostream os(&state->buffer);
 			os.write(data.data(), data.size());
-			sock->async_jobs.fetch_add(1, std::memory_order_relaxed);
+			sock->async_jobs.fetch_add(1, std::memory_order_release);
 			auto on_done = [sock, state](const asio::error_code &ec, std::size_t bytes) {
 				state->buffer.consume(bytes);
 				state->bytes_transferred = bytes;
 				state->ec = ec;
 				state->has_done.store(true, std::memory_order_release);
-				sock->async_jobs.fetch_sub(1, std::memory_order_relaxed);
+				sock->async_jobs.fetch_sub(1, std::memory_order_release);
 			};
 			if (sock->is_ssl())
 				asio::async_write(sock->get_tls_raw(), state->buffer, on_done);
@@ -899,14 +899,14 @@ namespace network_cs_ext {
 			state->init = true;
 			state->is_udp = true;
 			state->is_read = true;
-			sock->async_jobs.fetch_add(1, std::memory_order_relaxed);
+			sock->async_jobs.fetch_add(1, std::memory_order_release);
 			sock->get_raw().async_receive_from(state->buffer.prepare(n), state->udp_endpoint,
 			[sock, state](const asio::error_code &ec, std::size_t bytes) {
 				state->buffer.commit(bytes);
 				state->bytes_transferred = bytes;
 				state->ec = ec;
 				state->has_done.store(true, std::memory_order_release);
-				sock->async_jobs.fetch_sub(1, std::memory_order_relaxed);
+				sock->async_jobs.fetch_sub(1, std::memory_order_release);
 			});
 			return state;
 		}
@@ -919,14 +919,14 @@ namespace network_cs_ext {
 			state->udp_endpoint = ep;
 			std::ostream os(&state->buffer);
 			os.write(data.data(), data.size());
-			sock->async_jobs.fetch_add(1, std::memory_order_relaxed);
+			sock->async_jobs.fetch_add(1, std::memory_order_release);
 			sock->get_raw().async_send_to(asio::buffer(state->buffer.data(), state->buffer.size()), state->udp_endpoint,
 			[sock, state](const asio::error_code &ec, std::size_t bytes) {
 				state->buffer.consume(bytes);
 				state->bytes_transferred = bytes;
 				state->ec = ec;
 				state->has_done.store(true, std::memory_order_release);
-				sock->async_jobs.fetch_sub(1, std::memory_order_relaxed);
+				sock->async_jobs.fetch_sub(1, std::memory_order_release);
 			});
 			return state;
 		}
@@ -1071,22 +1071,29 @@ bool network_cs_ext::tcp::socket::safe_shutdown(socket_t &sock)
 {
 	if (!sock->get_raw().is_open())
 		return true;
-	while (sock->async_jobs.load(std::memory_order_acquire) > 0) {
-		network_cs_ext::async::get_global_settings().poll();
-		cs_runtime_yield();
+	// Double-check loop to prevent TOCTOU race: cs_runtime_yield() may
+	// reschedule a fiber that submits a new async operation, incrementing
+	// async_jobs after we observed 0.
+	while (true) {
+		while (sock->async_jobs.load(std::memory_order_acquire) > 0) {
+			network_cs_ext::async::get_global_settings().poll();
+			cs_runtime_yield();
+		}
+		if (sock->async_jobs.load(std::memory_order_acquire) == 0)
+			break;
 	}
 	bool shutdown_ok = true;
 	bool close_ok = true;
 	try {
 		sock->shutdown();
 	}
-	catch (...) {
+	catch (const std::exception &) {
 		shutdown_ok = false;
 	}
 	try {
 		sock->close();
 	}
-	catch (...) {
+	catch (const std::exception &) {
 		close_ok = false;
 	}
 	return shutdown_ok && close_ok;
@@ -1096,9 +1103,14 @@ bool network_cs_ext::udp::socket::safe_close(socket_t &sock)
 {
 	if (!sock->get_raw().is_open())
 		return true;
-	while (sock->async_jobs.load(std::memory_order_acquire) > 0) {
-		network_cs_ext::async::get_global_settings().poll();
-		cs_runtime_yield();
+	// Double-check loop to prevent TOCTOU race (same pattern as tcp::safe_shutdown)
+	while (true) {
+		while (sock->async_jobs.load(std::memory_order_acquire) > 0) {
+			network_cs_ext::async::get_global_settings().poll();
+			cs_runtime_yield();
+		}
+		if (sock->async_jobs.load(std::memory_order_acquire) == 0)
+			break;
 	}
 	asio::error_code ec;
 	sock->get_raw().close(ec);

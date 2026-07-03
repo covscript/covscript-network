@@ -450,7 +450,7 @@ function call_http_handler(session, server)
         if server->url_map.exist(error_code)
             server->url_map[error_code](*server, session)
         else
-            async.write(sock, compose_response(error_code))
+            async.write(session.sock, compose_response(error_code))
         end
         return false
     else
@@ -914,12 +914,13 @@ function parse_http_args(input)
 end
 
 var proxy = null, timeout_ms = null, low_speed_limit = null
+var ssl_verify = true
 
 # ===========================================================
 # OpenAI API Compatible Client
 # ===========================================================
 
-var http_url_reg = regex.build_optimize("^(https?)://([^/:]+)(?::([0-9]+))?(.*)$")
+var http_url_reg = regex.build_optimize("^(?i)(https?)://([^/:]+)(?::([0-9]+))?(.*)$")
 var http_status_line_reg = regex.build_optimize("^HTTP/([0-9.]+) ([0-9]{3})(?: (.*))?$")
 var http_header_line_reg = regex.build_optimize("^([^:]+):\\s*(.*)$")
 var transfer_chunked_reg = regex.build_optimize(".*chunked.*")
@@ -953,6 +954,14 @@ class http_client
         end
         var path = m.str(4)
         if path == null || path.empty()
+            path = "/"
+        end
+        # Strip URL fragment (#...) per RFC 3986 §3.5
+        var frag_pos = path.find("#", 0)
+        if frag_pos != -1
+            path = path.substr(0, frag_pos)
+        end
+        if path.empty()
             path = "/"
         end
         return {
@@ -1323,8 +1332,10 @@ function http_get(url)
     if proxy != null
         session.set_proxy(proxy)
     end
-    session.set_ssl_verify_host(false)
-    session.set_ssl_verify_peer(false)
+    if !ssl_verify
+        session.set_ssl_verify_host(false)
+        session.set_ssl_verify_peer(false)
+    end
     if timeout_ms != null
         session.set_connect_timeout_ms(timeout_ms)
         session.set_accept_timeout_ms(timeout_ms)
@@ -1350,8 +1361,10 @@ function http_post(url, post_fields)
     end
     session.set_http_post(true)
     session.set_http_post_fields(post_fields)
-    session.set_ssl_verify_host(false)
-    session.set_ssl_verify_peer(false)
+    if !ssl_verify
+        session.set_ssl_verify_host(false)
+        session.set_ssl_verify_peer(false)
+    end
     if timeout_ms != null
         session.set_connect_timeout_ms(timeout_ms)
         session.set_accept_timeout_ms(timeout_ms)

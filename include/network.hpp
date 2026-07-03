@@ -34,14 +34,14 @@
 
 #ifdef _WIN32
 #include <windows.h>
-// undef WinCrypt macros that conflict with OpenSSL type names already defined above
+#include <wincrypt.h>
+// undef WinCrypt macros that conflict with OpenSSL type names
 #undef X509_NAME
 #undef X509_CERT_PAIR
 #undef X509_EXTENSIONS
 #undef PKCS7_SIGNER_INFO
 #undef OCSP_REQUEST
 #undef OCSP_RESPONSE
-#include <wincrypt.h>
 #endif
 #include <string>
 #include <atomic>
@@ -151,11 +151,19 @@ namespace cs_impl {
 
 			static void try_load_env_trust_sources(asio::ssl::context &ctx, trust_load_report &report)
 			{
-				const char *cert_file = std::getenv("SSL_CERT_FILE");
-				if (cert_file != nullptr && cert_file[0] != '\0')
+				// Cache environment variables at first call (static local init is thread-safe in C++11+)
+				static const std::string cert_file = []() -> std::string {
+					const char *val = std::getenv("SSL_CERT_FILE");
+					return (val != nullptr && val[0] != '\0') ? val : "";
+				}();
+				static const std::string cert_dir = []() -> std::string {
+					const char *val = std::getenv("SSL_CERT_DIR");
+					return (val != nullptr && val[0] != '\0') ? val : "";
+				}();
+
+				if (!cert_file.empty())
 					try_load_verify_file(ctx, cert_file, report, "env:SSL_CERT_FILE");
-				const char *cert_dir = std::getenv("SSL_CERT_DIR");
-				if (cert_dir != nullptr && cert_dir[0] != '\0')
+				if (!cert_dir.empty())
 					try_add_verify_path(ctx, cert_dir, report, "env:SSL_CERT_DIR");
 			}
 
@@ -233,8 +241,8 @@ namespace cs_impl {
 					const unsigned char *enc = pCert->pbCertEncoded;
 					X509 *x509 = d2i_X509(nullptr, &enc, static_cast<long>(pCert->cbCertEncoded));
 					if (x509) {
-						loaded_any = true;
-						X509_STORE_add_cert(SSL_CTX_get_cert_store(ctx.native_handle()), x509);
+						if (X509_STORE_add_cert(SSL_CTX_get_cert_store(ctx.native_handle()), x509))
+							loaded_any = true;
 						X509_free(x509);
 					}
 				}
@@ -372,6 +380,7 @@ namespace cs_impl {
 				{
 					tls_stream.reset();
 					tls_ctx.reset();
+					last_tls_trust_report = "trust_mode=unset; loaded=(none); failed=(none)";
 				}
 
 			public:
@@ -430,6 +439,8 @@ namespace cs_impl {
 					return static_cast<bool>(tls_stream);
 				}
 
+				// NOTE: close() does not wait for in-flight async operations.
+				// If async jobs are pending, use safe_shutdown() instead.
 				void close()
 				{
 					if (tls_stream) {
@@ -500,6 +511,7 @@ namespace cs_impl {
 					if (tls_stream) {
 						asio::error_code ec;
 						tls_stream->shutdown(ec);
+						clear_ssl();
 					}
 					sock.shutdown(tcp::socket::shutdown_both);
 				}

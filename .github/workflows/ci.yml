@@ -212,10 +212,39 @@ jobs:
           set -e
           cs tests/test_url_parse.csc
           cs tests/test_header_parser.csc
+          cs tests/test_utils.csc
+          cs tests/test_tcp_sync.csc
           cs tests/test_openai_client.csc
 
       # ------------------------------------------------------------------ #
-      # 12. Run async TCP test                                            #
+      # 12. Run UDP tests                                                  #
+      # ------------------------------------------------------------------ #
+      - name: Run UDP tests
+        shell: bash
+        run: |
+          set -e
+          cs tests/test_udp.csc
+
+      # ------------------------------------------------------------------ #
+      # 13. Run HTTP round-trip tests                                      #
+      # ------------------------------------------------------------------ #
+      - name: Run HTTP round-trip tests
+        shell: bash
+        run: |
+          set -e
+          cs tests/test_http_roundtrip.csc
+
+      # ------------------------------------------------------------------ #
+      # 14. Run fiber + socket tests                                       #
+      # ------------------------------------------------------------------ #
+      - name: Run fiber socket tests
+        shell: bash
+        run: |
+          set -e
+          cs tests/test_fiber_socket.csc
+
+      # ------------------------------------------------------------------ #
+      # 15. Run async TCP test                                             #
       # ------------------------------------------------------------------ #
       - name: Run async TCP test
         shell: bash
@@ -224,16 +253,17 @@ jobs:
           cs tests/test_async_tcp.csc
 
       # ------------------------------------------------------------------ #
-      # 13. Run integration tests                                         #
+      # 16. Run integration tests                                          #
       # ------------------------------------------------------------------ #
       - name: Run integration tests
         shell: bash
         run: |
           set -e
           cs tests/test_tls_trust.csc
+          cs tests/test_tls_errors.csc
 
       # ------------------------------------------------------------------ #
-      # 14. Run DeepSeek test (only when API key is available)            #
+      # 17. Run DeepSeek test (only when API key is available)             #
       # ------------------------------------------------------------------ #
       - name: Run DeepSeek test
         shell: bash
