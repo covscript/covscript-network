@@ -160,6 +160,7 @@ jobs:
       # ------------------------------------------------------------------ #
       - name: Setup MSYS2
         if: runner.os == 'Windows'
+        id: msys2
         uses: msys2/setup-msys2@v2
         with:
           msystem: UCRT64
@@ -185,8 +186,11 @@ jobs:
       # ------------------------------------------------------------------ #
       - name: Build extension (Windows)
         if: runner.os == 'Windows'
-        shell: msys2 {0}
+        shell: bash
+        env:
+          MSYS2_LOCATION: ${{ steps.msys2.outputs.msys2-location }}
         run: |
+          export PATH="${{ steps.msys2.outputs.msys2-location }}/ucrt64/bin:${PATH}"
           export CS_DEV_PATH="$(cygpath -u "${{ steps.sdk.outputs.cs_home }}")/"
           bash csbuild/make.sh
 
