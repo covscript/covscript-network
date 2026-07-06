@@ -40,15 +40,12 @@ function check_false(label, v)
     check(label, v == false)
 end
 
-// ============================================================
-// Helper: find a free port
-// ============================================================
 function find_free_port()
     var port = 12000
     while port < 12100
         try
             var acpt = tcp.acceptor(tcp.endpoint_v4(port))
-            acpt = null  // release
+            acpt = null
             return port
         catch e
             port += 1
@@ -65,9 +62,6 @@ if server_port == 0
 end
 system.out.println("Using port: " + to_string(server_port))
 
-// ============================================================
-// S01 — sync connect + send + receive round-trip
-// ============================================================
 section("S01: sync connect + echo round-trip")
 
 var guard = new async.work_guard
@@ -94,20 +88,16 @@ else
     check("S01-03: no accept error", true)
 end
 
-// Client -> Server
 var msg = "Hello, CovScript Network!"
 client.write(msg)
 check("S01-04: client write " + to_string(msg.size) + " bytes", true)
 
-// Server <- Client
 var received = server.receive(msg.size)
 check_eq("S01-05: server received echo", received, msg)
 check_eq("S01-06: server received length", received.size, msg.size)
 
-// Server -> Client (echo back)
 server.write(received)
 
-// Client <- Server
 var echoed = client.read(msg.size)
 check_eq("S01-07: client read echo", echoed, msg)
 
@@ -116,9 +106,6 @@ server.close()
 check_false("S01-08: client closed", client.is_open())
 check_false("S01-09: server closed", server.is_open())
 
-// ============================================================
-// S02 — send() vs write() partial-write behavior
-// ============================================================
 section("S02: send() partial write awareness")
 
 var srv2 = new tcp.socket
@@ -129,7 +116,6 @@ var cli2 = new tcp.socket
 cli2.connect(tcp.endpoint("127.0.0.1", server_port + 1))
 ast2.wait_for(5000)
 
-// send() may write fewer bytes — this just verifies it doesn't crash
 cli2.send("test")
 var buf2 = srv2.receive(10)
 check_not_null("S02-01: send() delivered some data", buf2)
@@ -138,9 +124,6 @@ check("S02-02: send() delivered non-empty", !buf2.empty())
 cli2.close()
 srv2.close()
 
-// ============================================================
-// S03 — available() non-blocking check
-// ============================================================
 section("S03: available()")
 
 var srv3 = new tcp.socket
@@ -154,7 +137,6 @@ ast3.wait_for(5000)
 check_eq("S03-01: available 0 before data", cli3.available(), 0)
 
 cli3.write("ABCDEFGH")
-// small delay to let data arrive
 runtime.delay(50)
 async.poll_once()
 
@@ -164,31 +146,23 @@ check("S03-02: available > 0 after write", avail > 0)
 cli3.close()
 srv3.close()
 
-// ============================================================
-// S04 — set_opt_no_delay, set_opt_keep_alive, set_opt_reuse_address
-// ============================================================
 section("S04: socket options")
 
 var sock4 = new tcp.socket
-sock4.set_opt_no_delay(true)
-sock4.set_opt_keep_alive(true)
-sock4.set_opt_reuse_address(true)
-check("S04-01: options set without error", true)
-
-// Verify options persist through connect
 var srv4 = new tcp.socket
 var acpt4 = tcp.acceptor(tcp.endpoint_v4(server_port + 3))
 var ast4 = async.accept(srv4, acpt4)
 sock4.connect(tcp.endpoint("127.0.0.1", server_port + 3))
+sock4.set_opt_no_delay(true)
+sock4.set_opt_keep_alive(true)
+sock4.set_opt_reuse_address(true)
+check("S04-01: options set after connect without error", true)
 ast4.wait_for(5000)
 check("S04-02: connected with options set", sock4.is_open())
 
 sock4.close()
 srv4.close()
 
-// ============================================================
-// S05 — safe_shutdown with async jobs
-// ============================================================
 section("S05: safe_shutdown")
 
 var srv5 = new tcp.socket
@@ -199,7 +173,6 @@ var cli5 = new tcp.socket
 cli5.connect(tcp.endpoint("127.0.0.1", server_port + 4))
 ast5.wait_for(5000)
 
-// safe_shutdown on a clean socket
 var ok = cli5.safe_shutdown()
 check_true("S05-01: safe_shutdown returns true on clean socket", ok)
 check_false("S05-02: socket closed after safe_shutdown", cli5.is_open())
@@ -207,9 +180,6 @@ check_false("S05-02: socket closed after safe_shutdown", cli5.is_open())
 ok = srv5.safe_shutdown()
 check_true("S05-03: safe_shutdown server side", ok)
 
-// ============================================================
-// S06 — local_endpoint / remote_endpoint
-// ============================================================
 section("S06: endpoint info")
 
 var srv6 = new tcp.socket
@@ -234,9 +204,6 @@ check_eq("S06-06: remote port matches server", remote_ep.port(), server_port + 5
 cli6.close()
 srv6.close()
 
-// ============================================================
-// S07 — shutdown() behavior (no crash, no hang)
-// ============================================================
 section("S07: shutdown()")
 
 var srv7 = new tcp.socket
@@ -257,9 +224,6 @@ check("S07-01: shutdown client no crash", true)
 cli7.close()
 srv7.close()
 
-// ============================================================
-// S08 — resolve DNS
-// ============================================================
 section("S08: resolve")
 
 var results = tcp.resolve("127.0.0.1", to_string(server_port))
@@ -268,7 +232,6 @@ var ep = results[0]
 check("S08-02: resolved endpoint is_v4", ep.is_v4())
 check_eq("S08-03: resolved port matches", ep.port(), server_port)
 
-// Results
 system.out.println("")
 system.out.println("=== Results ===")
 system.out.println("PASS: " + _pass)

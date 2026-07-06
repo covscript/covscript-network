@@ -36,9 +36,6 @@ function check_true(label, v)
     check(label, v == true)
 end
 
-// ============================================================
-// U01 — UDP loopback send_to / receive_from (sync)
-// ============================================================
 section("U01: UDP sync loopback")
 
 var port = 13000
@@ -57,11 +54,9 @@ catch e
     system.exit(1)
 end
 
-// A sends to B
 var msg = "UDP loopback test message"
 sock_a.send_to(msg, udp.endpoint("127.0.0.1", port + 1))
 
-// B receives
 var ep_from = udp.endpoint_v4(0)
 var received = sock_b.receive_from(msg.size, ep_from)
 check_eq("U01-02: received message", received, msg)
@@ -72,9 +67,6 @@ check_eq("U01-05: sender port matches A", ep_from.port(), port)
 sock_a.close()
 sock_b.close()
 
-// ============================================================
-// U02 — UDP endpoint operations
-// ============================================================
 section("U02: endpoint info")
 
 var ep1 = udp.endpoint("127.0.0.1", 9000)
@@ -91,9 +83,6 @@ var ep3 = udp.endpoint_broadcast(8888)
 check("U02-07: broadcast is_v4", ep3.is_v4())
 check_eq("U02-08: broadcast port", ep3.port(), 8888)
 
-// ============================================================
-// U03 — UDP async receive_from / send_to
-// ============================================================
 section("U03: UDP async")
 
 var guard = new async.work_guard
@@ -106,13 +95,10 @@ sock_d.open_v4()
 sock_c.bind(udp.endpoint_v4(port3))
 sock_d.bind(udp.endpoint_v4(port3 + 1))
 
-// Async receive on C
 var recv_state = async.receive_from(sock_c, 100)
 
-// Send from D to C
 var send_state = async.send_to(sock_d, "async-udp-test", udp.endpoint("127.0.0.1", port3))
 
-// Wait for receive
 if recv_state.wait_for(3000)
     check("U03-01: async receive completed", true)
     var data = recv_state.get_result()
@@ -135,9 +121,6 @@ end
 sock_c.close()
 sock_d.close()
 
-// ============================================================
-// U04 — UDP socket options
-// ============================================================
 section("U04: socket options")
 
 var sock4 = new udp.socket
@@ -147,9 +130,6 @@ sock4.set_opt_broadcast(true)
 check("U04-01: options set without error", true)
 sock4.close()
 
-// ============================================================
-// U05 — UDP resolve
-// ============================================================
 section("U05: resolve")
 
 var results = udp.resolve("127.0.0.1", "53")
@@ -158,7 +138,6 @@ if !results.empty()
     check("U05-02: resolved endpoint is_v4", results[0].is_v4())
 end
 
-// Results
 system.out.println("")
 system.out.println("=== Results ===")
 system.out.println("PASS: " + _pass)

@@ -341,3 +341,4 @@ end
 4. **`shutdown` vs `close` vs `safe_shutdown`**：`shutdown` 关闭通信通道但不释放资源；`close` 立即关闭并释放 TLS 上下文；`safe_shutdown` 等待所有异步操作完成后安全关闭（推荐用于异步场景）。
 5. **信任报告**：建议使用 `sock.get_ssl_trust_report()`（每个 socket 独立），而非全局的 `get_last_ssl_trust_report()`（线程级别，可能被覆盖）。
 6. **线程安全**：`std::getenv` 在 TLS 连接初始化时调用，静态缓存后不再重复调用。多线程高并发场景下建议使用 `async.thread_worker` 管理事件循环线程。
+7. **netutils HTTPS 行为变更 (v1.2.1)**：`netutils.http_get` 和 `netutils.http_post` 现在默认启用 SSL 证书验证（`netutils.ssl_verify = true`）。旧版本无条件跳过验证。连接自签名证书或内部 PKI 的 HTTPS 服务器时，需显式设置 `netutils.ssl_verify = false`。

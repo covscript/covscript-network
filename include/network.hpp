@@ -203,6 +203,19 @@ namespace cs_impl {
 					try_load_verify_file(ctx, path, report, "macos:file");
 				for (const auto *path : dir_candidates)
 					try_add_verify_path(ctx, path, report, "macos:dir");
+#elif defined(__FreeBSD__) || defined(__FreeBSD_kernel__) || defined(__OpenBSD__) || defined(__NetBSD__) || defined(__DragonFly__)
+				const char *file_candidates[] = {
+					"/usr/local/share/certs/ca-root-nss.crt",
+					"/etc/ssl/cert.pem"
+				};
+				const char *dir_candidates[] = {
+					"/usr/local/share/certs",
+					"/etc/ssl/certs"
+				};
+				for (const auto *path : file_candidates)
+					try_load_verify_file(ctx, path, report, "bsd:file");
+				for (const auto *path : dir_candidates)
+					try_add_verify_path(ctx, path, report, "bsd:dir");
 #else
 				(void)ctx;
 				(void)report;
@@ -469,6 +482,8 @@ namespace cs_impl {
 
 				std::size_t available()
 				{
+					if (tls_stream)
+						return 0; // asio::ssl::stream does not support available(); encrypted byte count is meaningless
 					return sock.available();
 				}
 

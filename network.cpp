@@ -26,6 +26,7 @@
 #include <thread>
 #include <memory>
 #include <regex>
+#include <cstdio>
 
 inline void cs_runtime_yield()
 {
@@ -125,10 +126,9 @@ namespace network_cs_ext {
 
 	std::string to_fixed_hex(const numeric &n)
 	{
-		numeric_integer val = n.as_integer();
-		std::ostringstream oss;
-		oss << std::hex << std::uppercase << std::setw(16) << std::setfill('0') << val;
-		return oss.str();
+		std::string result(16, '\0');
+		snprintf(result.data(), result.size() + 1, "%016llX", static_cast<unsigned long long>(n.as_integer()));
+		return result;
 	}
 
 	numeric from_fixed_hex(const std::string &s)
@@ -642,9 +642,18 @@ namespace network_cs_ext {
 			{
 				cs_impl::network::get_io_context().run();
 			}
-			thread_executor_type() : worker(thread_executor_type::executor)
+			// Increment thread_executors BEFORE starting the worker thread
+			// to close the TOCTOU window between poll() check and io.poll() call.
+			thread_executor_type()
 			{
 				get_global_settings().thread_executors.fetch_add(1, std::memory_order_release);
+				try {
+					worker = std::thread(thread_executor_type::executor);
+				}
+				catch (...) {
+					get_global_settings().thread_executors.fetch_sub(1, std::memory_order_release);
+					throw;
+				}
 			}
 			~thread_executor_type()
 			{
@@ -657,7 +666,6 @@ namespace network_cs_ext {
 			bool init = false;
 			bool is_udp = false;
 			bool is_read = false;
-			bool is_reentrant = false;
 			std::atomic<bool> has_done{false};
 			std::size_t bytes_transferred = 0;
 			udp::endpoint_t udp_endpoint;
@@ -685,6 +693,8 @@ namespace network_cs_ext {
 				throw cs::lang_error("Asynchronous operation not a read/receive session.");
 			if (!state->has_done.load(std::memory_order_acquire))
 				return cs::null_pointer;
+			if (state->ec)
+				return cs::null_pointer; // operation completed with error, no valid data
 			if (state->bytes_transferred == 0)
 				return cs::var::make<cs::string>();
 			std::string data(asio::buffers_begin(state->buffer.data()), asio::buffers_begin(state->buffer.data()) + state->bytes_transferred);
@@ -699,6 +709,8 @@ namespace network_cs_ext {
 				throw cs::lang_error("Asynchronous operation not a read/receive session.");
 			if (!state->has_done.load(std::memory_order_acquire))
 				return cs::null_pointer;
+			if (state->ec)
+				return cs::null_pointer; // operation completed with error, no valid data
 			if (state->buffer.size() == 0)
 				return cs::var::make<cs::string>();
 			std::size_t to_read = (std::min)(max_bytes, state->buffer.size());
@@ -710,7 +722,7 @@ namespace network_cs_ext {
 
 		std::size_t available(const state_t &state)
 		{
-			if (state->is_read && state->has_done.load(std::memory_order_acquire))
+			if (state->is_read && state->has_done.load(std::memory_order_acquire) && !state->ec)
 				return state->buffer.size();
 			else
 				return 0;
@@ -832,7 +844,6 @@ namespace network_cs_ext {
 			if (!state->init) {
 				state->init = true;
 				state->is_read = true;
-				state->is_reentrant = true;
 			}
 			else if (!state->has_done.load(std::memory_order_acquire))
 				throw cs::lang_error("Last asynchronous operation have not done yet.");
@@ -1074,7 +1085,9 @@ bool network_cs_ext::tcp::socket::safe_shutdown(socket_t &sock)
 	// Double-check loop to prevent TOCTOU race: cs_runtime_yield() may
 	// reschedule a fiber that submits a new async operation, incrementing
 	// async_jobs after we observed 0.
-	while (true) {
+	// Capped to prevent livelock under sustained async load.
+	std::size_t max_spins = 1000;
+	while (max_spins-- > 0) {
 		while (sock->async_jobs.load(std::memory_order_acquire) > 0) {
 			network_cs_ext::async::get_global_settings().poll();
 			cs_runtime_yield();
@@ -1104,7 +1117,9 @@ bool network_cs_ext::udp::socket::safe_close(socket_t &sock)
 	if (!sock->get_raw().is_open())
 		return true;
 	// Double-check loop to prevent TOCTOU race (same pattern as tcp::safe_shutdown)
-	while (true) {
+	// Capped to prevent livelock under sustained async load.
+	std::size_t max_spins = 1000;
+	while (max_spins-- > 0) {
 		while (sock->async_jobs.load(std::memory_order_acquire) > 0) {
 			network_cs_ext::async::get_global_settings().poll();
 			cs_runtime_yield();
