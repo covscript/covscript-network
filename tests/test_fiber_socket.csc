@@ -97,6 +97,8 @@ var client = new tcp.socket
 client.connect(tcp.endpoint("127.0.0.1", server_port))
 check_true("F01-01: client connected", client.is_open())
 
+client.write("fiber-ping")
+
 var max_iter = 100
 var iter = 0
 loop

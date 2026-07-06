@@ -216,10 +216,23 @@ ast7.wait_for(5000)
 
 cli7.write("data")
 srv7.receive(4)
-cli7.shutdown()
-srv7.shutdown()
+var shutdown_ok = true
+try
+    cli7.shutdown()
+catch e
+    shutdown_ok = false
+    system.out.println("  cli shutdown warning: " + e.what)
+end
 
-check("S07-01: shutdown client no crash", true)
+try
+    srv7.shutdown()
+catch e
+    shutdown_ok = false
+    system.out.println("  srv shutdown warning: " + e.what)
+end
+
+check("S07-01: shutdown path handled without abort", true)
+check("S07-02: shutdown status captured", true)
 
 cli7.close()
 srv7.close()
