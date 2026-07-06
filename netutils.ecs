@@ -5,7 +5,21 @@ import network.*, regex, curl
 import codec.json
 
 constant server_name = "CovScript-NetUtils"
-constant server_version = "1.2.1"
+constant server_version = "1.4"
+
+# ============================================================================
+# Configuration constants — override before use to adjust behavior
+# ============================================================================
+
+# HTTP client low-level I/O
+constant http_client_read_chunk = 8192            # bytes per recv() call
+
+# Framing protocol (must match C++ side NETWORK_FIXED_HEX_SIZE)
+constant framing_hex_size = 16                   # length of fixed-hex size header
+
+# Default ports (IANA-registered; override for non-standard deployments)
+constant default_http_port = 80
+constant default_https_port = 443
 
 # Internal Functions
 
@@ -73,7 +87,7 @@ function send_content(sock, content)
 end
 
 function receive_content(sock)
-    var state = async.read(sock, 16)
+    var state = async.read(sock, framing_hex_size)
     if !state.wait()
         log("Read content header failed: " + state.get_error())
         return null
@@ -89,7 +103,7 @@ end
 
 function receive_content_s(sock, timeout)
     var start_time = runtime.time()
-    var state = async.read(sock, 16)
+    var state = async.read(sock, framing_hex_size)
     if !state.wait_for(timeout)
         if state.has_done()
             log("Read content header failed: " + state.get_error())
@@ -505,7 +519,9 @@ function simple_worker(self)
                 break
             end
         end
-        sock.safe_shutdown()
+        if !sock.safe_shutdown()
+            log("safe_shutdown returned false — async jobs may still be pending")
+        end
     end
 end
 
@@ -616,7 +632,9 @@ function master_request_worker(self)
         var sock = conn->sock
         var session = read_http_header(sock, conn->last_request_time + self->server->keep_alive_timeout)
         if session == null
-            sock.safe_shutdown()
+            if !sock.safe_shutdown()
+                log("safe_shutdown returned false — async jobs may still be pending")
+            end
             conn->state = -1
             continue
         end
@@ -672,7 +690,9 @@ function master_response_worker(self)
             if !conn->close
                 async.write(conn->sock, compose_response(state_codes.code_408))
             end
-            conn->sock.safe_shutdown()
+            if !conn->sock.safe_shutdown()
+                log("safe_shutdown returned false — async jobs may still be pending")
+            end
             conn->state = -1
         end
     end
@@ -727,7 +747,9 @@ function master_dispatch_worker(self)
                     node->state = 0
                 else
                     log("Heartbeat failed for worker rank " + node->rank)
-                    node->sock.safe_shutdown()
+                    if !node->sock.safe_shutdown()
+                        log("safe_shutdown returned false — async jobs may still be pending")
+                    end
                     node->state = -1
                 end
             end
@@ -749,7 +771,9 @@ function master_dispatch_worker(self)
             else
                 log("Read response failed for worker rank " + node->rank)
                 session.response = compose_response(error_code)
-                node->sock.safe_shutdown()
+                if !node->sock.safe_shutdown()
+                    log("safe_shutdown returned false — async jobs may still be pending")
+                end
                 node->state = -1
             end
         end
@@ -949,7 +973,7 @@ class http_client
         end
         var scheme = m.str(1).tolower()
         var host = m.str(2)
-        var port = (scheme == "http" ? 80 : 443)
+        var port = (scheme == "http" ? default_http_port : default_https_port)
         var port_str = m.str(3)
         if port_str != null && !port_str.empty()
             port = port_str as integer
@@ -1017,7 +1041,7 @@ class http_client
             end
             var chunk = null
             try
-                chunk = sock.receive(8192)
+                chunk = sock.receive(http_client_read_chunk)
             catch e
                 return null
             end
@@ -1046,7 +1070,7 @@ class http_client
         while need > 0
             var step = need
             if step > 8192
-                step = 8192
+                step = http_client_read_chunk
             end
             var chunk = null
             try
@@ -1157,7 +1181,7 @@ class http_client
                     loop
                         var chunk = null
                         try
-                            chunk = sock.receive(8192)
+                            chunk = sock.receive(http_client_read_chunk)
                         catch e
                             break
                         end
@@ -1189,8 +1213,8 @@ class http_client
         end
         var req_body = (body == null ? "" : body)
         var host_header = target["host"]
-        if (target["scheme"] == "http" && target["port"] != 80) ||
-            (target["scheme"] == "https" && target["port"] != 443)
+        if (target["scheme"] == "http" && target["port"] != default_http_port) ||
+            (target["scheme"] == "https" && target["port"] != default_https_port)
             host_header = host_header + ":" + to_string(target["port"])
         end
         var req = method + " " + target["path"] + " HTTP/1.1\r\n"

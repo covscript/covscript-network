@@ -12,9 +12,29 @@ else ()
     message(FATAL_ERROR "-- CovScript SDK not detected. Please set environment variable CS_DEV_PATH")
 endif ()
 
+# ============================================================================
+# Network extension — compile-time configuration
+# Override with: cmake -DNETWORK_SAFE_SHUTDOWN_TIMEOUT_MS=500 ...
+# ============================================================================
+set(NETWORK_FIXED_HEX_SIZE 16 CACHE STRING
+    "Hex string length for framing protocol (to_fixed_hex / from_fixed_hex)")
+set(NETWORK_MAX_PORT 65535 CACHE STRING
+    "Maximum valid TCP/UDP port number")
+set(NETWORK_SAFE_SHUTDOWN_TIMEOUT_MS 200 CACHE STRING
+    "safe_shutdown / safe_close drain-loop timeout in milliseconds")
+set(NETWORK_THREAD_WORKER_POLL_MS 1 CACHE STRING
+    "thread_executor run_one_for polling interval in milliseconds")
+
 find_package(OpenSSL REQUIRED)
 
 add_library(network SHARED network.cpp)
+
+target_compile_definitions(network PRIVATE
+    NETWORK_FIXED_HEX_SIZE=${NETWORK_FIXED_HEX_SIZE}
+    NETWORK_MAX_PORT=${NETWORK_MAX_PORT}
+    NETWORK_SAFE_SHUTDOWN_TIMEOUT_MS=${NETWORK_SAFE_SHUTDOWN_TIMEOUT_MS}
+    NETWORK_THREAD_WORKER_POLL_MS=${NETWORK_THREAD_WORKER_POLL_MS}
+)
 
 target_link_libraries(network covscript OpenSSL::SSL OpenSSL::Crypto)
 

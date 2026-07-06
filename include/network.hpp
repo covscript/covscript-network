@@ -464,10 +464,13 @@ namespace cs_impl {
 				// Use safe_shutdown() to wait for completion first.
 				void close()
 				{
-					if (async_jobs.load(std::memory_order_acquire) > 0)
-						throw std::runtime_error(
-						    "close() called with " + std::to_string(async_jobs.load(std::memory_order_acquire)) +
-						    " async operation(s) still in flight. Use safe_shutdown() instead.");
+					{
+						auto pending = async_jobs.load(std::memory_order_acquire);
+						if (pending > 0)
+							throw std::runtime_error(
+							    "close() called with " + std::to_string(pending) +
+							    " async operation(s) still in flight. Use safe_shutdown() instead.");
+					}
 					if (tls_stream) {
 						asio::error_code ec;
 						tls_stream->shutdown(ec);
@@ -537,9 +540,13 @@ namespace cs_impl {
 				// in flight to prevent use-after-free on the TLS stream.
 				void shutdown()
 				{
-					if (async_jobs.load(std::memory_order_acquire) > 0)
-						throw std::runtime_error(
-						    "shutdown() called with async operation(s) still in flight. Use safe_shutdown() instead.");
+					{
+						auto pending = async_jobs.load(std::memory_order_acquire);
+						if (pending > 0)
+							throw std::runtime_error(
+							    "shutdown() called with " + std::to_string(pending) +
+							    " async operation(s) still in flight. Use safe_shutdown() instead.");
+					}
 					if (tls_stream) {
 						asio::error_code ec;
 						tls_stream->shutdown(ec);

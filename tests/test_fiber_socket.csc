@@ -120,7 +120,6 @@ var guard2 = new async.work_guard
 var server2 = new tcp.socket
 var acpt2 = tcp.acceptor(tcp.endpoint_v4(server_port + 1))
 
-var read_complete = false
 var read_data = ""
 var read_done = false
 var read_error = null
@@ -147,7 +146,6 @@ function server_fiber_func2(sock)
 
     if state.get_error() == null
         read_data = state.get_result()
-        read_complete = true
     else
         read_error = state.get_error()
     end
@@ -181,12 +179,10 @@ check("F02-01: read_until completed", read_done)
 if read_done
     check("F02-02: read_until no error", read_error == null)
 end
-if read_complete
+if read_error == null
     check("F02-03: received data contains hello", read_data.find("hello", 0) != -1)
 else
-    if read_error != null
-        system.out.println("  F02 error: " + read_error)
-    end
+    system.out.println("  F02 error: " + read_error)
 end
 
 client2.close()

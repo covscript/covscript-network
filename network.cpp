@@ -23,10 +23,13 @@
 #include <covscript/dll.hpp>
 #include <covscript/cni.hpp>
 #include <network.hpp>
+#include <chrono>
+#include <optional>
+#include <cstdio>
 #include <thread>
 #include <memory>
 #include <regex>
-#include <cstdio>
+#include <array>
 
 inline void cs_runtime_yield()
 {
@@ -126,18 +129,21 @@ namespace network_cs_ext {
 
 	std::string to_fixed_hex(const numeric &n)
 	{
-		// snprintf will put a null terminator at the end, so we need to allocate 17 characters for a 16-character hex string.
-		std::string result(17, '\0');
-		if (snprintf(result.data(), result.size() + 1, "%016llX", static_cast<unsigned long long>(n.as_integer())) != 16)
+		static_assert(NETWORK_FIXED_HEX_SIZE >= 1 && NETWORK_FIXED_HEX_SIZE <= 256,
+		              "NETWORK_FIXED_HEX_SIZE must be between 1 and 256");
+		if (n.as_integer() < 0)
+			throw cs::lang_error("Cannot convert negative number to fixed hex string.");
+		std::array<char, NETWORK_FIXED_HEX_SIZE + 1> buf{};
+		int written = snprintf(buf.data(), buf.size(), "%0*llX", static_cast<int>(NETWORK_FIXED_HEX_SIZE), static_cast<unsigned long long>(n.as_integer()));
+		if (written != static_cast<int>(NETWORK_FIXED_HEX_SIZE))
 			throw cs::lang_error("Failed to convert number to fixed hex string.");
-		result.resize(16); // Resize to 16 characters to remove the null terminator.
-		return result;
+		return std::string(buf.data(), NETWORK_FIXED_HEX_SIZE);
 	}
 
 	numeric from_fixed_hex(const std::string &s)
 	{
-		if (s.size() != 16)
-			throw cs::lang_error("Invalid byte string size, must be 16.");
+		if (s.size() != NETWORK_FIXED_HEX_SIZE)
+			throw cs::lang_error("Invalid byte string size, must be " + std::to_string(NETWORK_FIXED_HEX_SIZE) + ".");
 		std::size_t idx = 0;
 		unsigned long long val = 0;
 		try {
@@ -147,7 +153,7 @@ namespace network_cs_ext {
 			throw cs::lang_error(std::string("Invalid hex string: ") + e.what());
 		}
 		if (idx != s.size())
-			throw cs::lang_error("Invalid hex string: unexpected trailing characters after 16 hex digits.");
+			throw cs::lang_error("Invalid hex string: unexpected trailing characters after " + std::to_string(NETWORK_FIXED_HEX_SIZE) + " hex digits.");
 		return val;
 	}
 
@@ -180,24 +186,24 @@ namespace network_cs_ext {
 
 		var endpoint(const string &host, number port)
 		{
-			if (port < 0 || port > 65535)
-				throw lang_error("Port number must be in range [0, 65535].");
+			if (port < 0 || port > NETWORK_MAX_PORT)
+				throw lang_error("Port number must be in range [0, " + std::to_string(NETWORK_MAX_PORT) + "].");
 			else
 				return var::make<endpoint_t>(cs_impl::network::tcp::endpoint(host, static_cast<unsigned short>(port)));
 		}
 
 		var endpoint_v4(number port)
 		{
-			if (port < 0 || port > 65535)
-				throw lang_error("Port number must be in range [0, 65535].");
+			if (port < 0 || port > NETWORK_MAX_PORT)
+				throw lang_error("Port number must be in range [0, " + std::to_string(NETWORK_MAX_PORT) + "].");
 			else
 				return var::make<endpoint_t>(asio::ip::tcp::v4(), static_cast<unsigned short>(port));
 		}
 
 		var endpoint_v6(number port)
 		{
-			if (port < 0 || port > 65535)
-				throw lang_error("Port number must be in range [0, 65535].");
+			if (port < 0 || port > NETWORK_MAX_PORT)
+				throw lang_error("Port number must be in range [0, " + std::to_string(NETWORK_MAX_PORT) + "].");
 			else
 				return var::make<endpoint_t>(asio::ip::tcp::v6(), static_cast<unsigned short>(port));
 		}
@@ -418,32 +424,32 @@ namespace network_cs_ext {
 
 		var endpoint(const string &host, number port)
 		{
-			if (port < 0 || port > 65535)
-				throw lang_error("Port number must be in range [0, 65535].");
+			if (port < 0 || port > NETWORK_MAX_PORT)
+				throw lang_error("Port number must be in range [0, " + std::to_string(NETWORK_MAX_PORT) + "].");
 			else
 				return var::make<endpoint_t>(cs_impl::network::udp::endpoint(host, static_cast<unsigned short>(port)));
 		}
 
 		var endpoint_v4(number port)
 		{
-			if (port < 0 || port > 65535)
-				throw lang_error("Port number must be in range [0, 65535].");
+			if (port < 0 || port > NETWORK_MAX_PORT)
+				throw lang_error("Port number must be in range [0, " + std::to_string(NETWORK_MAX_PORT) + "].");
 			else
 				return var::make<endpoint_t>(asio::ip::udp::v4(), static_cast<unsigned short>(port));
 		}
 
 		var endpoint_broadcast(number port)
 		{
-			if (port < 0 || port > 65535)
-				throw lang_error("Port number must be in range [0, 65535].");
+			if (port < 0 || port > NETWORK_MAX_PORT)
+				throw lang_error("Port number must be in range [0, " + std::to_string(NETWORK_MAX_PORT) + "].");
 			else
 				return var::make<endpoint_t>(asio::ip::address_v4::broadcast(), static_cast<unsigned short>(port));
 		}
 
 		var endpoint_v6(number port)
 		{
-			if (port < 0 || port > 65535)
-				throw lang_error("Port number must be in range [0, 65535].");
+			if (port < 0 || port > NETWORK_MAX_PORT)
+				throw lang_error("Port number must be in range [0, " + std::to_string(NETWORK_MAX_PORT) + "].");
 			else
 				return var::make<endpoint_t>(asio::ip::udp::v6(), static_cast<unsigned short>(port));
 		}
@@ -650,7 +656,6 @@ namespace network_cs_ext {
 		class thread_executor_type {
 			std::thread worker;
 			std::atomic<bool> running{true};
-			std::atomic<bool> counter_active{true};
 
 		public:
 			void executor()
@@ -667,7 +672,7 @@ namespace network_cs_ext {
 					// run_one_for uses the OS-native I/O demux timeout (IOCP /
 					// epoll / kqueue), so it is NOT affected by the Windows
 					// default timer resolution (~15.6 ms) the way sleep_for is.
-					io.run_one_for(std::chrono::milliseconds(1));
+					io.run_one_for(std::chrono::milliseconds(NETWORK_THREAD_WORKER_POLL_MS));
 				}
 			}
 			// Increment thread_executors BEFORE starting the worker thread
@@ -686,14 +691,10 @@ namespace network_cs_ext {
 							fprintf(stderr, "[network] executor thread"
 							                " terminated by exception: %s\n",
 							        e.what());
-							if (counter_active.exchange(false, std::memory_order_acq_rel))
-								get_global_settings().thread_executors.fetch_sub(1, std::memory_order_release);
 						}
 						catch (...) {
 							fprintf(stderr, "[network] executor thread"
 							                " terminated by unknown exception\n");
-						if (counter_active.exchange(false, std::memory_order_acq_rel))
-							get_global_settings().thread_executors.fetch_sub(1, std::memory_order_release);
 						}
 					});
 				}
@@ -711,10 +712,9 @@ namespace network_cs_ext {
 				asio::post(cs_impl::network::get_io_context(), [] {});
 				if (worker.joinable())
 					worker.join();
-				// Only decrement if the worker thread did not already do so
-				// (e.g. on an exception exit path).
-				if (counter_active.exchange(false, std::memory_order_acq_rel))
-					get_global_settings().thread_executors.fetch_sub(1, std::memory_order_release);
+				// join() guarantees the worker thread has exited, so it is
+				// safe to decrement unconditionally here.
+				get_global_settings().thread_executors.fetch_sub(1, std::memory_order_release);
 			}
 		};
 
@@ -812,37 +812,29 @@ namespace network_cs_ext {
 			return state->udp_endpoint;
 		}
 
-		bool wait(const state_t &state)
+		bool wait_impl(const state_t &state, std::optional<std::chrono::milliseconds> timeout)
 		{
-			// Default safety ceiling: 30 seconds.
-			// Callers that need unbounded waiting should use a loop with
-			// their own progress checks or call wait_for() with an explicit
-			// timeout.
-			constexpr auto default_timeout = std::chrono::seconds(30);
 			auto start = std::chrono::steady_clock::now();
 			while (true) {
 				get_global_settings().poll();
 				if (state->has_done.load(std::memory_order_acquire))
 					return !state->ec;
-				if (std::chrono::steady_clock::now() - start >= default_timeout)
-					return state->has_done.load(std::memory_order_acquire) && !state->ec;
+				if (timeout.has_value()) {
+					if (std::chrono::steady_clock::now() - start >= *timeout)
+						return state->has_done.load(std::memory_order_acquire) && !state->ec;
+				}
 				cs_runtime_yield();
 			}
 		}
 
+		bool wait(const state_t &state)
+		{
+			return wait_impl(state, std::nullopt);
+		}
+
 		bool wait_for(const state_t &state, std::size_t timeout_ms)
 		{
-			auto start = std::chrono::steady_clock::now();
-			std::chrono::milliseconds timeout_duration(timeout_ms);
-			while (true) {
-				get_global_settings().poll();
-				if (state->has_done.load(std::memory_order_acquire))
-					return !state->ec;
-				auto now = std::chrono::steady_clock::now();
-				if (now - start >= timeout_duration)
-					return state->has_done.load(std::memory_order_acquire) && !state->ec;
-				cs_runtime_yield();
-			}
+			return wait_impl(state, std::chrono::milliseconds(timeout_ms));
 		}
 
 		static namespace_t async_ext = make_shared_namespace<name_space>();
@@ -852,11 +844,17 @@ namespace network_cs_ext {
 			state_t state = std::make_shared<state_type>();
 			state->init = true;
 			sock->async_jobs.fetch_add(1, std::memory_order_release);
-			acceptor->async_accept(sock->get_raw(), [sock, state](const asio::error_code &ec) {
-				state->ec = ec;
-				state->has_done.store(true, std::memory_order_release);
+			try {
+				acceptor->async_accept(sock->get_raw(), [sock, state](const asio::error_code &ec) {
+					state->ec = ec;
+					state->has_done.store(true, std::memory_order_release);
+					sock->async_jobs.fetch_sub(1, std::memory_order_release);
+				});
+			}
+			catch (...) {
 				sock->async_jobs.fetch_sub(1, std::memory_order_release);
-			});
+				throw;
+			}
 			return state;
 		}
 
@@ -865,11 +863,17 @@ namespace network_cs_ext {
 			state_t state = std::make_shared<state_type>();
 			state->init = true;
 			sock->async_jobs.fetch_add(1, std::memory_order_release);
-			sock->get_raw().async_connect(ep, [sock, state](const asio::error_code &ec) {
-				state->ec = ec;
-				state->has_done.store(true, std::memory_order_release);
+			try {
+				sock->get_raw().async_connect(ep, [sock, state](const asio::error_code &ec) {
+					state->ec = ec;
+					state->has_done.store(true, std::memory_order_release);
+					sock->async_jobs.fetch_sub(1, std::memory_order_release);
+				});
+			}
+			catch (...) {
 				sock->async_jobs.fetch_sub(1, std::memory_order_release);
-			});
+				throw;
+			}
 			return state;
 		}
 
@@ -909,19 +913,14 @@ namespace network_cs_ext {
 				state->init = true;
 				state->is_read = true;
 			}
-			else {
-				if (!state->has_done.load(std::memory_order_acquire))
-					throw cs::lang_error("Last asynchronous operation have not done yet.");
-				// Clear stale buffer data from the previous read to prevent
-				// the new pattern from matching against old data.
-				if (state->buffer.size() > 0)
-					state->buffer.consume(state->buffer.size());
-			}
+			else if (!state->has_done.load(std::memory_order_acquire))
+				throw cs::lang_error("Last asynchronous operation have not done yet.");
 			state->has_done = false;
 			state->ec.clear();
 			sock->async_jobs.fetch_add(1, std::memory_order_release);
 			auto on_done = [sock, state](const asio::error_code &ec, std::size_t bytes) {
-				state->buffer.commit(bytes);
+				// async_read_until already committed data to the streambuf
+				// internally; we must NOT call commit() again here.
 				state->bytes_transferred = bytes;
 				state->ec = ec;
 				state->has_done.store(true, std::memory_order_release);
@@ -939,17 +938,23 @@ namespace network_cs_ext {
 			state->init = true;
 			state->is_read = true;
 			sock->async_jobs.fetch_add(1, std::memory_order_release);
-			auto on_done = [sock, state](const asio::error_code &ec, std::size_t bytes) {
-				state->buffer.commit(bytes);
-				state->bytes_transferred = bytes;
-				state->ec = ec;
-				state->has_done.store(true, std::memory_order_release);
+			try {
+				auto on_done = [sock, state](const asio::error_code &ec, std::size_t bytes) {
+					state->buffer.commit(bytes);
+					state->bytes_transferred = bytes;
+					state->ec = ec;
+					state->has_done.store(true, std::memory_order_release);
+					sock->async_jobs.fetch_sub(1, std::memory_order_release);
+				};
+				if (sock->is_ssl())
+					asio::async_read(sock->get_tls_raw(), state->buffer.prepare(n), on_done);
+				else
+					asio::async_read(sock->get_raw(), state->buffer.prepare(n), on_done);
+			}
+			catch (...) {
 				sock->async_jobs.fetch_sub(1, std::memory_order_release);
-			};
-			if (sock->is_ssl())
-				asio::async_read(sock->get_tls_raw(), state->buffer.prepare(n), on_done);
-			else
-				asio::async_read(sock->get_raw(), state->buffer.prepare(n), on_done);
+				throw;
+			}
 			return state;
 		}
 
@@ -967,10 +972,16 @@ namespace network_cs_ext {
 				state->has_done.store(true, std::memory_order_release);
 				sock->async_jobs.fetch_sub(1, std::memory_order_release);
 			};
-			if (sock->is_ssl())
-				asio::async_write(sock->get_tls_raw(), state->buffer, on_done);
-			else
-				asio::async_write(sock->get_raw(), state->buffer, on_done);
+			try {
+				if (sock->is_ssl())
+					asio::async_write(sock->get_tls_raw(), state->buffer, on_done);
+				else
+					asio::async_write(sock->get_raw(), state->buffer, on_done);
+			}
+			catch (...) {
+				sock->async_jobs.fetch_sub(1, std::memory_order_release);
+				throw;
+			}
 			return state;
 		}
 
@@ -981,14 +992,20 @@ namespace network_cs_ext {
 			state->is_udp = true;
 			state->is_read = true;
 			sock->async_jobs.fetch_add(1, std::memory_order_release);
-			sock->get_raw().async_receive_from(state->buffer.prepare(n), state->udp_endpoint,
-			[sock, state](const asio::error_code &ec, std::size_t bytes) {
-				state->buffer.commit(bytes);
-				state->bytes_transferred = bytes;
-				state->ec = ec;
-				state->has_done.store(true, std::memory_order_release);
+			try {
+				sock->get_raw().async_receive_from(state->buffer.prepare(n), state->udp_endpoint,
+				[sock, state](const asio::error_code &ec, std::size_t bytes) {
+					state->buffer.commit(bytes);
+					state->bytes_transferred = bytes;
+					state->ec = ec;
+					state->has_done.store(true, std::memory_order_release);
+					sock->async_jobs.fetch_sub(1, std::memory_order_release);
+				});
+			}
+			catch (...) {
 				sock->async_jobs.fetch_sub(1, std::memory_order_release);
-			});
+				throw;
+			}
 			return state;
 		}
 
@@ -1001,14 +1018,22 @@ namespace network_cs_ext {
 			std::ostream os(&state->buffer);
 			os.write(data.data(), data.size());
 			sock->async_jobs.fetch_add(1, std::memory_order_release);
-			sock->get_raw().async_send_to(asio::buffer(state->buffer.data(), state->buffer.size()), state->udp_endpoint,
-			[sock, state](const asio::error_code &ec, std::size_t bytes) {
-				state->buffer.consume(bytes);
-				state->bytes_transferred = bytes;
-				state->ec = ec;
-				state->has_done.store(true, std::memory_order_release);
+			// Pass streambuf data() directly as ConstBufferSequence to avoid
+			// truncation when the streambuf spans multiple internal blocks.
+			try {
+				sock->get_raw().async_send_to(state->buffer.data(), state->udp_endpoint,
+				[sock, state](const asio::error_code &ec, std::size_t bytes) {
+					state->buffer.consume(bytes);
+					state->bytes_transferred = bytes;
+					state->ec = ec;
+					state->has_done.store(true, std::memory_order_release);
+					sock->async_jobs.fetch_sub(1, std::memory_order_release);
+				});
+			}
+			catch (...) {
 				sock->async_jobs.fetch_sub(1, std::memory_order_release);
-			});
+				throw;
+			}
 			return state;
 		}
 
@@ -1029,10 +1054,11 @@ namespace network_cs_ext {
 
 		void restart()
 		{
-			// When a dedicated worker thread is active it handles
-			// restart internally; calling io.restart() concurrently
-			// with poll_one() violates Asio preconditions.
-			if (get_global_settings().thread_executors.load(std::memory_order_acquire) == 0)
+			// Only restart if the io_context is actually stopped.
+			// When io.stopped() is true, no thread can be inside
+			// poll_one()/run_one(), so calling restart() is safe
+			// regardless of whether a thread_worker is active.
+			if (cs_impl::network::get_io_context().stopped())
 				cs_impl::network::get_io_context().restart();
 		}
 
@@ -1167,7 +1193,7 @@ bool network_cs_ext::tcp::socket::safe_shutdown(socket_t &sock)
 	// reschedule a fiber that submits a new async operation, incrementing
 	// async_jobs after we observed 0.
 	// Time-bounded to prevent indefinite blocking under sustained async load.
-	auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(200);
+	auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(NETWORK_SAFE_SHUTDOWN_TIMEOUT_MS);
 	while (std::chrono::steady_clock::now() < deadline) {
 		while (sock->async_jobs.load(std::memory_order_acquire) > 0) {
 			if (std::chrono::steady_clock::now() >= deadline)
@@ -1206,7 +1232,7 @@ bool network_cs_ext::udp::socket::safe_close(socket_t &sock)
 		return true;
 	// Double-check loop to prevent TOCTOU race (same pattern as tcp::safe_shutdown)
 	// Time-bounded to prevent indefinite blocking under sustained async load.
-	auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(200);
+	auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(NETWORK_SAFE_SHUTDOWN_TIMEOUT_MS);
 	while (std::chrono::steady_clock::now() < deadline) {
 		while (sock->async_jobs.load(std::memory_order_acquire) > 0) {
 			if (std::chrono::steady_clock::now() >= deadline)
