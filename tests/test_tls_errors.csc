@@ -242,7 +242,7 @@ if !connected
 else
     try
         sock6.connect_ssl(test_host, {"trust_mode": "auto"}.to_hash_map())
-        check_true("E06-01: first TLS handshake ok", true)
+        check_true("E06-01: first TLS handshake ok", sock6.is_ssl())
 
         var double_ok = true
         try
@@ -251,7 +251,7 @@ else
             double_ok = false
             system.out.println("  Expected: " + e.what)
         end
-        check("E06-02: double connect_ssl rejected or handled", true)
+        check_false("E06-02: double connect_ssl rejected", double_ok)
 
         sock6.close()
     catch e

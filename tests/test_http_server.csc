@@ -33,9 +33,9 @@ function check_not_null(label, v)
     check(label, v != null)
 end
 
-// ============================================================
-// Find free port
-// ============================================================
+# ============================================================
+# Find free port
+# ============================================================
 function find_free_port()
     var port = 14000
     while port < 14100
@@ -57,9 +57,9 @@ if server_port == 0
 end
 system.out.println("Using port: " + to_string(server_port))
 
-// ============================================================
-// S01 -- http_server basic setup and configuration
-// ============================================================
+# ============================================================
+# S01 -- http_server basic setup and configuration
+# ============================================================
 section("S01: basic setup")
 
 var server = new netutils.http_server
@@ -68,9 +68,9 @@ check_not_null("S01-01: server created", server)
 server.set_config({"thread_count": 1, "worker_count": 1}.to_hash_map())
 check("S01-02: config set", true)
 
-// ============================================================
-// S02 -- bind_func with a dynamic handler
-// ============================================================
+# ============================================================
+# S02 -- bind_func with a dynamic handler
+# ============================================================
 section("S02: bind_func dynamic handler")
 
 var handler_called = false
@@ -84,7 +84,7 @@ server.bind_func("/test", function(srv, session) {
 
 server.listen(server_port)
 
-// Start server polling in a fiber
+# Start server polling in a fiber
 var server_running = true
 var server_fiber = fiber.create([](server) {
     var guard = new async.work_guard
@@ -96,25 +96,27 @@ var server_fiber = fiber.create([](server) {
 server_fiber.resume()
 runtime.delay(50)
 
-// Connect and send HTTP request
+# Connect and send HTTP request
 var client = new tcp.socket
 client.connect(tcp.endpoint("127.0.0.1", server_port))
 check("S02-01: client connected", client.is_open())
 
-// Send HTTP request
+# Send HTTP request
 client.write("GET /test HTTP/1.1\r\nHost: 127.0.0.1:" + to_string(server_port) + "\r\nConnection: close\r\n\r\n")
 
-// Read response
+# Read response
 var response = client.receive(1024)
 check_not_null("S02-02: received response", response)
 check("S02-03: response contains 200", response.find("200 OK", 0) != -1)
 check("S02-04: response contains body", response.find("hello from handler", 0) != -1)
+check("S02-05: handler invoked", handler_called)
+check_eq("S02-06: handler received expected path", handler_path, "/test")
 
 client.close()
 
-// ============================================================
-// S03 -- 404 handling
-// ============================================================
+# ============================================================
+# S03 -- 404 handling
+# ============================================================
 section("S03: 404 handling")
 
 var client2 = new tcp.socket
@@ -129,19 +131,21 @@ check("S03-03: response contains 404", response2.find("404", 0) != -1)
 
 client2.close()
 
-// ============================================================
-// Cleanup
-// ============================================================
+# ============================================================
+# Cleanup
+# ============================================================
 section("S04: cleanup")
 
 server_running = false
-check("S04-01: server stopped", true)
+check("S04-01: server stop flag set", server_running == false)
 
-// Give fiber time to exit
+# Give fiber time to exit
+server_fiber.resume()
 runtime.delay(50)
 async.poll_once()
+server_fiber = null
 
-// Results
+# Results
 system.out.println("")
 system.out.println("=== Results ===")
 system.out.println("PASS: " + _pass)

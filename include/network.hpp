@@ -243,27 +243,34 @@ namespace cs_impl {
 #ifdef _WIN32
 			static void load_windows_root_certs(asio::ssl::context &ctx, trust_load_report &report)
 			{
-				HCERTSTORE hStore = CertOpenSystemStoreA(0, "ROOT");
-				if (!hStore) {
-					report.mark_failed("windows:ROOT", "failed to open ROOT cert store");
-					return;
-				}
-				PCCERT_CONTEXT pCert = nullptr;
-				bool loaded_any = false;
-				while ((pCert = CertEnumCertificatesInStore(hStore, pCert)) != nullptr) {
-					const unsigned char *enc = pCert->pbCertEncoded;
-					X509 *x509 = d2i_X509(nullptr, &enc, static_cast<long>(pCert->cbCertEncoded));
-					if (x509) {
-						if (X509_STORE_add_cert(SSL_CTX_get_cert_store(ctx.native_handle()), x509))
-							loaded_any = true;
-						X509_free(x509);
+				// Load from multiple Windows system certificate stores to cover
+				// enterprise and platform-managed chains.
+				const char *stores[] = {"ROOT", "CA", "AuthRoot"};
+				for (const auto *store_name : stores) {
+					HCERTSTORE hStore = CertOpenSystemStoreA(0, store_name);
+					if (!hStore) {
+						report.mark_failed(std::string("windows:") + store_name,
+						                   "failed to open " + std::string(store_name) + " cert store");
+						continue;
 					}
+					PCCERT_CONTEXT pCert = nullptr;
+					bool loaded_any = false;
+					while ((pCert = CertEnumCertificatesInStore(hStore, pCert)) != nullptr) {
+						const unsigned char *enc = pCert->pbCertEncoded;
+						X509 *x509 = d2i_X509(nullptr, &enc, static_cast<long>(pCert->cbCertEncoded));
+						if (x509) {
+							if (X509_STORE_add_cert(SSL_CTX_get_cert_store(ctx.native_handle()), x509))
+								loaded_any = true;
+							X509_free(x509);
+						}
+					}
+					if (loaded_any)
+						report.mark_loaded(std::string("windows:") + store_name);
+					else
+						report.mark_failed(std::string("windows:") + store_name,
+						                   "no certificates decoded from " + std::string(store_name) + " store");
+					CertCloseStore(hStore, 0);
 				}
-				if (loaded_any)
-					report.mark_loaded("windows:ROOT");
-				else
-					report.mark_failed("windows:ROOT", "no certificates decoded from ROOT store");
-				CertCloseStore(hStore, 0);
 			}
 #endif
 
@@ -452,10 +459,15 @@ namespace cs_impl {
 					return static_cast<bool>(tls_stream);
 				}
 
-				// NOTE: close() does not wait for in-flight async operations.
-				// If async jobs are pending, use safe_shutdown() instead.
+				// close() refuses to proceed when async operations are still
+				// in flight to prevent use-after-free on the TLS stream.
+				// Use safe_shutdown() to wait for completion first.
 				void close()
 				{
+					if (async_jobs.load(std::memory_order_acquire) > 0)
+						throw std::runtime_error(
+						    "close() called with " + std::to_string(async_jobs.load(std::memory_order_acquire)) +
+						    " async operation(s) still in flight. Use safe_shutdown() instead.");
 					if (tls_stream) {
 						asio::error_code ec;
 						tls_stream->shutdown(ec);
@@ -521,8 +533,13 @@ namespace cs_impl {
 						asio::write(sock, asio::buffer(s));
 				}
 
+				// shutdown() refuses to proceed when async operations are still
+				// in flight to prevent use-after-free on the TLS stream.
 				void shutdown()
 				{
+					if (async_jobs.load(std::memory_order_acquire) > 0)
+						throw std::runtime_error(
+						    "shutdown() called with async operation(s) still in flight. Use safe_shutdown() instead.");
 					if (tls_stream) {
 						asio::error_code ec;
 						tls_stream->shutdown(ec);

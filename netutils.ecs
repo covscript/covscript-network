@@ -421,7 +421,9 @@ function call_http_handler(session, server)
         var base_path = server->wwwroot_path
         var full_path = path_normalize(base_path + "/" + session.url)
         log("Resolved path: " + full_path)
-        if full_path.find(base_path, 0) == 0
+        # Boundary check: accept only exact match or base_path followed by '/'
+        # to prevent sibling-directory escape (e.g. www_evil matching root www).
+        if full_path == base_path || full_path.find(base_path + "/", 0) == 0
             if system.path.is_directory(full_path)
                 if full_path[-1] != '/'
                     full_path.append('/')

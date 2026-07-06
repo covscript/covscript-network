@@ -126,8 +126,11 @@ namespace network_cs_ext {
 
 	std::string to_fixed_hex(const numeric &n)
 	{
-		std::string result(16, '\0');
-		snprintf(result.data(), result.size() + 1, "%016llX", static_cast<unsigned long long>(n.as_integer()));
+		// snprintf will put a null terminator at the end, so we need to allocate 17 characters for a 16-character hex string.
+		std::string result(17, '\0');
+		if (snprintf(result.data(), result.size() + 1, "%016llX", static_cast<unsigned long long>(n.as_integer())) != 16)
+			throw cs::lang_error("Failed to convert number to fixed hex string.");
+		result.resize(16); // Resize to 16 characters to remove the null terminator.
 		return result;
 	}
 
@@ -135,7 +138,17 @@ namespace network_cs_ext {
 	{
 		if (s.size() != 16)
 			throw cs::lang_error("Invalid byte string size, must be 16.");
-		return std::stoull(s, nullptr, 16);
+		std::size_t idx = 0;
+		unsigned long long val = 0;
+		try {
+			val = std::stoull(s, &idx, 16);
+		}
+		catch (const std::exception &e) {
+			throw cs::lang_error(std::string("Invalid hex string: ") + e.what());
+		}
+		if (idx != s.size())
+			throw cs::lang_error("Invalid hex string: unexpected trailing characters after 16 hex digits.");
+		return val;
 	}
 
 	string host_name()
@@ -636,11 +649,26 @@ namespace network_cs_ext {
 
 		class thread_executor_type {
 			std::thread worker;
+			std::atomic<bool> running{true};
+			std::atomic<bool> counter_active{true};
 
 		public:
-			static void executor()
+			void executor()
 			{
-				cs_impl::network::get_io_context().run();
+				auto &io = cs_impl::network::get_io_context();
+				while (true) {
+					if (io.stopped())
+						io.restart();
+					// Drain all ready handlers without blocking
+					while (io.poll_one() > 0);
+					if (!running.load(std::memory_order_acquire))
+						break;
+					// Block until a handler is ready or the timeout expires.
+					// run_one_for uses the OS-native I/O demux timeout (IOCP /
+					// epoll / kqueue), so it is NOT affected by the Windows
+					// default timer resolution (~15.6 ms) the way sleep_for is.
+					io.run_one_for(std::chrono::milliseconds(1));
+				}
 			}
 			// Increment thread_executors BEFORE starting the worker thread
 			// to close the TOCTOU window between poll() check and io.poll() call.
@@ -648,7 +676,26 @@ namespace network_cs_ext {
 			{
 				get_global_settings().thread_executors.fetch_add(1, std::memory_order_release);
 				try {
-					worker = std::thread(thread_executor_type::executor);
+					worker = std::thread([this]() {
+						try {
+							executor();
+						}
+						catch (const std::exception &e) {
+							// Log or report the error instead of calling
+							// std::terminate via the uncaught-exception path.
+							fprintf(stderr, "[network] executor thread"
+							                " terminated by exception: %s\n",
+							        e.what());
+							if (counter_active.exchange(false, std::memory_order_acq_rel))
+								get_global_settings().thread_executors.fetch_sub(1, std::memory_order_release);
+						}
+						catch (...) {
+							fprintf(stderr, "[network] executor thread"
+							                " terminated by unknown exception\n");
+						if (counter_active.exchange(false, std::memory_order_acq_rel))
+							get_global_settings().thread_executors.fetch_sub(1, std::memory_order_release);
+						}
+					});
 				}
 				catch (...) {
 					get_global_settings().thread_executors.fetch_sub(1, std::memory_order_release);
@@ -657,8 +704,17 @@ namespace network_cs_ext {
 			}
 			~thread_executor_type()
 			{
-				worker.join();
-				get_global_settings().thread_executors.fetch_sub(1, std::memory_order_release);
+				running.store(false, std::memory_order_release);
+				// Post an empty handler to wake up run_one_for immediately
+				// so the worker thread can see running == false and exit
+				// without waiting for the full timeout.
+				asio::post(cs_impl::network::get_io_context(), [] {});
+				if (worker.joinable())
+					worker.join();
+				// Only decrement if the worker thread did not already do so
+				// (e.g. on an exception exit path).
+				if (counter_active.exchange(false, std::memory_order_acq_rel))
+					get_global_settings().thread_executors.fetch_sub(1, std::memory_order_release);
 			}
 		};
 
@@ -758,10 +814,18 @@ namespace network_cs_ext {
 
 		bool wait(const state_t &state)
 		{
+			// Default safety ceiling: 30 seconds.
+			// Callers that need unbounded waiting should use a loop with
+			// their own progress checks or call wait_for() with an explicit
+			// timeout.
+			constexpr auto default_timeout = std::chrono::seconds(30);
+			auto start = std::chrono::steady_clock::now();
 			while (true) {
 				get_global_settings().poll();
 				if (state->has_done.load(std::memory_order_acquire))
 					return !state->ec;
+				if (std::chrono::steady_clock::now() - start >= default_timeout)
+					return state->has_done.load(std::memory_order_acquire) && !state->ec;
 				cs_runtime_yield();
 			}
 		}
@@ -845,8 +909,14 @@ namespace network_cs_ext {
 				state->init = true;
 				state->is_read = true;
 			}
-			else if (!state->has_done.load(std::memory_order_acquire))
-				throw cs::lang_error("Last asynchronous operation have not done yet.");
+			else {
+				if (!state->has_done.load(std::memory_order_acquire))
+					throw cs::lang_error("Last asynchronous operation have not done yet.");
+				// Clear stale buffer data from the previous read to prevent
+				// the new pattern from matching against old data.
+				if (state->buffer.size() > 0)
+					state->buffer.consume(state->buffer.size());
+			}
 			state->has_done = false;
 			state->ec.clear();
 			sock->async_jobs.fetch_add(1, std::memory_order_release);
@@ -959,15 +1029,26 @@ namespace network_cs_ext {
 
 		void restart()
 		{
-			cs_impl::network::get_io_context().restart();
+			// When a dedicated worker thread is active it handles
+			// restart internally; calling io.restart() concurrently
+			// with poll_one() violates Asio preconditions.
+			if (get_global_settings().thread_executors.load(std::memory_order_acquire) == 0)
+				cs_impl::network::get_io_context().restart();
 		}
 
 		using work_guard_t = std::shared_ptr<asio::executor_work_guard<asio::io_context::executor_type>>;
 
 		var work_guard()
 		{
-			if (stopped())
-				restart();
+			// When a thread_worker is active, async::restart() refuses to
+			// call io.restart() to avoid racing with the worker's poll_one().
+			// But if the io_context is actually stopped when we arrive here,
+			// the worker is NOT inside poll_one() (it's at the top of its
+			// loop or waiting in run_one_for), so it's safe to restart.
+			// Creating a work_guard on an already-stopped io_context would
+			// leave it permanently stopped even with the guard active.
+			if (cs_impl::network::get_io_context().stopped())
+				cs_impl::network::get_io_context().restart();
 			return std::make_shared<asio::executor_work_guard<asio::io_context::executor_type>>(cs_impl::network::get_io_context().get_executor());
 		}
 
@@ -1085,16 +1166,23 @@ bool network_cs_ext::tcp::socket::safe_shutdown(socket_t &sock)
 	// Double-check loop to prevent TOCTOU race: cs_runtime_yield() may
 	// reschedule a fiber that submits a new async operation, incrementing
 	// async_jobs after we observed 0.
-	// Capped to prevent livelock under sustained async load.
-	std::size_t max_spins = 1000;
-	while (max_spins-- > 0) {
+	// Time-bounded to prevent indefinite blocking under sustained async load.
+	auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(200);
+	while (std::chrono::steady_clock::now() < deadline) {
 		while (sock->async_jobs.load(std::memory_order_acquire) > 0) {
+			if (std::chrono::steady_clock::now() >= deadline)
+				break;
 			network_cs_ext::async::get_global_settings().poll();
 			cs_runtime_yield();
 		}
 		if (sock->async_jobs.load(std::memory_order_acquire) == 0)
 			break;
 	}
+	// Refuse to close if async jobs are still pending after the timeout.
+	// This prevents destroying TLS state while async handlers may still
+	// reference the stream.
+	if (sock->async_jobs.load(std::memory_order_acquire) > 0)
+		return false;
 	bool shutdown_ok = true;
 	bool close_ok = true;
 	try {
@@ -1117,10 +1205,12 @@ bool network_cs_ext::udp::socket::safe_close(socket_t &sock)
 	if (!sock->get_raw().is_open())
 		return true;
 	// Double-check loop to prevent TOCTOU race (same pattern as tcp::safe_shutdown)
-	// Capped to prevent livelock under sustained async load.
-	std::size_t max_spins = 1000;
-	while (max_spins-- > 0) {
+	// Time-bounded to prevent indefinite blocking under sustained async load.
+	auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(200);
+	while (std::chrono::steady_clock::now() < deadline) {
 		while (sock->async_jobs.load(std::memory_order_acquire) > 0) {
+			if (std::chrono::steady_clock::now() >= deadline)
+				break;
 			network_cs_ext::async::get_global_settings().poll();
 			cs_runtime_yield();
 		}

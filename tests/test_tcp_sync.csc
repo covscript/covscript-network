@@ -231,8 +231,9 @@ catch e
     system.out.println("  srv shutdown warning: " + e.what)
 end
 
-check("S07-01: shutdown path handled without abort", true)
-check("S07-02: shutdown status captured", true)
+check_true("S07-01: shutdown operations succeeded", shutdown_ok)
+# shutdown() closes communication without releasing resources; socket remains open
+check_true("S07-02: client still open after shutdown", cli7.is_open())
 
 cli7.close()
 srv7.close()

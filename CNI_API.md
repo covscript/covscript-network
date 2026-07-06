@@ -107,8 +107,8 @@ sock.connect_ssl("localhost", {"trust_mode": "insecure"}.to_hash_map())
 | `read` | `(size: int) → string` | 读取恰好 `size` 字节。阻塞直到全部读完 |
 | `send` | `(data: string)` | 发送数据（尽力而为，可能部分写入） |
 | `write` | `(data: string)` | 发送数据（保证全部写入，阻塞直到完成） |
-| `shutdown` | `()` | 关闭套接字两端（不释放资源） |
-| `safe_shutdown` | `() → boolean` | 安全关闭：等待所有异步操作完成，然后关闭 TLS 和 TCP。成功返回 `true` |
+| `shutdown` | `()` | 关闭套接字通信通道。与 `close()` 的区别：`shutdown()` 仅关闭通信，socket 保持打开且资源不释放；`close()` 释放所有资源 |
+| `safe_shutdown` | `() → boolean` | 安全关闭：等待异步操作完成（最多 200ms），然后关闭 TLS 和 TCP。成功返回 `true`，有异步操作未完成返回 `false` |
 | `local_endpoint` | `() → endpoint` | 获取本地端点地址 |
 | `remote_endpoint` | `() → endpoint` | 获取远程端点地址 |
 
@@ -205,7 +205,7 @@ sock.connect_ssl("localhost", {"trust_mode": "insecure"}.to_hash_map())
 |------|------|--------|------|
 | `async.accept` | `(sock: tcp_socket, acpt: acceptor) → state` | `state` | 异步接受连接 |
 | `async.connect` | `(sock: tcp_socket, ep: endpoint) → state` | `state` | 异步建立 TCP 连接 |
-| `async.connect_ssl` | `(sock: tcp_socket, host: string, options: var) → state` | `state` | 异步 TLS 连接（先 TCP 连接再 TLS 握手） |
+| `async.connect_ssl` | `(sock: tcp_socket, host: string, options: var) → state` | `state` | 异步 TLS 握手（socket 必须先建立 TCP 连接） |
 | `async.read` | `(sock: tcp_socket, n: int) → state` | `state` | 异步读取恰好 `n` 字节 |
 | `async.read_until` | `(sock: tcp_socket, state: state, pattern: string)` | - | 异步读取直到匹配 `pattern`。**可重入**：`state` 参数可复用 |
 | `async.write` | `(sock: tcp_socket, data: string) → state` | `state` | 异步写入全部数据 |
@@ -336,9 +336,9 @@ end
 ## 注意事项
 
 1. **异步操作生命周期**：异步操作期间 socket 必须保持存活。创建 `work_guard` 可防止事件循环在所有异步操作完成前停止。
-2. **TLS 连接**：`connect_ssl` 内部先建立 TCP 连接再执行 TLS 握手。握手失败时 SSL 上下文会被自动清理。
+2. **TLS 连接**：同步 `connect_ssl` 方法先建立 TCP 连接再执行 TLS 握手；异步 `async.connect_ssl` 仅执行 TLS 握手（socket 必须先建立 TCP 连接）。握手失败时 SSL 上下文会被自动清理。
 3. **`send` vs `write`**：`send` 是尽力而为的部分写入（类似 POSIX `send()`），`write` 保证全部写入。需要可靠传输时使用 `write`。
-4. **`shutdown` vs `close` vs `safe_shutdown`**：`shutdown` 关闭通信通道但不释放资源；`close` 立即关闭并释放 TLS 上下文；`safe_shutdown` 等待所有异步操作完成后安全关闭（推荐用于异步场景）。
+4. **`shutdown` vs `close` vs `safe_shutdown`**：`shutdown` 关闭通信通道但不释放资源（socket 保持 `is_open()` 为 true）；`close` 立即关闭并释放 TLS 上下文；`safe_shutdown` 等待异步操作完成（最多 200ms），然后关闭。如有异步操作仍在进行则返回 `false` 且不关闭（推荐用于异步场景）。
 5. **信任报告**：建议使用 `sock.get_ssl_trust_report()`（每个 socket 独立），而非全局的 `get_last_ssl_trust_report()`（线程级别，可能被覆盖）。
-6. **线程安全**：`std::getenv` 在 TLS 连接初始化时调用，静态缓存后不再重复调用。多线程高并发场景下建议使用 `async.thread_worker` 管理事件循环线程。
+6. **线程安全**：同一 socket 不应并发进行同步和异步操作。特别是 TLS socket，混合使用同步和异步操作可能导致 OpenSSL 流状态损坏或数据竞争。`std::getenv` 在 TLS 连接初始化时调用，静态缓存后不再重复调用。多线程高并发场景下建议使用 `async.thread_worker` 管理事件循环线程。
 7. **netutils HTTPS 行为变更 (v1.2.1)**：`netutils.http_get` 和 `netutils.http_post` 现在默认启用 SSL 证书验证（`netutils.ssl_verify = true`）。旧版本无条件跳过验证。连接自签名证书或内部 PKI 的 HTTPS 服务器时，需显式设置 `netutils.ssl_verify = false`。
