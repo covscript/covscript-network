@@ -528,7 +528,10 @@ namespace cs_impl {
 						tls_stream->shutdown(ec);
 						clear_ssl();
 					}
-					sock.shutdown(tcp::socket::shutdown_both);
+					asio::error_code ec;
+					sock.shutdown(tcp::socket::shutdown_both, ec);
+					if (ec && ec != asio::error::not_connected)
+						throw asio::system_error(ec);
 				}
 
 				tcp::endpoint local_endpoint()
