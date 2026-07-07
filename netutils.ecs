@@ -1069,7 +1069,7 @@ class http_client
         end
         while need > 0
             var step = need
-            if step > 8192
+            if step > http_client_read_chunk
                 step = http_client_read_chunk
             end
             var chunk = null

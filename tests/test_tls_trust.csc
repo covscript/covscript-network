@@ -2,6 +2,7 @@ import network.tcp as tcp
 
 var _pass = 0
 var _fail = 0
+var _skip = 0
 var _section = ""
 
 function section(name)
@@ -22,6 +23,11 @@ end
 
 function check_not_null(label, v)
     check(label, v != null)
+end
+
+function skip(label, reason)
+    _skip += 1
+    system.out.println("[SKIP] " + _section + " | " + label + " -- " + reason)
 end
 
 # --- Parse command-line args ---
@@ -52,10 +58,13 @@ function run_trust_check(mode_name, options)
 
     var handshake_ok = false
     var error_msg = ""
+    var connected = false
+    var resolved = false
 
+    # --- Phase 1: DNS + TCP connect ---
     try
         var endpoints = tcp.resolve(host, to_string(port))
-        var connected = false
+        resolved = true
         foreach ep in endpoints
             try
                 sock.connect(ep)
@@ -65,12 +74,34 @@ function run_trust_check(mode_name, options)
                 null
             end
         end
-        if !connected
-            error_msg = "TCP connect failed"
-        else
-            sock.connect_ssl(host, options)
-            handshake_ok = true
+    catch e
+        error_msg = e.what
+    end
+
+    # Connectivity failure → skip (offline / no route to host)
+    if !resolved
+        skip("handshake " + mode_name, "DNS resolution failed for " + host + ":" + to_string(port) + " -- " + error_msg)
+        try
+            sock.safe_shutdown()
+        catch e
+            null
         end
+        return
+    end
+    if !connected
+        skip("handshake " + mode_name, "TCP connect failed to " + host + ":" + to_string(port) + " -- " + (error_msg.empty() ? "no reachable endpoint" : error_msg))
+        try
+            sock.safe_shutdown()
+        catch e
+            null
+        end
+        return
+    end
+
+    # --- Phase 2: TLS handshake (we are connected; failures are real) ---
+    try
+        sock.connect_ssl(host, options)
+        handshake_ok = true
     catch e
         error_msg = e.what
         handshake_ok = false
@@ -81,6 +112,7 @@ function run_trust_check(mode_name, options)
         system.out.println("  Error: " + error_msg)
     end
 
+    # --- Phase 3: Trust report ---
     try
         var report = sock.get_ssl_trust_report()
         system.out.println("  Trust report: " + report)
@@ -101,7 +133,9 @@ run_trust_check("auto", {"trust_mode": "auto"}.to_hash_map())
 
 # Test openssl mode
 if system.is_platform_windows()
-    system.out.println("Skipping openssl mode on Windows (not supported)")
+    system.out.println("")
+    system.out.println("[Mode openssl] skipped (not supported on Windows)")
+    _skip += 1
 else
     run_trust_check("openssl", {"trust_mode": "openssl"}.to_hash_map())
 end
@@ -119,12 +153,14 @@ if (ca_file != null && !ca_file.empty()) || (ca_path != null && !ca_path.empty()
 else
     system.out.println("")
     system.out.println("[Mode custom] skipped (pass ca_file or ca_path as args)")
+    _skip += 1
 end
 
 system.out.println("")
 system.out.println("=== Results ===")
 system.out.println("PASS: " + _pass)
 system.out.println("FAIL: " + _fail)
+system.out.println("SKIP: " + _skip)
 if _fail > 0
     system.exit(1)
 end

@@ -58,6 +58,33 @@ end
 system.out.println("Using port: " + to_string(server_port))
 
 # ============================================================
+# Helpers: drive server fiber + async event loop together
+# ============================================================
+function drive_server()
+    server_fiber.resume()
+    async.poll_once()
+end
+
+function drive_server_cycles(count)
+    var i = 0
+    while i < count
+        drive_server()
+        i += 1
+    end
+end
+
+# Drive server and poll until data is available on the client socket,
+# or timeout expires. Returns true if data is ready to read.
+function drive_until_data(client, timeout_ms)
+    var start = runtime.time()
+    while client.available() == 0 && runtime.time() - start < timeout_ms
+        drive_server()
+        runtime.delay(5)
+    end
+    return client.available() > 0
+end
+
+# ============================================================
 # S01 -- http_server basic setup and configuration
 # ============================================================
 section("S01: basic setup")
@@ -76,25 +103,30 @@ section("S02: bind_func dynamic handler")
 var handler_called = false
 var handler_path = ""
 
-server.bind_func("/test", function(srv, session) {
+function test_handler(srv, session)
     handler_called = true
     handler_path = session.url
     session.send_response("200 OK", "hello from handler", "text/plain")
-})
+end
+
+server.bind_func("/test", test_handler)
 
 server.listen(server_port)
 
-# Start server polling in a fiber
+# Start server polling in a fiber — continuously driven by helpers above
 var server_running = true
-var server_fiber = fiber.create([](server) {
-    var guard = new async.work_guard
+
+function server_fiber_func(srv)
     loop
-        server.poll()
+        srv.poll()
         fiber.yield()
     until !server_running
-}, server)
-server_fiber.resume()
-runtime.delay(50)
+end
+
+var server_fiber = fiber.create(server_fiber_func, server)
+
+# Prime the server: let workers start accepting
+drive_server_cycles(5)
 
 # Connect and send HTTP request
 var client = new tcp.socket
@@ -104,20 +136,30 @@ check("S02-01: client connected", client.is_open())
 # Send HTTP request
 client.write("GET /test HTTP/1.1\r\nHost: 127.0.0.1:" + to_string(server_port) + "\r\nConnection: close\r\n\r\n")
 
-# Read response
-var response = client.receive(1024)
-check_not_null("S02-02: received response", response)
-check("S02-03: response contains 200", response.find("200 OK", 0) != -1)
-check("S02-04: response contains body", response.find("hello from handler", 0) != -1)
+# Drive server until response data is available, with 5s timeout
+if !drive_until_data(client, 5000)
+    check("S02-02: received response (timed out after 5s)", false)
+    system.out.println("  Server did not respond in time — possible deadlock")
+else
+    var response = client.receive(1024)
+    check_not_null("S02-02: received response", response)
+    if response != null
+        check("S02-03: response contains 200", response.find("200 OK", 0) != -1)
+        check("S02-04: response contains body", response.find("hello from handler", 0) != -1)
+    end
+end
 check("S02-05: handler invoked", handler_called)
 check_eq("S02-06: handler received expected path", handler_path, "/test")
 
 client.close()
 
 # ============================================================
-# S03 -- 404 handling
+# S03 -- unmapped URL returns 403 (no wwwroot configured)
 # ============================================================
-section("S03: 404 handling")
+section("S03: unmapped URL handling")
+
+# Drive server to get worker back to accept state
+drive_server_cycles(5)
 
 var client2 = new tcp.socket
 client2.connect(tcp.endpoint("127.0.0.1", server_port))
@@ -125,9 +167,17 @@ check("S03-01: client connected", client2.is_open())
 
 client2.write("GET /nonexistent HTTP/1.1\r\nHost: 127.0.0.1:" + to_string(server_port) + "\r\nConnection: close\r\n\r\n")
 
-var response2 = client2.receive(1024)
-check_not_null("S03-02: received 404 response", response2)
-check("S03-03: response contains 404", response2.find("404", 0) != -1)
+# Drive server until response data is available, with 5s timeout
+if !drive_until_data(client2, 5000)
+    check("S03-02: received error response (timed out after 5s)", false)
+    system.out.println("  Server did not respond in time — possible deadlock")
+else
+    var response2 = client2.receive(1024)
+    check_not_null("S03-02: received error response", response2)
+    if response2 != null
+        check("S03-03: response contains 403 Forbidden", response2.find("403 Forbidden", 0) != -1)
+    end
+end
 
 client2.close()
 
@@ -139,11 +189,20 @@ section("S04: cleanup")
 server_running = false
 check("S04-01: server stop flag set", server_running == false)
 
-# Give fiber time to exit
+# Resume server fiber so it exits the polling loop
 server_fiber.resume()
 runtime.delay(50)
 async.poll_once()
 server_fiber = null
+
+# Release server's work_guard so async event loop can stop
+server.async_guard = null
+server = null
+
+# Drain remaining async events so process can exit cleanly
+while !async.stopped()
+    async.poll_once()
+end
 
 # Results
 system.out.println("")
