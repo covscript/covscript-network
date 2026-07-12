@@ -16,6 +16,8 @@ jobs:
   test:
     name: "${{ matrix.os }} / ${{ matrix.cs-channel }}"
     runs-on: ${{ matrix.os }}
+    env:
+      DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
     strategy:
       fail-fast: false
       matrix:
@@ -278,10 +280,8 @@ jobs:
       # 17. Run DeepSeek test (only when API key is available)             #
       # ------------------------------------------------------------------ #
       - name: Run DeepSeek test
-        if: ${{ secrets.DEEPSEEK_API_KEY != '' }}
+        if: ${{ env.DEEPSEEK_API_KEY != '' }}
         shell: bash
-        env:
-          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
         run: |
           set -e
           cs tests/test_deepseek.csc
