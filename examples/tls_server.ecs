@@ -21,11 +21,10 @@ end
 
 function wait_for(co, time)
     var start_time = runtime.time()
-    var result = null
     loop
         co.resume()
         runtime.delay(10)
-    until co.is_finished() || runtime.time() - start_time > time
+    until co.is_finished() || runtime.time() - start_time >= time
     return !co.is_finished()
 end
 

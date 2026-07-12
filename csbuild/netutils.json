@@ -3,9 +3,10 @@
     "Name": "netutils",
     "Info": "Network Utilities",
     "Author": "CovScript Organization",
-    "Version": "1.2.1",
+    "Version": "1.4",
     "Target": "netutils.csp",
     "Dependencies": [
+        "ecs",
         "network",
         "regex",
         "codec",

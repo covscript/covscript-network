@@ -5,7 +5,24 @@ import network.*, regex, curl
 import codec.json
 
 constant server_name = "CovScript-NetUtils"
-constant server_version = "1.2.1"
+constant server_version = "1.4"
+
+# ============================================================================
+# Configuration constants — override before use to adjust behavior
+# ============================================================================
+
+# HTTP client low-level I/O
+constant http_client_read_chunk = 8192            # bytes per recv() call
+constant http_max_header_line_size = 8192         # maximum request/status/header line
+constant http_max_header_size = 65536             # maximum complete header block
+constant http_max_body_size = 67108864            # maximum buffered HTTP body (64 MiB)
+
+# Framing protocol (must match C++ side NETWORK_FIXED_HEX_SIZE)
+constant framing_hex_size = 16                   # length of fixed-hex size header
+
+# Default ports (IANA-registered; override for non-standard deployments)
+constant default_http_port = 80
+constant default_https_port = 443
 
 # Internal Functions
 
@@ -15,6 +32,7 @@ var request_header_reg = regex.build_optimize("^([^:]*): ?(.*)$")
 namespace state_codes
     constant code_200 = "200 OK"
     constant code_400 = "400 Bad Request"
+    constant code_431 = "431 Request Header Fields Too Large"
     constant code_403 = "403 Forbidden"
     constant code_404 = "404 Not Found"
     constant code_408 = "408 Request Timeout"
@@ -73,7 +91,7 @@ function send_content(sock, content)
 end
 
 function receive_content(sock)
-    var state = async.read(sock, 16)
+    var state = async.read(sock, framing_hex_size)
     if !state.wait()
         log("Read content header failed: " + state.get_error())
         return null
@@ -89,7 +107,7 @@ end
 
 function receive_content_s(sock, timeout)
     var start_time = runtime.time()
-    var state = async.read(sock, 16)
+    var state = async.read(sock, framing_hex_size)
     if !state.wait_for(timeout)
         if state.has_done()
             log("Read content header failed: " + state.get_error())
@@ -240,6 +258,7 @@ class http_session
     # for handler
     var sock = null
     var write_response = async.write
+    var response_state = null
     # for multi-node setup
     var response = null
     function send_response(code, data, type)
@@ -253,7 +272,7 @@ class http_session
         resp.append("Content-Type: " + type + "\r\n")
         resp.append("\r\n")
         resp.append(data)
-        write_response(sock, resp)
+        response_state = write_response(sock, resp)
     end
     function serialize()
         var obj = json_value.make_object()
@@ -298,6 +317,7 @@ function create_http_session(request_header)
     if session.url.empty()
         session.url = "/"
     end
+    var has_content_length = false
     foreach line in request_header
         var match = request_header_reg.match(line)
         if !match.empty()
@@ -309,7 +329,23 @@ function create_http_session(request_header)
                     session.connection = match.str(2).tolower()
                 end
                 case "content-length"
-                    session.content_length = match.str(2) as integer
+                    if has_content_length
+                        return null
+                    end
+                    has_content_length = true
+                    try
+                        session.content_length = match.str(2) as integer
+                    catch e
+                        return null
+                    end
+                    if session.content_length < 0 || session.content_length > http_max_body_size
+                        return null
+                    end
+                end
+                case "transfer-encoding"
+                    # Chunked request bodies are not implemented. Ignoring this
+                    # header would leave bytes to be parsed as a new request.
+                    return null
                 end
             end
         end
@@ -320,11 +356,11 @@ function create_http_session(request_header)
     return move(session)
 end
 
-function read_http_header(sock, keep_alive_timeout)
+function read_http_header(sock, state, keep_alive_timeout)
     # Read HTTP headers
     var header = new array
     var error_code = null
-    var state = new async.state
+    var header_size = 0
     loop
         async.read_until(sock, state, "\r\n")
         var timeout = keep_alive_timeout - runtime.time()
@@ -347,7 +383,14 @@ function read_http_header(sock, keep_alive_timeout)
             end
             break
         end
-        var line = state.get_result().trim()
+        var raw_line = state.get_result()
+        header_size += raw_line.size
+        if raw_line.size > http_max_header_line_size || header_size > http_max_header_size
+            log("Read request header error: Header limit exceeded.")
+            error_code = state_codes.code_431
+            break
+        end
+        var line = raw_line.trim()
         if line.empty()
             break
         end
@@ -374,8 +417,8 @@ function read_http_header(sock, keep_alive_timeout)
     if session.connection == "keep-alive"
         sock.set_opt_keep_alive(true)
     end
-    # Read POST data if needed
-    if session.method == "POST"
+    # Consume framed request data for every method so keep-alive parsing stays aligned.
+    if session.content_length != null && session.content_length > 0
         session.post_data = state.get_buffer(session.content_length)
         var remaining = session.content_length - session.post_data.size
         while remaining > 0
@@ -421,7 +464,9 @@ function call_http_handler(session, server)
         var base_path = server->wwwroot_path
         var full_path = path_normalize(base_path + "/" + session.url)
         log("Resolved path: " + full_path)
-        if full_path.find(base_path, 0) == 0
+        # Boundary check: accept only exact match or base_path followed by '/'
+        # to prevent sibling-directory escape (e.g. www_evil matching root www).
+        if full_path == base_path || full_path.find(base_path + "/", 0) == 0
             if system.path.is_directory(full_path)
                 if full_path[-1] != '/'
                     full_path.append('/')
@@ -450,7 +495,7 @@ function call_http_handler(session, server)
         if server->url_map.exist(error_code)
             server->url_map[error_code](*server, session)
         else
-            async.write(sock, compose_response(error_code))
+            async.write(session.sock, compose_response(error_code))
         end
         return false
     else
@@ -482,13 +527,14 @@ function simple_worker(self)
         sock.set_opt_no_delay(true)
         var last_request_time = runtime.time()
         var request_count = 0
+        var read_state = new async.state
         loop
             if ++request_count >= self->server->max_keep_alive
                 log("Keep-alive exceeded max request count.")
                 async.write(sock, compose_response(state_codes.code_408))
                 break
             end
-            var session = read_http_header(sock, last_request_time + self->server->keep_alive_timeout)
+            var session = read_http_header(sock, read_state, last_request_time + self->server->keep_alive_timeout)
             if session == null
                 break
             end
@@ -497,18 +543,25 @@ function simple_worker(self)
             if !call_http_handler(session, self->server)
                 break
             end
+            if session.response_state != null && !session.response_state.wait()
+                log("Write response error: " + session.response_state.get_error())
+                break
+            end
             last_request_time = runtime.time()
             # Keep-Alive check
             if !sock.is_open() || session.connection == "close"
                 break
             end
         end
-        sock.safe_shutdown()
+        if !sock.safe_shutdown()
+            log("safe_shutdown returned false — async jobs may still be pending")
+        end
     end
 end
 
 struct http_conn
     var sock = null
+    var read_state = null
     # -1 = close, 0 = established, 1 = busy
     var state = 0
     var close = false
@@ -583,6 +636,7 @@ function master_accept_worker(self)
         sock.set_opt_no_delay(true)
         var conn = gcnew http_conn
         conn->sock = sock
+        conn->read_state = new async.state
         conn->last_request_time = runtime.time()
         self->server->conn_list.push_back(conn)
     end
@@ -612,9 +666,11 @@ function master_request_worker(self)
         end
         conn->state = 1
         var sock = conn->sock
-        var session = read_http_header(sock, conn->last_request_time + self->server->keep_alive_timeout)
+        var session = read_http_header(sock, conn->read_state, conn->last_request_time + self->server->keep_alive_timeout)
         if session == null
-            sock.safe_shutdown()
+            if !sock.safe_shutdown()
+                log("safe_shutdown returned false — async jobs may still be pending")
+            end
             conn->state = -1
             continue
         end
@@ -658,7 +714,14 @@ function master_response_worker(self)
         while !conn->request_queue.empty()
             link session = conn->request_queue.front
             if session != null && session.response != null
-                async.write(conn->sock, session.response)
+                var response_state = async.write(conn->sock, session.response)
+                if !response_state.wait()
+                    log("Write response error: " + response_state.get_error())
+                    conn->keep_alive = false
+                    conn->close = true
+                    conn->request_queue = new array
+                    break
+                end
                 conn->request_queue.pop_front()
                 --conn->request_idx
             else
@@ -670,7 +733,9 @@ function master_response_worker(self)
             if !conn->close
                 async.write(conn->sock, compose_response(state_codes.code_408))
             end
-            conn->sock.safe_shutdown()
+            if !conn->sock.safe_shutdown()
+                log("safe_shutdown returned false — async jobs may still be pending")
+            end
             conn->state = -1
         end
     end
@@ -725,7 +790,9 @@ function master_dispatch_worker(self)
                     node->state = 0
                 else
                     log("Heartbeat failed for worker rank " + node->rank)
-                    node->sock.safe_shutdown()
+                    if !node->sock.safe_shutdown()
+                        log("safe_shutdown returned false — async jobs may still be pending")
+                    end
                     node->state = -1
                 end
             end
@@ -747,7 +814,9 @@ function master_dispatch_worker(self)
             else
                 log("Read response failed for worker rank " + node->rank)
                 session.response = compose_response(error_code)
-                node->sock.safe_shutdown()
+                if !node->sock.safe_shutdown()
+                    log("safe_shutdown returned false — async jobs may still be pending")
+                end
                 node->state = -1
             end
         end
@@ -914,6 +983,484 @@ function parse_http_args(input)
 end
 
 var proxy = null, timeout_ms = null, low_speed_limit = null
+var ssl_verify = true
+
+# ===========================================================
+# OpenAI API Compatible Client
+# ===========================================================
+
+var http_url_reg = regex.build_optimize("^(?i)(https?)://([^/:]+)(?::([0-9]+))?(.*)$")
+var http_status_line_reg = regex.build_optimize("^HTTP/([0-9.]+) ([0-9]{3})(?: (.*))?$")
+var http_header_line_reg = regex.build_optimize("^([^:]+):\\s*(.*)$")
+var transfer_chunked_reg = regex.build_optimize(".*chunked.*")
+
+class http_client
+    var sock = null
+    var pending = ""
+    var tls_options = null
+
+    function set_tls_options(options)
+        tls_options = options
+    end
+
+    function close()
+        if sock != null && sock.is_open()
+            sock.close()
+        end
+    end
+
+    function parse_url(url)
+        var m = http_url_reg.match(url)
+        if m.empty()
+            return null
+        end
+        var scheme = m.str(1).tolower()
+        var host = m.str(2)
+        var port = (scheme == "http" ? default_http_port : default_https_port)
+        var port_str = m.str(3)
+        if port_str != null && !port_str.empty()
+            port = port_str as integer
+        end
+        var path = m.str(4)
+        if path == null || path.empty()
+            path = "/"
+        end
+        # Strip URL fragment (#...) per RFC 3986 §3.5
+        var frag_pos = path.find("#", 0)
+        if frag_pos != -1
+            path = path.substr(0, frag_pos)
+        end
+        if path.empty()
+            path = "/"
+        end
+        return {
+            "scheme": scheme,
+            "host": host,
+            "port": port,
+            "path": path
+        }.to_hash_map()
+    end
+
+    function connect_target(target)
+        close()
+        sock = new tcp.socket
+        pending = ""
+        try
+            var host = target["host"]
+            var port = target["port"]
+            var endpoints = tcp.resolve(host, to_string(port))
+            var connected = false
+            foreach ep in endpoints
+                try
+                    sock.connect(ep)
+                    connected = true
+                    break
+                catch e
+                    null
+                end
+            end
+            if !connected
+                return false
+            end
+            if target["scheme"] == "https"
+                sock.connect_ssl(host, tls_options)
+            end
+            sock.set_opt_no_delay(true)
+            return true
+        catch e
+            log("HTTP connect error: " + e.what)
+            close()
+            return false
+        end
+    end
+
+    function read_until_limited(delim, max_size)
+        loop
+            var pos = pending.find(delim, 0)
+            if pos != -1
+                if pos + delim.size > max_size
+                    return null
+                end
+                var data = pending.substr(0, pos + delim.size)
+                pending = pending.substr(pos + delim.size, pending.size - pos - delim.size)
+                return data
+            end
+            var chunk = null
+            try
+                chunk = sock.receive(http_client_read_chunk)
+            catch e
+                return null
+            end
+            if chunk == null || chunk.empty()
+                return null
+            end
+            pending.append(chunk)
+            if pending.size > max_size
+                return null
+            end
+        end
+    end
+
+    function read_until(delim)
+        return read_until_limited(delim, http_max_header_size)
+    end
+
+    function read_exact(total)
+        if total <= 0
+            return ""
+        end
+        if total > http_max_body_size
+            return null
+        end
+        var need = total
+        var out = new string
+        if pending.size > 0
+            var take = need
+            if pending.size < take
+                take = pending.size
+            end
+            out.append(pending.substr(0, take))
+            pending = pending.substr(take, pending.size - take)
+            need -= take
+        end
+        while need > 0
+            var step = need
+            if step > http_client_read_chunk
+                step = http_client_read_chunk
+            end
+            var chunk = null
+            try
+                chunk = sock.receive(step)
+            catch e
+                return null
+            end
+            if chunk == null || chunk.empty()
+                return null
+            end
+            out.append(chunk)
+            need -= chunk.size
+        end
+        return move(out)
+    end
+
+    function read_chunked_body()
+        var body = new string
+        var trailer_size = 0
+        loop
+            var line = read_until_limited("\r\n", http_max_header_line_size)
+            if line == null
+                return null
+            end
+            var size_str = line.trim()
+            var sc = size_str.find(";", 0)
+            if sc != -1
+                size_str = size_str.substr(0, sc).trim()
+            end
+            if size_str.empty() || size_str.size > 8
+                return null
+            end
+            foreach i in range(size_str.size)
+                if hex_char_to_int(size_str.substr(i, 1)) < 0
+                    return null
+                end
+            end
+            var chunk_size = hex_to_int(size_str)
+            if chunk_size == 0
+                loop
+                    var trailer = read_until_limited("\r\n", http_max_header_line_size)
+                    if trailer == null
+                        return null
+                    end
+                    trailer_size += trailer.size
+                    if trailer_size > http_max_header_size
+                        return null
+                    end
+                until trailer.trim().empty()
+                break
+            end
+            if chunk_size > http_max_body_size - body.size
+                return null
+            end
+            var chunk = read_exact(chunk_size)
+            if chunk == null
+                return null
+            end
+            body.append(chunk)
+            if read_exact(2) == null
+                return null
+            end
+        end
+        return move(body)
+    end
+
+    function parse_response_headers(headers_raw)
+        var lines = headers_raw.split({'\n'})
+        if lines.empty()
+            return null
+        end
+        var status_line = lines[0].trim()
+        var sm = http_status_line_reg.match(status_line)
+        if sm.empty()
+            return null
+        end
+        var headers = new hash_map
+        foreach i in range(lines.size)
+            if i == 0
+                continue
+            end
+            var line = lines[i].trim()
+            if line.empty()
+                continue
+            end
+            var hm = http_header_line_reg.match(line)
+            if !hm.empty()
+                var header_name = hm.str(1).tolower()
+                if headers.exist(header_name) && (header_name == "content-length" || header_name == "transfer-encoding")
+                    return null
+                end
+                headers[header_name] = hm.str(2).trim()
+            end
+        end
+        var content_length = -1
+        if headers.exist("content-length")
+            try
+                content_length = headers["content-length"] as integer
+            catch e
+                return null
+            end
+            if content_length < 0 || content_length > http_max_body_size
+                return null
+            end
+        end
+        var is_chunked = false
+        if headers.exist("transfer-encoding")
+            if !transfer_chunked_reg.match(headers["transfer-encoding"].tolower()).empty()
+                is_chunked = true
+            else
+                return null
+            end
+        end
+        if is_chunked && headers.exist("content-length")
+            return null
+        end
+        return {
+            "status_code": sm.str(2) as integer,
+            "headers": headers,
+            "content_length": content_length,
+            "is_chunked": is_chunked
+        }.to_hash_map()
+    end
+
+    function read_body(meta)
+        var resp_body = ""
+        if meta["is_chunked"]
+            resp_body = read_chunked_body()
+        else
+            if meta["content_length"] > 0
+                resp_body = read_exact(meta["content_length"])
+            else
+                if meta["content_length"] == 0
+                    resp_body = ""
+                else
+                    var body_buf = new string
+                    body_buf.append(pending)
+                    pending = ""
+                    loop
+                        var chunk = null
+                        try
+                            chunk = sock.receive(http_client_read_chunk)
+                        catch e
+                            break
+                        end
+                        if chunk == null || chunk.empty()
+                            break
+                        end
+                        if body_buf.size > http_max_body_size - chunk.size
+                            return null
+                        end
+                        body_buf.append(chunk)
+                    end
+                    resp_body = move(body_buf)
+                end
+            end
+        end
+        if resp_body == null
+            log("HTTP read body error.")
+            return null
+        end
+        return resp_body
+    end
+
+    function http_request(method, url, headers, body)
+        var target = parse_url(url)
+        if target == null
+            log("HTTP URL parse error: " + url)
+            return null
+        end
+        var req_body = (body == null ? "" : body)
+        if req_body.size > http_max_body_size || method.find("\r", 0) != -1 || method.find("\n", 0) != -1 ||
+            target["host"].find("\r", 0) != -1 || target["host"].find("\n", 0) != -1 ||
+            target["path"].find("\r", 0) != -1 || target["path"].find("\n", 0) != -1
+            log("HTTP request rejected: Invalid request metadata or body size.")
+            return null
+        end
+        foreach hdr in headers
+            if hdr.find("\r", 0) != -1 || hdr.find("\n", 0) != -1
+                log("HTTP request rejected: Header contains a line break.")
+                return null
+            end
+            var colon = hdr.find(":", 0)
+            if colon <= 0
+                log("HTTP request rejected: Malformed header.")
+                return null
+            end
+            var header_name = hdr.substr(0, colon).trim().tolower()
+            if header_name == "host" || header_name == "content-length" || header_name == "transfer-encoding" || header_name == "connection"
+                log("HTTP request rejected: Framing header is managed internally.")
+                return null
+            end
+        end
+        if !connect_target(target)
+            log("HTTP connect error: no reachable endpoint for " + target["host"] + ":" + to_string(target["port"]))
+            return null
+        end
+        var host_header = target["host"]
+        if (target["scheme"] == "http" && target["port"] != default_http_port) ||
+            (target["scheme"] == "https" && target["port"] != default_https_port)
+            host_header = host_header + ":" + to_string(target["port"])
+        end
+        var req = method + " " + target["path"] + " HTTP/1.1\r\n"
+        req.append("Host: " + host_header + "\r\n")
+        foreach hdr in headers
+            req.append(hdr + "\r\n")
+        end
+        req.append("Content-Length: " + to_string(req_body.size) + "\r\n")
+        req.append("Connection: close\r\n")
+        req.append("\r\n")
+        req.append(req_body)
+        try
+            sock.write(req)
+        catch e
+            log("HTTP write error: " + e.what)
+            close()
+            return null
+        end
+
+        var headers_raw = read_until_limited("\r\n\r\n", http_max_header_size)
+        if headers_raw == null
+            log("HTTP read headers error.")
+            close()
+            return null
+        end
+
+        var meta = parse_response_headers(headers_raw)
+        if meta == null
+            log("HTTP parse headers error.")
+            close()
+            return null
+        end
+
+        var resp_body = read_body(meta)
+        close()
+        if resp_body == null
+            return null
+        end
+        return {
+            "status_code": meta["status_code"],
+            "headers": meta["headers"],
+            "body": resp_body
+        }.to_hash_map()
+    end
+
+    function post(url, headers, body)
+        return http_request("POST", url, headers, body)
+    end
+end
+
+class openai_client extends http_client
+    var api_key = null
+    var api_base = "https://api.openai.com/v1"
+    var model = "gpt-4o-mini"
+
+    function set_api_key(key)
+        api_key = key
+    end
+
+    function set_base(url)
+        api_base = url
+    end
+
+    function set_model(name)
+        model = name
+    end
+
+    function message(role, content)
+        return {"role": role, "content": content}.to_hash_map()
+    end
+
+    function request(endpoint, payload)
+        if api_key == null || api_key.empty()
+            log("OpenAI: api_key not set. Call client.set_api_key() first.")
+            return null
+        end
+        var path_str = endpoint
+        if path_str == null || path_str.empty()
+            path_str = "/chat/completions"
+        else if path_str.find("/", 0) != 0
+            path_str = "/" + path_str
+        end
+
+        var base = api_base
+        if base == null || base.empty()
+            base = "https://api.openai.com/v1"
+        end
+        if base[-1] == '/'
+            base.cut(1)
+        end
+
+        var full_url = base + path_str
+        var headers = {
+            "Authorization: Bearer " + api_key,
+            "Content-Type: application/json",
+            "Accept: application/json"
+        }
+        var body = json.to_string(json.from_var(payload))
+        var resp = this.post(full_url, headers, body)
+        if resp == null
+            return null
+        end
+        var raw = resp["body"]
+        if raw == null || raw.empty()
+            return null
+        end
+        try
+            return json.to_var(json.from_string(raw))
+        catch e
+            log("OpenAI JSON parse error: " + e.what)
+            return null
+        end
+    end
+
+    function chat(messages)
+        var payload = {
+            "model": model,
+            "messages": messages
+        }.to_hash_map()
+        return request("/chat/completions", payload)
+    end
+
+    function chat_text(messages)
+        var response = chat(messages)
+        if response == null || !response.exist("choices") || response.choices.empty()
+            return null
+        end
+        var choice = response.choices[0]
+        if !choice.exist("message") || !choice.message.exist("content")
+            return null
+        end
+        return choice.message.content
+    end
+end
 
 function http_get(url)
     var buff = new iostream.char_buff
@@ -923,8 +1470,10 @@ function http_get(url)
     if proxy != null
         session.set_proxy(proxy)
     end
-    session.set_ssl_verify_host(false)
-    session.set_ssl_verify_peer(false)
+    if !ssl_verify
+        session.set_ssl_verify_host(false)
+        session.set_ssl_verify_peer(false)
+    end
     if timeout_ms != null
         session.set_connect_timeout_ms(timeout_ms)
         session.set_accept_timeout_ms(timeout_ms)
@@ -950,8 +1499,10 @@ function http_post(url, post_fields)
     end
     session.set_http_post(true)
     session.set_http_post_fields(post_fields)
-    session.set_ssl_verify_host(false)
-    session.set_ssl_verify_peer(false)
+    if !ssl_verify
+        session.set_ssl_verify_host(false)
+        session.set_ssl_verify_peer(false)
+    end
     if timeout_ms != null
         session.set_connect_timeout_ms(timeout_ms)
         session.set_accept_timeout_ms(timeout_ms)

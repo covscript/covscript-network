@@ -1,0 +1,11 @@
+{
+    "Type": "Package",
+    "Name": "argparse.csym",
+    "Info": "Argument Parser cSYM Module",
+    "Author": "CovScript Organization",
+    "Version": "1.0",
+    "Target": "argparse.csym",
+    "Dependencies": [
+        "argparse"
+    ]
+}

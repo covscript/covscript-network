@@ -9,7 +9,65 @@ function send_content(sock, content)
 end
 
 function receive_content(sock)
-    return sock.read(from_fixed_hex(sock.read(16)))
+    var state = async.read(sock, 16)
+    if !state.wait()
+        throw runtime.exception("TLS Read Error: " + state.get_error())
+    end
+    var size = from_fixed_hex(state.get_result())
+    state = async.read(sock, size)
+    if !state.wait()
+        throw runtime.exception("TLS Read Error: " + state.get_error())
+    end
+    return state.get_result()
+end
+
+# Concatenate two bytes_arrays
+function bytes_concat(a, b)
+    return gmssl.bytes_encode(gmssl.bytes_decode(a) + gmssl.bytes_decode(b))
+end
+
+# Derive encryption key and MAC key from ECDH shared secret
+function derive_keys(shared_secret)
+    var enc_key = gmssl.sm3(bytes_concat(gmssl.bytes_encode("tls_enc_key"), shared_secret))
+    var mac_key = gmssl.sm3(bytes_concat(gmssl.bytes_encode("tls_mac_key"), shared_secret))
+    var keys = new hash_map
+    keys["enc_key"] = gmssl.bytes_encode(gmssl.bytes_decode(enc_key).substr(0, gmssl.sm4_key_size))
+    keys["mac_key"] = mac_key
+    return keys
+end
+
+# Encrypt and authenticate a message: IV || Ciphertext || MAC (hex-encoded, '|' separated)
+function encrypt_message(enc_key, mac_key, plaintext)
+    var iv = gmssl.rand_bytes(gmssl.sm4_key_size)
+    var ciphertext = gmssl.sm4(gmssl.sm4_mode.ctr_encrypt, enc_key, iv, gmssl.bytes_encode(plaintext))
+    var mac = gmssl.sm3_hmac(mac_key, bytes_concat(iv, ciphertext))
+    return gmssl.bytes_decode(gmssl.hex_encode(iv)) + "|" + gmssl.bytes_decode(gmssl.hex_encode(ciphertext)) + "|" + gmssl.bytes_decode(gmssl.hex_encode(mac))
+end
+
+# Decrypt and verify a message
+function decrypt_message(enc_key, mac_key, payload)
+    var parts = payload.split({'|'})
+    if parts.size < 3
+        throw runtime.exception("TLS invalid encrypted message format")
+    end
+    var iv = gmssl.hex_decode(gmssl.bytes_encode(parts[0]))
+    var ciphertext = gmssl.hex_decode(gmssl.bytes_encode(parts[1]))
+    var mac = gmssl.hex_decode(gmssl.bytes_encode(parts[2]))
+    var expected_mac = gmssl.sm3_hmac(mac_key, bytes_concat(iv, ciphertext))
+    if gmssl.hex_encode(expected_mac) != gmssl.hex_encode(mac)
+        throw runtime.exception("TLS MAC verification failed")
+    end
+    return gmssl.bytes_decode(gmssl.sm4(gmssl.sm4_mode.ctr_decrypt, enc_key, iv, ciphertext))
+end
+
+# Send encrypted message with IV and MAC
+function send_encrypted(sock, enc_key, mac_key, plaintext)
+    send_content(sock, encrypt_message(enc_key, mac_key, plaintext))
+end
+
+# Receive and decrypt message with MAC verification
+function receive_encrypted(sock, enc_key, mac_key)
+    return decrypt_message(enc_key, mac_key, receive_content(sock))
 end
 
 class server
@@ -18,7 +76,8 @@ class server
     var vkeypass = null
     var sock = null
     var acpt = null
-    var session_id = null
+    var enc_key = null
+    var mac_key = null
     var send_buff = new array
     var recv_buff = new array
     var close_flag = false
@@ -39,8 +98,8 @@ class server
     # integer port: Port to be listened.
 
     function listen(pkey_path, vkey_path, keypass, addr, port)
-        pkey = gmssl.sm2_pem_read(pkey_path)
-        vkey = gmssl.sm2_pem_read(vkey_path)
+        pkey = gmssl.sm2_pem_read(pkey_path, gmssl.pem_name_pbk)
+        vkey = gmssl.sm2_pem_read(vkey_path, gmssl.pem_name_pvk)
         vkeypass = keypass
         sock = new tcp.socket
         acpt = tcp.acceptor(tcp.endpoint(addr, port))
@@ -72,9 +131,27 @@ class server
                 throw runtime.exception("TLS unknown response: " + response)
             end
         end
-        session_id = gmssl.sm2_decrypt(vkey, vkeypass, gmssl.base64_decode(gmssl.bytes_encode(receive_content(sock))))
-        var session_id_digest = gmssl.bytes_decode(gmssl.base64_encode(gmssl.sm3(session_id)))
-        send_content(sock, session_id_digest)
+
+        # ECDH key exchange: receive client's ephemeral public key
+        _log("Performing ECDH key exchange...")
+        var client_ephemeral_pubkey = gmssl.base64_decode(gmssl.bytes_encode(receive_content(sock)))
+
+        # Generate server's ephemeral key pair and compute shared secret
+        var (server_ephemeral_pubkey, server_ephemeral_privkey) = gmssl.sm2_key_generate(vkeypass)
+        var shared_secret = gmssl.sm2_ecdh(server_ephemeral_privkey, vkeypass, client_ephemeral_pubkey)
+
+        # Send server's ephemeral public key to client
+        send_content(sock, gmssl.bytes_decode(gmssl.base64_encode(server_ephemeral_pubkey)))
+
+        # Derive session keys
+        var keys = derive_keys(shared_secret)
+        enc_key = keys["enc_key"]
+        mac_key = keys["mac_key"]
+
+        # Verify handshake with challenge-response
+        var challenge = receive_encrypted(sock, enc_key, mac_key)
+        send_encrypted(sock, enc_key, mac_key, gmssl.bytes_decode(gmssl.sm3(gmssl.bytes_encode(challenge))))
+
         response = receive_content(sock)
         switch response
             case "TLS_HANDSHAKE_SUCCESS"
@@ -93,21 +170,19 @@ class server
     end
 
     function sync()
-        _log("Retrieving transmission password...")
-        var pass = gmssl.sm2_decrypt(vkey, vkeypass, gmssl.base64_decode(gmssl.bytes_encode(receive_content(sock))))
         _log("Sending server side information...")
         var s_head = json.to_string(json.from_var({"send_size": send_buff.size, "close_flag": close_flag}.to_hash_map()))
-        send_content(sock, gmssl.bytes_decode(gmssl.base64_encode(gmssl.sm4(gmssl.sm4_mode.ctr_encrypt, pass, session_id, gmssl.bytes_encode(s_head)))))
+        send_encrypted(sock, enc_key, mac_key, s_head)
         _log("Receiving client side information...")
-        var c_head = json.to_var(json.from_string(gmssl.bytes_decode(gmssl.sm4(gmssl.sm4_mode.ctr_decrypt, pass, session_id, gmssl.base64_decode(gmssl.bytes_encode(receive_content(sock)))))))
+        var c_head = json.to_var(json.from_string(receive_encrypted(sock, enc_key, mac_key)))
         foreach i in range(send_buff.size)
             _log("Sending data from buffer...")
-            send_content(sock, gmssl.bytes_decode(gmssl.base64_encode(gmssl.sm4(gmssl.sm4_mode.ctr_encrypt, pass, session_id, gmssl.bytes_encode(send_buff[i])))))
+            send_encrypted(sock, enc_key, mac_key, send_buff[i])
         end
         send_buff = new array
         foreach i in range(c_head.send_size)
             _log("Receiving data to buffer...")
-            recv_buff.push_back(gmssl.bytes_decode(gmssl.sm4(gmssl.sm4_mode.ctr_decrypt, pass, session_id, gmssl.base64_decode(gmssl.bytes_encode(receive_content(sock))))))
+            recv_buff.push_back(receive_encrypted(sock, enc_key, mac_key))
         end
         if close_flag || c_head.close_flag
             _log("Closing pipe...")
@@ -162,7 +237,8 @@ class client
     var pkey = null
     var sock = null
     var authorized_keys = new hash_set
-    var session_id = null
+    var enc_key = null
+    var mac_key = null
     var send_buff = new array
     var recv_buff = new array
     var close_flag = false
@@ -193,14 +269,34 @@ class client
         end
         send_content(sock, "TLS_AUTH_SUCCESS")
         _log("Authentication succeed.")
-        session_id = gmssl.rand_bytes(gmssl.sm4_key_size)
-        send_content(sock, gmssl.bytes_decode(gmssl.base64_encode(gmssl.sm2_encrypt(pkey, session_id))))
-        var session_id_digest1 = receive_content(sock)
-        var session_id_digest2 = gmssl.bytes_decode(gmssl.base64_encode(gmssl.sm3(session_id)))
-        if session_id_digest1 != session_id_digest2
+
+        # ECDH key exchange: generate ephemeral key pair
+        _log("Performing ECDH key exchange...")
+        var (client_ephemeral_pubkey, client_ephemeral_privkey) = gmssl.sm2_key_generate("")
+
+        # Send client's ephemeral public key to server
+        send_content(sock, gmssl.bytes_decode(gmssl.base64_encode(client_ephemeral_pubkey)))
+
+        # Receive server's ephemeral public key
+        var server_ephemeral_pubkey = gmssl.base64_decode(gmssl.bytes_encode(receive_content(sock)))
+
+        # Compute shared secret
+        var shared_secret = gmssl.sm2_ecdh(client_ephemeral_privkey, "", server_ephemeral_pubkey)
+
+        # Derive session keys
+        var keys = derive_keys(shared_secret)
+        enc_key = keys["enc_key"]
+        mac_key = keys["mac_key"]
+
+        # Verify handshake with challenge-response
+        var challenge = gmssl.bytes_decode(gmssl.hex_encode(gmssl.rand_bytes(32)))
+        send_encrypted(sock, enc_key, mac_key, challenge)
+        var expected = gmssl.bytes_decode(gmssl.sm3(gmssl.bytes_encode(challenge)))
+        var response = receive_encrypted(sock, enc_key, mac_key)
+        if response != expected
             send_content(sock, "TLS_HANDSHAKE_FAILED")
             sock.close()
-            _log("Authentication failed.")
+            _log("Handshake failed.")
             return false
         end
         send_content(sock, "TLS_HANDSHAKE_SUCCESS")
@@ -208,21 +304,18 @@ class client
     end
 
     function sync()
-        _log("Sending transmission password...")
-        var pass = gmssl.rand_bytes(gmssl.sm4_key_size)
-        send_content(sock, gmssl.bytes_decode(gmssl.base64_encode(gmssl.sm2_encrypt(pkey, pass))))
-        _log("Receiving client side information...")
-        var s_head = json.to_var(json.from_string(gmssl.bytes_decode(gmssl.sm4(gmssl.sm4_mode.ctr_decrypt, pass, session_id, gmssl.base64_decode(gmssl.bytes_encode(receive_content(sock)))))))
-        _log("Sending server side information...")
+        _log("Receiving server side information...")
+        var s_head = json.to_var(json.from_string(receive_encrypted(sock, enc_key, mac_key)))
+        _log("Sending client side information...")
         var c_head = json.to_string(json.from_var({"send_size": send_buff.size, "close_flag": close_flag}.to_hash_map()))
-        send_content(sock, gmssl.bytes_decode(gmssl.base64_encode(gmssl.sm4(gmssl.sm4_mode.ctr_encrypt, pass, session_id, gmssl.bytes_encode(c_head)))))
+        send_encrypted(sock, enc_key, mac_key, c_head)
         foreach i in range(s_head.send_size)
             _log("Receiving data to buffer...")
-            recv_buff.push_back(gmssl.bytes_decode(gmssl.sm4(gmssl.sm4_mode.ctr_decrypt, pass, session_id, gmssl.base64_decode(gmssl.bytes_encode(receive_content(sock))))))
+            recv_buff.push_back(receive_encrypted(sock, enc_key, mac_key))
         end
         foreach i in range(send_buff.size)
             _log("Sending data from buffer...")
-            send_content(sock, gmssl.bytes_decode(gmssl.base64_encode(gmssl.sm4(gmssl.sm4_mode.ctr_encrypt, pass, session_id, gmssl.bytes_encode(send_buff[i])))))
+            send_encrypted(sock, enc_key, mac_key, send_buff[i])
         end
         send_buff = new array
         if s_head.close_flag || close_flag

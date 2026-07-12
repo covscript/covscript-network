@@ -203,9 +203,16 @@ class ArgumentParser
                     args_arr[args_idx++]->value = args[idx]
                 end
             else
+                var next_key = filter(args[idx], [](ch)->(!ch.isspace()&&!ch.iscntrl()))
+                if args[idx].find("-", 0) == 0 && opts_map.exist(next_key)
+                    throw runtime.exception("ArgumentParser: option \"" + key + "\" requires a value.")
+                end
                 opts_map[key]->value = args[idx]
                 read_val = false
             end
+        end
+        if read_val
+            throw runtime.exception("ArgumentParser: option \"" + key + "\" requires a value.")
         end
         var result_map = new hash_map
         foreach it in args_arr

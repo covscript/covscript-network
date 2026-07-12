@@ -1,0 +1,305 @@
+# CI for covscript-network extension.
+
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: "${{ matrix.os }} / ${{ matrix.cs-channel }}"
+    runs-on: ${{ matrix.os }}
+    env:
+      DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-2022]
+        cs-channel: [release, nightly]
+
+    steps:
+      # ------------------------------------------------------------------ #
+      # 1. Check out this extension repo                                    #
+      # ------------------------------------------------------------------ #
+      - name: Checkout extension
+        uses: actions/checkout@v5
+
+      # ------------------------------------------------------------------ #
+      # 2. Set platform identifiers                                         #
+      # ------------------------------------------------------------------ #
+      - name: Set platform identifiers
+        id: platform
+        shell: bash
+        run: |
+          case "${{ runner.os }}" in
+            Linux)   echo "os=ubuntu" >> "$GITHUB_OUTPUT"
+                     echo "arch=x86_64" >> "$GITHUB_OUTPUT"
+                     echo "cspkg_arch=amd64" >> "$GITHUB_OUTPUT"
+                     echo "cspkg_arch_dir=ubuntu/x86_64" >> "$GITHUB_OUTPUT" ;;
+            macOS)   echo "os=macos" >> "$GITHUB_OUTPUT"
+                     echo "arch=arm64" >> "$GITHUB_OUTPUT"
+                     echo "cspkg_arch=arm64" >> "$GITHUB_OUTPUT"
+                     echo "cspkg_arch_dir=darwin/arm64" >> "$GITHUB_OUTPUT" ;;
+            Windows) echo "os=windows" >> "$GITHUB_OUTPUT"
+                     echo "arch=x86_64" >> "$GITHUB_OUTPUT"
+                     echo "cspkg_arch=amd64" >> "$GITHUB_OUTPUT"
+                     echo "cspkg_arch_dir=windows-ucrt/amd64" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      # ------------------------------------------------------------------ #
+      # 3. Determine release tag                                            #
+      # ------------------------------------------------------------------ #
+      - name: Determine csbuild release
+        id: cs-release
+        shell: bash
+        run: |
+          if [ "${{ matrix.cs-channel }}" = "release" ]; then
+            echo "tag=${{ steps.platform.outputs.os }}-schedule-release" >> "$GITHUB_OUTPUT"
+            echo "suffix=" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${{ steps.platform.outputs.os }}-schedule" >> "$GITHUB_OUTPUT"
+            echo "suffix=-nightly" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ------------------------------------------------------------------ #
+      # 4. Download & extract covscript SDK + cspkg repo                    #
+      # ------------------------------------------------------------------ #
+      - name: Download covscript SDK
+        id: sdk
+        shell: bash
+        run: |
+          TAG="${{ steps.cs-release.outputs.tag }}"
+          ARCH="${{ steps.platform.outputs.arch }}"
+          OS="${{ steps.platform.outputs.os }}"
+          SUFFIX="${{ steps.cs-release.outputs.suffix }}"
+          BASE="https://github.com/covscript/csbuild/releases/download/${TAG}"
+          COV="covscript-${OS}-${ARCH}${SUFFIX}.7z"
+          PKG="cspkg-${OS}-${ARCH}${SUFFIX}.7z"
+
+          echo "Downloading ${COV}..."
+          curl -fsSL -o covscript.7z "${BASE}/${COV}"
+          echo "Downloading ${PKG}..."
+          curl -fsSL -o cspkg.7z "${BASE}/${PKG}"
+
+          7z x covscript.7z -y
+          mv build covscript-home
+          7z x cspkg.7z -y
+
+          CS_HOME="${{ github.workspace }}/covscript-home"
+          CS_HOME="${CS_HOME//\\//}"
+          echo "cs_home=${CS_HOME}" >> "$GITHUB_OUTPUT"
+
+          echo "=== covscript-home ==="
+          ls -la covscript-home/
+          echo "=== covscript-home/bin ==="
+          ls -la covscript-home/bin/
+          echo "=== cspkg-repo ==="
+          ls -la cspkg-repo/
+
+      # ------------------------------------------------------------------ #
+      # 5. Configure cspkg                                                  #
+      # ------------------------------------------------------------------ #
+      - name: Configure cspkg
+        shell: bash
+        run: |
+          mkdir -p "$HOME/.cspkg"
+
+          CS_HOME="${{ steps.sdk.outputs.cs_home }}"
+          WS="${{ github.workspace }}"
+          WS="${WS//\\//}"
+
+          if [[ "$WS" =~ ^[A-Za-z]:/ ]]; then
+            SOURCE_URL="file:///${WS}/cspkg-repo/"
+          else
+            SOURCE_URL="file://${WS}/cspkg-repo/"
+          fi
+
+          cat > "$HOME/.cspkg/config.json" << EOF
+          {
+            "arch": "${{ steps.platform.outputs.cspkg_arch }}",
+            "home": "${CS_HOME}",
+            "source": "${SOURCE_URL}",
+            "timeout_ms": 3000
+          }
+          EOF
+
+          echo "=== cspkg config ==="
+          cat "$HOME/.cspkg/config.json"
+
+      # ------------------------------------------------------------------ #
+      # 6. Persist environment for later steps                              #
+      # ------------------------------------------------------------------ #
+      - name: Setup environment
+        shell: bash
+        run: |
+          CS_HOME="${{ steps.sdk.outputs.cs_home }}"
+          echo "COVSCRIPT_HOME=${CS_HOME}" >> "$GITHUB_ENV"
+          echo "${CS_HOME}/bin" >> "$GITHUB_PATH"
+
+      # ------------------------------------------------------------------ #
+      # 7. Run cspkg install                                                #
+      # ------------------------------------------------------------------ #
+      - name: Run cspkg install
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" != "Windows" ]; then
+            chmod -R +x "$COVSCRIPT_HOME/bin/"
+          fi
+          cspkg install --import --yes
+          cspkg install ecs_bootstrap --yes
+          cspkg version
+          cspkg list
+
+      # ------------------------------------------------------------------ #
+      # 8. Setup MSYS2 + OpenSSL (Windows only)                            #
+      # ------------------------------------------------------------------ #
+      - name: Setup MSYS2
+        if: runner.os == 'Windows'
+        id: msys2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-toolchain
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-make
+            mingw-w64-ucrt-x86_64-openssl
+
+      # ------------------------------------------------------------------ #
+      # 9a. Build extension (Linux / macOS)                                #
+      # ------------------------------------------------------------------ #
+      - name: Build extension
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          CS_DEV_PATH: ${{ steps.sdk.outputs.cs_home }}/
+        run: bash csbuild/make.sh
+
+      # ------------------------------------------------------------------ #
+      # 9b. Build extension (Windows / MSYS2 UCRT64)                       #
+      # ------------------------------------------------------------------ #
+      - name: Build extension (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        env:
+          MSYS2_LOCATION: ${{ steps.msys2.outputs.msys2-location }}
+        run: |
+          export PATH="${{ steps.msys2.outputs.msys2-location }}/ucrt64/bin:${PATH}"
+          export CS_DEV_PATH="$(cygpath -u "${{ steps.sdk.outputs.cs_home }}")/"
+          bash csbuild/make.sh
+
+      # ------------------------------------------------------------------ #
+      # 10. Install built extension + packages                             #
+      # ------------------------------------------------------------------ #
+      - name: Install local build
+        shell: bash
+        run: |
+          cspkg build . --install
+          cspkg list
+
+      # ------------------------------------------------------------------ #
+      # 11. Run unit tests                                                 #
+      # ------------------------------------------------------------------ #
+      - name: Run unit tests
+        shell: bash
+        run: |
+          set -e
+          cs tests/test_url_parse.csc
+          cs tests/test_argparse.csc
+          cs tests/test_header_parser.csc
+          cs tests/test_utils.csc
+          cs tests/test_tcp_sync.csc
+          cs tests/test_openai_client.csc
+
+      # ------------------------------------------------------------------ #
+      # 12. Run UDP tests                                                  #
+      # ------------------------------------------------------------------ #
+      - name: Run UDP tests
+        shell: bash
+        run: |
+          set -e
+          cs tests/test_udp.csc
+
+      # ------------------------------------------------------------------ #
+      # 13. Run HTTP round-trip tests                                      #
+      # ------------------------------------------------------------------ #
+      - name: Run HTTP round-trip tests
+        shell: bash
+        run: |
+          set -e
+          cs tests/test_http_roundtrip.csc
+          cs tests/test_http_server.csc
+
+      # ------------------------------------------------------------------ #
+      # 14. Run fiber + socket tests                                       #
+      # ------------------------------------------------------------------ #
+      - name: Run fiber socket tests
+        shell: bash
+        run: |
+          set -e
+          cs tests/test_fiber_socket.csc
+
+      # ------------------------------------------------------------------ #
+      # 15. Run async TCP test                                             #
+      # ------------------------------------------------------------------ #
+      - name: Run async TCP test
+        shell: bash
+        run: |
+          set -e
+          cs tests/test_async_tcp.csc
+
+      # ------------------------------------------------------------------ #
+      # 16. Run integration tests                                          #
+      # ------------------------------------------------------------------ #
+      - name: Run integration tests
+        shell: bash
+        run: |
+          set -e
+          cs tests/test_tls_trust.csc
+          cs tests/test_tls_errors.csc
+
+      # ------------------------------------------------------------------ #
+      # 16b. Run TLS custom trust mode test (self-signed cert)            #
+      # ------------------------------------------------------------------ #
+      - name: Run TLS custom trust mode test
+        shell: bash
+        run: |
+          set -e
+          # MSYS2/MinGW converts /CN= to a Windows path; //CN= prevents this.
+          # Use the double-slash form only on Windows.
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            SUBJ='//CN=localhost'
+          else
+            SUBJ='/CN=localhost'
+          fi
+          openssl req -x509 -newkey rsa:2048 \
+            -keyout /tmp/test-key.pem -out /tmp/test-cert.pem \
+            -days 1 -nodes -subj "$SUBJ" 2>/dev/null
+          # Start a temporary TLS server presenting the self-signed cert
+          openssl s_server -cert /tmp/test-cert.pem -key /tmp/test-key.pem \
+            -port 19443 -www -quiet 2>/dev/null &
+          SERVER_PID=$!
+          # Ensure cleanup even if the test fails
+          trap 'kill $SERVER_PID 2>/dev/null || true' EXIT
+          # Give the server a moment to bind
+          sleep 1
+          # Run the custom trust mode test against the server
+          cs tests/test_tls_trust.csc localhost 19443 /tmp/test-cert.pem
+
+      # ------------------------------------------------------------------ #
+      # 17. Run DeepSeek test (only when API key is available)             #
+      # ------------------------------------------------------------------ #
+      - name: Run DeepSeek test
+        if: ${{ env.DEEPSEEK_API_KEY != '' }}
+        shell: bash
+        run: |
+          set -e
+          cs tests/test_deepseek.csc
