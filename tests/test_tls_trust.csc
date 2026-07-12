@@ -128,25 +128,40 @@ function run_trust_check(mode_name, options)
     end
 end
 
-# Test auto mode
-run_trust_check("auto", {"trust_mode": "auto"}.to_hash_map())
+var has_custom_ca = (ca_file != null && !ca_file.empty()) || (ca_path != null && !ca_path.empty())
 
-# Test openssl mode
-# Windows uses its own system certificate store (ROOT/CA/AuthRoot) via
-# load_windows_root_certs, not OpenSSL's set_default_verify_paths.
-# The "openssl" trust mode relies solely on OpenSSL defaults, which are
-# typically not configured on Windows — so we skip it there. The "auto"
-# mode already exercises Windows cert store loading.
-if system.is_platform_windows()
+if has_custom_ca
+    # When a custom CA file/path is provided, we are testing against a server
+    # that presents a self-signed certificate. Auto and openssl trust modes
+    # would reject this certificate by design, so we skip them here.
+    # They are tested separately against real-world servers in the other CI step.
     system.out.println("")
-    system.out.println("[Mode openssl] skipped (Windows uses system cert store, not OpenSSL defaults)")
+    system.out.println("[Mode auto] skipped (custom CA provided; auto trust tested separately)")
+    _skip += 1
+    system.out.println("")
+    system.out.println("[Mode openssl] skipped (custom CA provided; openssl trust tested separately)")
     _skip += 1
 else
-    run_trust_check("openssl", {"trust_mode": "openssl"}.to_hash_map())
+    # Test auto mode
+    run_trust_check("auto", {"trust_mode": "auto"}.to_hash_map())
+
+    # Test openssl mode
+    # Windows uses its own system certificate store (ROOT/CA/AuthRoot) via
+    # load_windows_root_certs, not OpenSSL's set_default_verify_paths.
+    # The "openssl" trust mode relies solely on OpenSSL defaults, which are
+    # typically not configured on Windows — so we skip it there. The "auto"
+    # mode already exercises Windows cert store loading.
+    if system.is_platform_windows()
+        system.out.println("")
+        system.out.println("[Mode openssl] skipped (Windows uses system cert store, not OpenSSL defaults)")
+        _skip += 1
+    else
+        run_trust_check("openssl", {"trust_mode": "openssl"}.to_hash_map())
+    end
 end
 
 # Test custom mode (only when ca_file/ca_path provided)
-if (ca_file != null && !ca_file.empty()) || (ca_path != null && !ca_path.empty())
+if has_custom_ca
     var custom_opts = {"trust_mode": "custom"}.to_hash_map()
     if ca_file != null && !ca_file.empty()
         custom_opts.insert("ca_file", ca_file)

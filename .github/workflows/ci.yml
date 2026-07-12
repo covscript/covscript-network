@@ -274,7 +274,16 @@ jobs:
           openssl req -x509 -newkey rsa:2048 \
             -keyout /tmp/test-key.pem -out /tmp/test-cert.pem \
             -days 1 -nodes -subj '/CN=localhost' 2>/dev/null
-          cs tests/test_tls_trust.csc localhost 443 /tmp/test-cert.pem
+          # Start a temporary TLS server presenting the self-signed cert
+          openssl s_server -cert /tmp/test-cert.pem -key /tmp/test-key.pem \
+            -port 19443 -www -quiet 2>/dev/null &
+          SERVER_PID=$!
+          # Ensure cleanup even if the test fails
+          trap 'kill $SERVER_PID 2>/dev/null || true' EXIT
+          # Give the server a moment to bind
+          sleep 1
+          # Run the custom trust mode test against the server
+          cs tests/test_tls_trust.csc localhost 19443 /tmp/test-cert.pem
 
       # ------------------------------------------------------------------ #
       # 17. Run DeepSeek test (only when API key is available)             #
