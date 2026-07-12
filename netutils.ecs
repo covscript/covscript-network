@@ -13,6 +13,9 @@ constant server_version = "1.4"
 
 # HTTP client low-level I/O
 constant http_client_read_chunk = 8192            # bytes per recv() call
+constant http_max_header_line_size = 8192         # maximum request/status/header line
+constant http_max_header_size = 65536             # maximum complete header block
+constant http_max_body_size = 67108864            # maximum buffered HTTP body (64 MiB)
 
 # Framing protocol (must match C++ side NETWORK_FIXED_HEX_SIZE)
 constant framing_hex_size = 16                   # length of fixed-hex size header
@@ -29,6 +32,7 @@ var request_header_reg = regex.build_optimize("^([^:]*): ?(.*)$")
 namespace state_codes
     constant code_200 = "200 OK"
     constant code_400 = "400 Bad Request"
+    constant code_431 = "431 Request Header Fields Too Large"
     constant code_403 = "403 Forbidden"
     constant code_404 = "404 Not Found"
     constant code_408 = "408 Request Timeout"
@@ -254,6 +258,7 @@ class http_session
     # for handler
     var sock = null
     var write_response = async.write
+    var response_state = null
     # for multi-node setup
     var response = null
     function send_response(code, data, type)
@@ -267,7 +272,7 @@ class http_session
         resp.append("Content-Type: " + type + "\r\n")
         resp.append("\r\n")
         resp.append(data)
-        write_response(sock, resp)
+        response_state = write_response(sock, resp)
     end
     function serialize()
         var obj = json_value.make_object()
@@ -312,6 +317,7 @@ function create_http_session(request_header)
     if session.url.empty()
         session.url = "/"
     end
+    var has_content_length = false
     foreach line in request_header
         var match = request_header_reg.match(line)
         if !match.empty()
@@ -323,7 +329,23 @@ function create_http_session(request_header)
                     session.connection = match.str(2).tolower()
                 end
                 case "content-length"
-                    session.content_length = match.str(2) as integer
+                    if has_content_length
+                        return null
+                    end
+                    has_content_length = true
+                    try
+                        session.content_length = match.str(2) as integer
+                    catch e
+                        return null
+                    end
+                    if session.content_length < 0 || session.content_length > http_max_body_size
+                        return null
+                    end
+                end
+                case "transfer-encoding"
+                    # Chunked request bodies are not implemented. Ignoring this
+                    # header would leave bytes to be parsed as a new request.
+                    return null
                 end
             end
         end
@@ -334,11 +356,11 @@ function create_http_session(request_header)
     return move(session)
 end
 
-function read_http_header(sock, keep_alive_timeout)
+function read_http_header(sock, state, keep_alive_timeout)
     # Read HTTP headers
     var header = new array
     var error_code = null
-    var state = new async.state
+    var header_size = 0
     loop
         async.read_until(sock, state, "\r\n")
         var timeout = keep_alive_timeout - runtime.time()
@@ -361,7 +383,14 @@ function read_http_header(sock, keep_alive_timeout)
             end
             break
         end
-        var line = state.get_result().trim()
+        var raw_line = state.get_result()
+        header_size += raw_line.size
+        if raw_line.size > http_max_header_line_size || header_size > http_max_header_size
+            log("Read request header error: Header limit exceeded.")
+            error_code = state_codes.code_431
+            break
+        end
+        var line = raw_line.trim()
         if line.empty()
             break
         end
@@ -388,8 +417,8 @@ function read_http_header(sock, keep_alive_timeout)
     if session.connection == "keep-alive"
         sock.set_opt_keep_alive(true)
     end
-    # Read POST data if needed
-    if session.method == "POST"
+    # Consume framed request data for every method so keep-alive parsing stays aligned.
+    if session.content_length != null && session.content_length > 0
         session.post_data = state.get_buffer(session.content_length)
         var remaining = session.content_length - session.post_data.size
         while remaining > 0
@@ -498,19 +527,24 @@ function simple_worker(self)
         sock.set_opt_no_delay(true)
         var last_request_time = runtime.time()
         var request_count = 0
+        var read_state = new async.state
         loop
             if ++request_count >= self->server->max_keep_alive
                 log("Keep-alive exceeded max request count.")
                 async.write(sock, compose_response(state_codes.code_408))
                 break
             end
-            var session = read_http_header(sock, last_request_time + self->server->keep_alive_timeout)
+            var session = read_http_header(sock, read_state, last_request_time + self->server->keep_alive_timeout)
             if session == null
                 break
             end
             # Call handler
             session.sock = sock
             if !call_http_handler(session, self->server)
+                break
+            end
+            if session.response_state != null && !session.response_state.wait()
+                log("Write response error: " + session.response_state.get_error())
                 break
             end
             last_request_time = runtime.time()
@@ -527,6 +561,7 @@ end
 
 struct http_conn
     var sock = null
+    var read_state = null
     # -1 = close, 0 = established, 1 = busy
     var state = 0
     var close = false
@@ -601,6 +636,7 @@ function master_accept_worker(self)
         sock.set_opt_no_delay(true)
         var conn = gcnew http_conn
         conn->sock = sock
+        conn->read_state = new async.state
         conn->last_request_time = runtime.time()
         self->server->conn_list.push_back(conn)
     end
@@ -630,7 +666,7 @@ function master_request_worker(self)
         end
         conn->state = 1
         var sock = conn->sock
-        var session = read_http_header(sock, conn->last_request_time + self->server->keep_alive_timeout)
+        var session = read_http_header(sock, conn->read_state, conn->last_request_time + self->server->keep_alive_timeout)
         if session == null
             if !sock.safe_shutdown()
                 log("safe_shutdown returned false — async jobs may still be pending")
@@ -678,7 +714,14 @@ function master_response_worker(self)
         while !conn->request_queue.empty()
             link session = conn->request_queue.front
             if session != null && session.response != null
-                async.write(conn->sock, session.response)
+                var response_state = async.write(conn->sock, session.response)
+                if !response_state.wait()
+                    log("Write response error: " + response_state.get_error())
+                    conn->keep_alive = false
+                    conn->close = true
+                    conn->request_queue = new array
+                    break
+                end
                 conn->request_queue.pop_front()
                 --conn->request_idx
             else
@@ -1031,10 +1074,13 @@ class http_client
         end
     end
 
-    function read_until(delim)
+    function read_until_limited(delim, max_size)
         loop
             var pos = pending.find(delim, 0)
             if pos != -1
+                if pos + delim.size > max_size
+                    return null
+                end
                 var data = pending.substr(0, pos + delim.size)
                 pending = pending.substr(pos + delim.size, pending.size - pos - delim.size)
                 return data
@@ -1049,12 +1095,22 @@ class http_client
                 return null
             end
             pending.append(chunk)
+            if pending.size > max_size
+                return null
+            end
         end
+    end
+
+    function read_until(delim)
+        return read_until_limited(delim, http_max_header_size)
     end
 
     function read_exact(total)
         if total <= 0
             return ""
+        end
+        if total > http_max_body_size
+            return null
         end
         var need = total
         var out = new string
@@ -1089,8 +1145,9 @@ class http_client
 
     function read_chunked_body()
         var body = new string
+        var trailer_size = 0
         loop
-            var line = read_until("\r\n")
+            var line = read_until_limited("\r\n", http_max_header_line_size)
             if line == null
                 return null
             end
@@ -1099,12 +1156,30 @@ class http_client
             if sc != -1
                 size_str = size_str.substr(0, sc).trim()
             end
-            var chunk_size = hex_to_int(size_str)
-            if chunk_size == 0
-                if read_until("\r\n") == null
+            if size_str.empty() || size_str.size > 8
+                return null
+            end
+            foreach i in range(size_str.size)
+                if hex_char_to_int(size_str.substr(i, 1)) < 0
                     return null
                 end
+            end
+            var chunk_size = hex_to_int(size_str)
+            if chunk_size == 0
+                loop
+                    var trailer = read_until_limited("\r\n", http_max_header_line_size)
+                    if trailer == null
+                        return null
+                    end
+                    trailer_size += trailer.size
+                    if trailer_size > http_max_header_size
+                        return null
+                    end
+                until trailer.trim().empty()
                 break
+            end
+            if chunk_size > http_max_body_size - body.size
+                return null
             end
             var chunk = read_exact(chunk_size)
             if chunk == null
@@ -1139,7 +1214,11 @@ class http_client
             end
             var hm = http_header_line_reg.match(line)
             if !hm.empty()
-                headers[hm.str(1).tolower()] = hm.str(2).trim()
+                var header_name = hm.str(1).tolower()
+                if headers.exist(header_name) && (header_name == "content-length" || header_name == "transfer-encoding")
+                    return null
+                end
+                headers[header_name] = hm.str(2).trim()
             end
         end
         var content_length = -1
@@ -1147,14 +1226,22 @@ class http_client
             try
                 content_length = headers["content-length"] as integer
             catch e
-                content_length = -1
+                return null
+            end
+            if content_length < 0 || content_length > http_max_body_size
+                return null
             end
         end
         var is_chunked = false
         if headers.exist("transfer-encoding")
             if !transfer_chunked_reg.match(headers["transfer-encoding"].tolower()).empty()
                 is_chunked = true
+            else
+                return null
             end
+        end
+        if is_chunked && headers.exist("content-length")
+            return null
         end
         return {
             "status_code": sm.str(2) as integer,
@@ -1188,6 +1275,9 @@ class http_client
                         if chunk == null || chunk.empty()
                             break
                         end
+                        if body_buf.size > http_max_body_size - chunk.size
+                            return null
+                        end
                         body_buf.append(chunk)
                     end
                     resp_body = move(body_buf)
@@ -1207,11 +1297,33 @@ class http_client
             log("HTTP URL parse error: " + url)
             return null
         end
+        var req_body = (body == null ? "" : body)
+        if req_body.size > http_max_body_size || method.find("\r", 0) != -1 || method.find("\n", 0) != -1 ||
+            target["host"].find("\r", 0) != -1 || target["host"].find("\n", 0) != -1 ||
+            target["path"].find("\r", 0) != -1 || target["path"].find("\n", 0) != -1
+            log("HTTP request rejected: Invalid request metadata or body size.")
+            return null
+        end
+        foreach hdr in headers
+            if hdr.find("\r", 0) != -1 || hdr.find("\n", 0) != -1
+                log("HTTP request rejected: Header contains a line break.")
+                return null
+            end
+            var colon = hdr.find(":", 0)
+            if colon <= 0
+                log("HTTP request rejected: Malformed header.")
+                return null
+            end
+            var header_name = hdr.substr(0, colon).trim().tolower()
+            if header_name == "host" || header_name == "content-length" || header_name == "transfer-encoding" || header_name == "connection"
+                log("HTTP request rejected: Framing header is managed internally.")
+                return null
+            end
+        end
         if !connect_target(target)
             log("HTTP connect error: no reachable endpoint for " + target["host"] + ":" + to_string(target["port"]))
             return null
         end
-        var req_body = (body == null ? "" : body)
         var host_header = target["host"]
         if (target["scheme"] == "http" && target["port"] != default_http_port) ||
             (target["scheme"] == "https" && target["port"] != default_https_port)
@@ -1234,7 +1346,7 @@ class http_client
             return null
         end
 
-        var headers_raw = read_until("\r\n\r\n")
+        var headers_raw = read_until_limited("\r\n\r\n", http_max_header_size)
         if headers_raw == null
             log("HTTP read headers error.")
             close()

@@ -46,8 +46,10 @@
 #include <string>
 #include <atomic>
 #include <memory>
+#include <mutex>
 #include <vector>
 #include <sstream>
+#include <stdexcept>
 #include <cstdlib>
 
 namespace cs_impl {
@@ -374,7 +376,7 @@ namespace cs_impl {
 
 			cs::var resolve(const std::string &host, const std::string &service)
 			{
-				static tcp::resolver resolver(get_io_context());
+				tcp::resolver resolver(get_io_context());
 				tcp::resolver::results_type results = resolver.resolve(host, service);
 				cs::var ret = cs::var::make<cs::array>();
 				cs::array &arr = ret.val<cs::array>();
@@ -385,9 +387,115 @@ namespace cs_impl {
 
 			class socket final {
 				tcp::socket sock;
+				asio::strand<asio::io_context::executor_type> tls_strand;
 				std::unique_ptr<asio::ssl::context> tls_ctx;
 				std::unique_ptr<asio::ssl::stream<tcp::socket &>> tls_stream;
 				std::string last_tls_trust_report = "trust_mode=unset; loaded=(none); failed=(none)";
+				mutable std::mutex tls_report_mutex;
+				std::atomic<bool> tls_enabled{false};
+				std::atomic<bool> exclusive_operation{false};
+				std::atomic<bool> read_operation{false};
+				std::atomic<bool> write_operation{false};
+
+				enum class io_direction { read, write };
+
+				bool try_begin_io_job() noexcept
+				{
+					if (exclusive_operation.load(std::memory_order_acquire))
+						return false;
+					async_jobs.fetch_add(1, std::memory_order_acq_rel);
+					if (exclusive_operation.load(std::memory_order_acquire)) {
+						async_jobs.fetch_sub(1, std::memory_order_release);
+						return false;
+					}
+					return true;
+				}
+
+				bool try_begin_io_job(io_direction direction) noexcept
+				{
+					auto &operation = direction == io_direction::read ? read_operation : write_operation;
+					bool expected = false;
+					if (!operation.compare_exchange_strong(expected, true,
+					                                       std::memory_order_acq_rel, std::memory_order_acquire))
+						return false;
+					if (!try_begin_io_job()) {
+						operation.store(false, std::memory_order_release);
+						return false;
+					}
+					return true;
+				}
+
+				void begin_io_job(io_direction direction)
+				{
+					auto &operation = direction == io_direction::read ? read_operation : write_operation;
+					bool expected = false;
+					if (!operation.compare_exchange_strong(expected, true,
+					                                       std::memory_order_acq_rel, std::memory_order_acquire))
+						throw std::runtime_error(direction == io_direction::read
+						                         ? "Another read operation is already pending on this socket."
+						                         : "Another write operation is already pending on this socket.");
+					if (!try_begin_io_job()) {
+						operation.store(false, std::memory_order_release);
+						throw std::runtime_error("Cannot start I/O while an exclusive socket operation is pending.");
+					}
+				}
+
+				void finish_io_job(io_direction direction) noexcept
+				{
+					async_jobs.fetch_sub(1, std::memory_order_release);
+					auto &operation = direction == io_direction::read ? read_operation : write_operation;
+					operation.store(false, std::memory_order_release);
+				}
+
+				class scoped_io_job {
+					socket &owner;
+					io_direction direction;
+
+				public:
+					scoped_io_job(socket &sock, io_direction operation_direction)
+						: owner(sock), direction(operation_direction)
+					{
+						owner.begin_io_job(direction);
+					}
+					~scoped_io_job()
+					{
+						owner.finish_io_job(direction);
+					}
+				};
+
+				void begin_exclusive_operation(const char *active_io_error)
+				{
+					bool expected_exclusive = false;
+					if (!exclusive_operation.compare_exchange_strong(expected_exclusive, true,
+					        std::memory_order_acq_rel, std::memory_order_acquire))
+						throw std::runtime_error("Another exclusive socket operation is already pending.");
+					std::size_t expected_jobs = 0;
+					if (!async_jobs.compare_exchange_strong(expected_jobs, 1,
+					                                        std::memory_order_acq_rel, std::memory_order_acquire)) {
+						exclusive_operation.store(false, std::memory_order_release);
+						throw std::runtime_error(active_io_error);
+					}
+				}
+
+				void end_exclusive_operation() noexcept
+				{
+					async_jobs.fetch_sub(1, std::memory_order_release);
+					exclusive_operation.store(false, std::memory_order_release);
+				}
+
+				class scoped_exclusive_operation {
+					socket &owner;
+
+				public:
+					scoped_exclusive_operation(socket &sock, const char *active_io_error) : owner(sock)
+					{
+						owner.begin_exclusive_operation(active_io_error);
+					}
+					~scoped_exclusive_operation()
+					{
+						owner.end_exclusive_operation();
+					}
+				};
 
 				void init_ssl(const std::string &host, const ssl_options &options)
 				{
@@ -400,31 +508,45 @@ namespace cs_impl {
 						throw std::runtime_error("TLS host verification requires peer verification.");
 					auto new_ctx = std::make_unique<asio::ssl::context>(asio::ssl::context::tls_client);
 					try {
-						last_tls_trust_report = detail::configure_client_context(*new_ctx, options);
-						detail::set_last_tls_trust_report(last_tls_trust_report);
+						auto report = detail::configure_client_context(*new_ctx, options);
+						{
+							std::lock_guard<std::mutex> lock(tls_report_mutex);
+							last_tls_trust_report = report;
+						}
+						detail::set_last_tls_trust_report(report);
 					}
 					catch (const std::exception &e) {
-						last_tls_trust_report = std::string("trust_mode=error; loaded=(none); failed=") + e.what();
-						detail::set_last_tls_trust_report(last_tls_trust_report);
+						auto report = std::string("trust_mode=error; loaded=(none); failed=") + e.what();
+						{
+							std::lock_guard<std::mutex> lock(tls_report_mutex);
+							last_tls_trust_report = report;
+						}
+						detail::set_last_tls_trust_report(report);
 						throw;
 					}
 					auto new_stream = std::make_unique<asio::ssl::stream<tcp::socket &>>(sock, *new_ctx);
 					detail::configure_client_stream(*new_stream, host, options);
 					tls_ctx = std::move(new_ctx);
 					tls_stream = std::move(new_stream);
+					tls_enabled.store(true, std::memory_order_release);
 				}
 
-				void clear_ssl()
+				void clear_ssl(bool clear_report = true)
 				{
+					tls_enabled.store(false, std::memory_order_release);
 					tls_stream.reset();
 					tls_ctx.reset();
-					last_tls_trust_report = "trust_mode=unset; loaded=(none); failed=(none)";
+					if (clear_report) {
+						std::lock_guard<std::mutex> lock(tls_report_mutex);
+						last_tls_trust_report = "trust_mode=unset; loaded=(none); failed=(none)";
+					}
 				}
 
 			public:
+				// Counts active I/O jobs; exclusive operations reserve one slot.
 				std::atomic<std::size_t> async_jobs{0};
 
-				socket() : sock(get_io_context()) {}
+				socket() : sock(get_io_context()), tls_strand(asio::make_strand(get_io_context())) {}
 
 				socket(const socket &) = delete;
 
@@ -435,19 +557,83 @@ namespace cs_impl {
 
 				void connect(const tcp::endpoint &ep)
 				{
+					scoped_exclusive_operation operation(
+					    *this, "Cannot connect while socket I/O is pending.");
 					sock.connect(ep);
 				}
 
 				void connect_ssl(const std::string &host, const ssl_options &options = ssl_options())
 				{
-					prepare_ssl(host, options);
+					begin_tls_handshake();
+					try {
+						prepare_ssl(host, options);
+					}
+					catch (...) {
+						end_tls_handshake();
+						throw;
+					}
 					try {
 						tls_stream->handshake(asio::ssl::stream_base::client);
 					}
 					catch (...) {
-						clear_ssl();
+						clear_ssl(false);
+						end_tls_handshake();
 						throw;
 					}
+					end_tls_handshake();
+				}
+
+				void begin_tls_handshake()
+				{
+					if (tls_enabled.load(std::memory_order_acquire))
+						throw std::runtime_error("TLS has already been enabled on this socket.");
+					begin_exclusive_operation("Cannot enable TLS while asynchronous operations are pending.");
+				}
+
+				void end_tls_handshake() noexcept
+				{
+					end_exclusive_operation();
+				}
+
+				void begin_async_read()
+				{
+					begin_io_job(io_direction::read);
+				}
+				void end_async_read() noexcept
+				{
+					finish_io_job(io_direction::read);
+				}
+				void begin_async_write()
+				{
+					begin_io_job(io_direction::write);
+				}
+				void end_async_write() noexcept
+				{
+					finish_io_job(io_direction::write);
+				}
+				void begin_async_connect()
+				{
+					begin_exclusive_operation("Cannot connect while socket I/O is pending.");
+				}
+				void end_async_connect() noexcept
+				{
+					end_exclusive_operation();
+				}
+
+				// Draining-exclusive reservation for safe_shutdown.
+				// Sets exclusive_operation to block new I/O, then the
+				// caller drains existing async_jobs cooperatively.
+				void begin_draining_exclusive()
+				{
+					bool expected = false;
+					if (!exclusive_operation.compare_exchange_strong(expected, true,
+					        std::memory_order_acq_rel, std::memory_order_acquire))
+						throw std::runtime_error(
+						    "Another exclusive socket operation is already pending.");
+				}
+				void end_draining_exclusive() noexcept
+				{
+					exclusive_operation.store(false, std::memory_order_release);
 				}
 
 				void prepare_ssl(const std::string &host, const ssl_options &options = ssl_options())
@@ -457,38 +643,38 @@ namespace cs_impl {
 
 				asio::ssl::stream<tcp::socket &> &get_tls_raw()
 				{
+					// Internal binding access. The caller must already hold an I/O or
+					// exclusive-operation reservation for the stream's full use.
 					if (!tls_stream)
 						throw std::runtime_error("TLS is not enabled on this socket.");
 					return *tls_stream;
 				}
 
+				asio::strand<asio::io_context::executor_type> &get_tls_strand()
+				{
+					return tls_strand;
+				}
+
 				void reset_ssl()
 				{
-					clear_ssl();
+					clear_ssl(false);
 				}
 
 				std::string get_ssl_trust_report() const
 				{
+					std::lock_guard<std::mutex> lock(tls_report_mutex);
 					return last_tls_trust_report;
 				}
 
 				bool is_ssl() const
 				{
-					return static_cast<bool>(tls_stream);
+					return tls_enabled.load(std::memory_order_acquire);
 				}
 
-				// close() refuses to proceed when async operations are still
-				// in flight to prevent use-after-free on the TLS stream.
-				// Use safe_shutdown() to wait for completion first.
 				void close()
 				{
-					{
-						auto pending = async_jobs.load(std::memory_order_acquire);
-						if (pending > 0)
-							throw std::runtime_error(
-							    "close() called with " + std::to_string(pending) +
-							    " async operation(s) still in flight. Use safe_shutdown() instead.");
-					}
+					scoped_exclusive_operation operation(
+					    *this, "close() called with async operations still in flight. Use safe_shutdown() instead.");
 					if (tls_stream) {
 						asio::error_code ec;
 						tls_stream->shutdown(ec);
@@ -499,6 +685,8 @@ namespace cs_impl {
 
 				void accept(tcp::acceptor &a)
 				{
+					scoped_exclusive_operation operation(
+					    *this, "Cannot accept into a socket while socket I/O is pending.");
 					a.accept(sock);
 				}
 
@@ -515,13 +703,23 @@ namespace cs_impl {
 
 				std::size_t available()
 				{
-					if (tls_stream)
+					if (!try_begin_io_job(io_direction::read))
+						return 0;
+					struct job_guard {
+						socket &owner;
+						~job_guard()
+						{
+							owner.finish_io_job(io_direction::read);
+						}
+					} job{*this};
+					if (tls_enabled.load(std::memory_order_acquire))
 						return 0; // asio::ssl::stream does not support available(); encrypted byte count is meaningless
 					return sock.available();
 				}
 
 				std::string receive(std::size_t maximum)
 				{
+					scoped_io_job job(*this, io_direction::read);
 					std::vector<char> buff(maximum);
 					std::size_t actually = tls_stream
 					                       ? tls_stream->read_some(asio::buffer(buff))
@@ -531,6 +729,7 @@ namespace cs_impl {
 
 				std::string read(std::size_t size)
 				{
+					scoped_io_job job(*this, io_direction::read);
 					std::vector<char> buff(size);
 					std::size_t n = tls_stream
 					                ? asio::read(*tls_stream, asio::buffer(buff))
@@ -538,33 +737,28 @@ namespace cs_impl {
 					return std::string(buff.data(), n);
 				}
 
-				void send(const std::string &s)
+				std::size_t send(const std::string &s)
 				{
+					scoped_io_job job(*this, io_direction::write);
 					if (tls_stream)
-						tls_stream->write_some(asio::buffer(s));
+						return tls_stream->write_some(asio::buffer(s));
 					else
-						sock.write_some(asio::buffer(s));
+						return sock.write_some(asio::buffer(s));
 				}
 
 				void write(const std::string &s)
 				{
+					scoped_io_job job(*this, io_direction::write);
 					if (tls_stream)
 						asio::write(*tls_stream, asio::buffer(s));
 					else
 						asio::write(sock, asio::buffer(s));
 				}
 
-				// shutdown() refuses to proceed when async operations are still
-				// in flight to prevent use-after-free on the TLS stream.
 				void shutdown()
 				{
-					{
-						auto pending = async_jobs.load(std::memory_order_acquire);
-						if (pending > 0)
-							throw std::runtime_error(
-							    "shutdown() called with " + std::to_string(pending) +
-							    " async operation(s) still in flight. Use safe_shutdown() instead.");
-					}
+					scoped_exclusive_operation operation(
+					    *this, "shutdown() called with async operations still in flight. Use safe_shutdown() instead.");
 					if (tls_stream) {
 						asio::error_code ec;
 						tls_stream->shutdown(ec);
@@ -597,7 +791,7 @@ namespace cs_impl {
 
 			cs::var resolve(const std::string &host, const std::string &service)
 			{
-				static udp::resolver resolver(get_io_context());
+				udp::resolver resolver(get_io_context());
 				udp::resolver::results_type results = resolver.resolve(host, service);
 				cs::var ret = cs::var::make<cs::array>();
 				cs::array &arr = ret.val<cs::array>();
@@ -608,6 +802,110 @@ namespace cs_impl {
 
 			class socket final {
 				udp::socket sock;
+				std::atomic<bool> exclusive_operation{false};
+				std::atomic<bool> read_operation{false};
+				std::atomic<bool> write_operation{false};
+
+				enum class io_direction { read, write };
+
+				bool try_begin_io_job() noexcept
+				{
+					if (exclusive_operation.load(std::memory_order_acquire))
+						return false;
+					async_jobs.fetch_add(1, std::memory_order_acq_rel);
+					if (exclusive_operation.load(std::memory_order_acquire)) {
+						async_jobs.fetch_sub(1, std::memory_order_release);
+						return false;
+					}
+					return true;
+				}
+
+				bool try_begin_io_job(io_direction direction) noexcept
+				{
+					auto &operation = direction == io_direction::read ? read_operation : write_operation;
+					bool expected = false;
+					if (!operation.compare_exchange_strong(expected, true,
+					                                       std::memory_order_acq_rel, std::memory_order_acquire))
+						return false;
+					if (!try_begin_io_job()) {
+						operation.store(false, std::memory_order_release);
+						return false;
+					}
+					return true;
+				}
+
+				void begin_io_job(io_direction direction)
+				{
+					auto &operation = direction == io_direction::read ? read_operation : write_operation;
+					bool expected = false;
+					if (!operation.compare_exchange_strong(expected, true,
+					                                       std::memory_order_acq_rel, std::memory_order_acquire))
+						throw std::runtime_error(direction == io_direction::read
+						                         ? "Another receive operation is already pending on this UDP socket."
+						                         : "Another send operation is already pending on this UDP socket.");
+					if (!try_begin_io_job()) {
+						operation.store(false, std::memory_order_release);
+						throw std::runtime_error("Cannot start UDP I/O while close is pending.");
+					}
+				}
+
+				void finish_io_job(io_direction direction) noexcept
+				{
+					async_jobs.fetch_sub(1, std::memory_order_release);
+					auto &operation = direction == io_direction::read ? read_operation : write_operation;
+					operation.store(false, std::memory_order_release);
+				}
+
+				class scoped_io_job {
+					socket &owner;
+					io_direction direction;
+
+				public:
+					scoped_io_job(socket &sock, io_direction operation_direction)
+						: owner(sock), direction(operation_direction)
+					{
+						owner.begin_io_job(direction);
+					}
+					~scoped_io_job()
+					{
+						owner.finish_io_job(direction);
+					}
+				};
+
+				void begin_exclusive_close()
+				{
+					bool expected_exclusive = false;
+					if (!exclusive_operation.compare_exchange_strong(expected_exclusive, true,
+					        std::memory_order_acq_rel, std::memory_order_acquire))
+						throw std::runtime_error("Another UDP close operation is already pending.");
+					std::size_t expected_jobs = 0;
+					if (!async_jobs.compare_exchange_strong(expected_jobs, 1,
+					                                        std::memory_order_acq_rel, std::memory_order_acquire)) {
+						exclusive_operation.store(false, std::memory_order_release);
+						throw std::runtime_error(
+						    "close() called with async operations still in flight. Use safe_close() instead.");
+					}
+				}
+
+				void end_exclusive_close() noexcept
+				{
+					async_jobs.fetch_sub(1, std::memory_order_release);
+					exclusive_operation.store(false, std::memory_order_release);
+				}
+
+				class scoped_exclusive_close {
+					socket &owner;
+
+				public:
+					explicit scoped_exclusive_close(socket &sock) : owner(sock)
+					{
+						owner.begin_exclusive_close();
+					}
+					~scoped_exclusive_close()
+					{
+						owner.end_exclusive_close();
+					}
+				};
 
 			public:
 				std::atomic<std::size_t> async_jobs{0};
@@ -643,7 +941,25 @@ namespace cs_impl {
 
 				void close()
 				{
+					scoped_exclusive_close operation(*this);
 					sock.close();
+				}
+
+				void begin_async_receive()
+				{
+					begin_io_job(io_direction::read);
+				}
+				void end_async_receive() noexcept
+				{
+					finish_io_job(io_direction::read);
+				}
+				void begin_async_send()
+				{
+					begin_io_job(io_direction::write);
+				}
+				void end_async_send() noexcept
+				{
+					finish_io_job(io_direction::write);
 				}
 
 				bool is_open()
@@ -659,11 +975,21 @@ namespace cs_impl {
 
 				std::size_t available()
 				{
+					if (!try_begin_io_job(io_direction::read))
+						return 0;
+					struct job_guard {
+						socket &owner;
+						~job_guard()
+						{
+							owner.finish_io_job(io_direction::read);
+						}
+					} job{*this};
 					return sock.available();
 				}
 
 				std::string receive_from(std::size_t maximum, udp::endpoint &ep)
 				{
+					scoped_io_job job(*this, io_direction::read);
 					std::vector<char> buff(maximum);
 					std::size_t actually = sock.receive_from(asio::buffer(buff), ep);
 					return std::string(buff.data(), actually);
@@ -671,6 +997,7 @@ namespace cs_impl {
 
 				void send_to(const std::string &s, const udp::endpoint &ep)
 				{
+					scoped_io_job job(*this, io_direction::write);
 					sock.send_to(asio::buffer(s), ep);
 				}
 

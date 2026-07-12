@@ -52,24 +52,57 @@ check_eq("H08: status code 201", h2["status_code"], 201)
 check_eq("H09: no content-length -> -1", h2["content_length"], -1)
 check("H10: is chunked", h2["is_chunked"])
 
+section("chunked body trailers")
+client.pending = "4\r\nWiki\r\n0\r\nX-Trace: one\r\nX-Extra: two\r\n\r\nNEXT"
+check_eq("H11: chunked body decoded", client.read_chunked_body(), "Wiki")
+check_eq("H12: all trailers consumed", client.pending, "NEXT")
+
 section("header key normalization")
 var raw3 = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nX-CUSTOM-KEY: value\r\n\r\n"
 var h3 = client.parse_response_headers(raw3)
-check_not_null("H11: headers parsed", h3)
-check_eq("H12: content-type lowercased", h3["headers"]["content-type"], "application/json")
-check_eq("H13: x-custom-key lowercased", h3["headers"]["x-custom-key"], "value")
+check_not_null("H13: headers parsed", h3)
+check_eq("H14: content-type lowercased", h3["headers"]["content-type"], "application/json")
+check_eq("H15: x-custom-key lowercased", h3["headers"]["x-custom-key"], "value")
 
 section("connection close without body info")
 var raw4 = "HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n"
 var h4 = client.parse_response_headers(raw4)
-check_not_null("H14: 204 parsed", h4)
-check_eq("H15: status code 204", h4["status_code"], 204)
-check_eq("H16: no content-length -> -1", h4["content_length"], -1)
-check("H17: not chunked", !h4["is_chunked"])
+check_not_null("H16: 204 parsed", h4)
+check_eq("H17: status code 204", h4["status_code"], 204)
+check_eq("H18: no content-length -> -1", h4["content_length"], -1)
+check("H19: not chunked", !h4["is_chunked"])
 
 section("invalid status lines")
-check_null("H18: not HTTP status line", client.parse_response_headers("NOT_HTTP_STATUS\r\nX-Test: abc\r\n\r\n"))
-check_null("H19: empty string", client.parse_response_headers(""))
+check_null("H20: not HTTP status line", client.parse_response_headers("NOT_HTTP_STATUS\r\nX-Test: abc\r\n\r\n"))
+check_null("H21: empty string", client.parse_response_headers(""))
+
+section("invalid response framing")
+check_null("H22: duplicate content-length rejected", client.parse_response_headers("HTTP/1.1 200 OK\r\nContent-Length: 1\r\nContent-Length: 2\r\n\r\n"))
+check_null("H23: transfer-encoding with content-length rejected", client.parse_response_headers("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nContent-Length: 4\r\n\r\n"))
+check_null("H24: oversized content-length rejected", client.parse_response_headers("HTTP/1.1 200 OK\r\nContent-Length: 67108865\r\n\r\n"))
+
+client.pending = "Z\r\n"
+check_null("H25: invalid chunk size rejected", client.read_chunked_body())
+client.pending = "FFFFFFFFF\r\n"
+check_null("H26: oversized chunk size rejected", client.read_chunked_body())
+
+section("invalid request framing")
+var transfer_encoded_request = new array
+transfer_encoded_request.push_back("POST / HTTP/1.1")
+transfer_encoded_request.push_back("Host: localhost")
+transfer_encoded_request.push_back("Transfer-Encoding: chunked")
+check_null("H27: request transfer-encoding rejected", netutils.create_http_session(transfer_encoded_request))
+var duplicate_length_request = new array
+duplicate_length_request.push_back("POST / HTTP/1.1")
+duplicate_length_request.push_back("Host: localhost")
+duplicate_length_request.push_back("Content-Length: 1")
+duplicate_length_request.push_back("Content-Length: 1")
+check_null("H28: duplicate request content-length rejected", netutils.create_http_session(duplicate_length_request))
+var oversized_length_request = new array
+oversized_length_request.push_back("POST / HTTP/1.1")
+oversized_length_request.push_back("Host: localhost")
+oversized_length_request.push_back("Content-Length: 67108865")
+check_null("H29: oversized request content-length rejected", netutils.create_http_session(oversized_length_request))
 
 system.out.println("")
 system.out.println("=== Results ===")

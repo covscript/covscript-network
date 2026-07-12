@@ -15,11 +15,13 @@ echo === Unit Tests ===
 
 for %%t in (
     tests\test_url_parse.csc
+    tests\test_argparse.csc
     tests\test_header_parser.csc
     tests\test_utils.csc
     tests\test_tcp_sync.csc
     tests\test_udp.csc
     tests\test_http_roundtrip.csc
+    tests\test_http_server.csc
     tests\test_openai_client.csc
     tests\test_fiber_socket.csc
     tests\test_async_tcp.csc

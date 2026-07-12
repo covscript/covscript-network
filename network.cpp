@@ -28,6 +28,7 @@
 #include <cstdio>
 #include <thread>
 #include <memory>
+#include <mutex>
 #include <regex>
 #include <array>
 
@@ -45,6 +46,18 @@ inline void cs_runtime_yield()
 
 namespace network_cs_ext {
 	using namespace cs;
+
+	std::size_t checked_io_buffer_size(number size)
+	{
+		static_assert(NETWORK_MAX_IO_BUFFER_SIZE > 0,
+		              "NETWORK_MAX_IO_BUFFER_SIZE must be greater than zero");
+		if (size <= 0)
+			throw lang_error("Buffer size must be greater than zero.");
+		if (size > NETWORK_MAX_IO_BUFFER_SIZE)
+			throw lang_error("Buffer size exceeds the configured limit of "
+			                 + std::to_string(NETWORK_MAX_IO_BUFFER_SIZE) + " bytes.");
+		return static_cast<std::size_t>(size);
+	}
 
 	bool is_null_var(const var &v)
 	{
@@ -310,36 +323,30 @@ namespace network_cs_ext {
 
 			string receive(socket_t &sock, number max)
 			{
-				if (max <= 0)
-					throw lang_error("Buffer size must above zero.");
-				else {
-					try {
-						return sock->receive(static_cast<std::size_t>(max));
-					}
-					catch (const std::exception &e) {
-						throw lang_error(e.what());
-					}
+				auto size = checked_io_buffer_size(max);
+				try {
+					return sock->receive(size);
+				}
+				catch (const std::exception &e) {
+					throw lang_error(e.what());
 				}
 			}
 
 			string read(socket_t &sock, number size)
 			{
-				if (size <= 0)
-					throw lang_error("Buffer size must above zero.");
-				else {
-					try {
-						return sock->read(static_cast<std::size_t>(size));
-					}
-					catch (const std::exception &e) {
-						throw lang_error(e.what());
-					}
+				auto checked_size = checked_io_buffer_size(size);
+				try {
+					return sock->read(checked_size);
+				}
+				catch (const std::exception &e) {
+					throw lang_error(e.what());
 				}
 			}
 
-			void send(socket_t &sock, const string &str)
+			std::size_t send(socket_t &sock, const string &str)
 			{
 				try {
-					sock->send(str);
+					return sock->send(str);
 				}
 				catch (const std::exception &e) {
 					throw lang_error(e.what());
@@ -548,15 +555,12 @@ namespace network_cs_ext {
 
 			string receive_from(socket_t &sock, number max, endpoint_t &ep)
 			{
-				if (max <= 0)
-					throw lang_error("Buffer size must above zero.");
-				else {
-					try {
-						return sock->receive_from(static_cast<std::size_t>(max), ep);
-					}
-					catch (const std::exception &e) {
-						throw lang_error(e.what());
-					}
+				auto size = checked_io_buffer_size(max);
+				try {
+					return sock->receive_from(size, ep);
+				}
+				catch (const std::exception &e) {
+					throw lang_error(e.what());
 				}
 			}
 
@@ -626,9 +630,13 @@ namespace network_cs_ext {
 		public:
 			asio::io_context &io = cs_impl::network::get_io_context();
 			std::atomic<std::size_t> thread_executors{0};
+			std::mutex lifecycle_mutex;
 
 			inline std::size_t poll()
 			{
+				if (thread_executors.load(std::memory_order_acquire) != 0)
+					return 0;
+				std::lock_guard<std::mutex> lock(lifecycle_mutex);
 				if (thread_executors.load(std::memory_order_acquire) == 0)
 					return io.poll();
 				else
@@ -637,6 +645,9 @@ namespace network_cs_ext {
 
 			inline std::size_t poll_one()
 			{
+				if (thread_executors.load(std::memory_order_acquire) != 0)
+					return 0;
+				std::lock_guard<std::mutex> lock(lifecycle_mutex);
 				if (thread_executors.load(std::memory_order_acquire) == 0)
 					return io.poll_one();
 				else
@@ -653,14 +664,13 @@ namespace network_cs_ext {
 		class thread_executor_type {
 			std::thread worker;
 			std::atomic<bool> running{true};
+			std::shared_ptr<asio::executor_work_guard<asio::io_context::executor_type>> work_guard;
 
 		public:
 			void executor()
 			{
 				auto &io = cs_impl::network::get_io_context();
 				while (true) {
-					if (io.stopped())
-						io.restart();
 					// Drain all ready handlers without blocking
 					while (io.poll_one() > 0);
 					if (!running.load(std::memory_order_acquire))
@@ -672,11 +682,16 @@ namespace network_cs_ext {
 					io.run_one_for(std::chrono::milliseconds(NETWORK_THREAD_WORKER_POLL_MS));
 				}
 			}
-			// Increment thread_executors BEFORE starting the worker thread
-			// to close the TOCTOU window between poll() check and io.poll() call.
 			thread_executor_type()
 			{
-				get_global_settings().thread_executors.fetch_add(1, std::memory_order_release);
+				auto &settings = get_global_settings();
+				{
+					std::lock_guard<std::mutex> lock(settings.lifecycle_mutex);
+					if (settings.thread_executors.load(std::memory_order_acquire) == 0 && settings.io.stopped())
+						settings.io.restart();
+					work_guard = std::make_shared<asio::executor_work_guard<asio::io_context::executor_type>>(settings.io.get_executor());
+					settings.thread_executors.fetch_add(1, std::memory_order_release);
+				}
 				try {
 					worker = std::thread([this]() {
 						try {
@@ -693,6 +708,7 @@ namespace network_cs_ext {
 							fprintf(stderr, "[network] executor thread"
 							                " terminated by unknown exception\n");
 						}
+						get_global_settings().thread_executors.fetch_sub(1, std::memory_order_release);
 					});
 				}
 				catch (...) {
@@ -706,12 +722,14 @@ namespace network_cs_ext {
 				// Post an empty handler to wake up run_one_for immediately
 				// so the worker thread can see running == false and exit
 				// without waiting for the full timeout.
-				asio::post(cs_impl::network::get_io_context(), [] {});
+				try {
+					asio::post(cs_impl::network::get_io_context(), [] {});
+				}
+				catch (...) {
+					// Worker will wake on next run_one_for timeout and exit.
+				}
 				if (worker.joinable())
 					worker.join();
-				// join() guarantees the worker thread has exited, so it is
-				// safe to decrement unconditionally here.
-				get_global_settings().thread_executors.fetch_sub(1, std::memory_order_release);
 			}
 		};
 
@@ -746,8 +764,6 @@ namespace network_cs_ext {
 				throw cs::lang_error("Asynchronous operation not a read/receive session.");
 			if (!state->has_done.load(std::memory_order_acquire))
 				return cs::null_pointer;
-			if (state->ec)
-				return cs::null_pointer; // operation completed with error, no valid data
 			if (state->bytes_transferred == 0)
 				return cs::var::make<cs::string>();
 			std::string data(asio::buffers_begin(state->buffer.data()), asio::buffers_begin(state->buffer.data()) + state->bytes_transferred);
@@ -756,17 +772,16 @@ namespace network_cs_ext {
 			return cs::var::make<cs::string>(std::move(data));
 		}
 
-		cs::var get_buffer(const state_t &state, std::size_t max_bytes)
+		cs::var get_buffer(const state_t &state, number max_bytes)
 		{
+			auto checked_max_bytes = checked_io_buffer_size(max_bytes);
 			if (!state->is_read)
 				throw cs::lang_error("Asynchronous operation not a read/receive session.");
 			if (!state->has_done.load(std::memory_order_acquire))
 				return cs::null_pointer;
-			if (state->ec)
-				return cs::null_pointer; // operation completed with error, no valid data
 			if (state->buffer.size() == 0)
 				return cs::var::make<cs::string>();
-			std::size_t to_read = (std::min)(max_bytes, state->buffer.size());
+			std::size_t to_read = (std::min)(checked_max_bytes, state->buffer.size());
 			std::string data(asio::buffers_begin(state->buffer.data()), asio::buffers_begin(state->buffer.data()) + to_read);
 			state->buffer.consume(to_read);
 			state->bytes_transferred = state->bytes_transferred > to_read ? state->bytes_transferred - to_read : 0;
@@ -775,7 +790,7 @@ namespace network_cs_ext {
 
 		std::size_t available(const state_t &state)
 		{
-			if (state->is_read && state->has_done.load(std::memory_order_acquire) && !state->ec)
+			if (state->is_read && state->has_done.load(std::memory_order_acquire))
 				return state->buffer.size();
 			else
 				return 0;
@@ -836,20 +851,52 @@ namespace network_cs_ext {
 
 		static namespace_t async_ext = make_shared_namespace<name_space>();
 
+		template <typename BeginOperation>
+		void begin_tcp_async_io(BeginOperation &&begin_operation)
+		{
+			try {
+				begin_operation();
+			}
+			catch (const std::exception &e) {
+				throw cs::lang_error(e.what());
+			}
+		}
+
+		template <typename BeginOperation>
+		void begin_udp_async_io(BeginOperation &&begin_operation)
+		{
+			try {
+				begin_operation();
+			}
+			catch (const std::exception &e) {
+				throw cs::lang_error(e.what());
+			}
+		}
+
+		void begin_tcp_tls_handshake(const tcp::socket_t &sock)
+		{
+			try {
+				sock->begin_tls_handshake();
+			}
+			catch (const std::exception &e) {
+				throw cs::lang_error(e.what());
+			}
+		}
+
 		state_t accept(tcp::socket_t &sock, tcp::acceptor_t &acceptor)
 		{
 			state_t state = std::make_shared<state_type>();
 			state->init = true;
-			sock->async_jobs.fetch_add(1, std::memory_order_release);
+			begin_tcp_async_io([&sock] { sock->begin_async_connect(); });
 			try {
 				acceptor->async_accept(sock->get_raw(), [sock, state](const asio::error_code &ec) {
 					state->ec = ec;
+					sock->end_async_connect();
 					state->has_done.store(true, std::memory_order_release);
-					sock->async_jobs.fetch_sub(1, std::memory_order_release);
 				});
 			}
 			catch (...) {
-				sock->async_jobs.fetch_sub(1, std::memory_order_release);
+				sock->end_async_connect();
 				throw;
 			}
 			return state;
@@ -859,16 +906,16 @@ namespace network_cs_ext {
 		{
 			state_t state = std::make_shared<state_type>();
 			state->init = true;
-			sock->async_jobs.fetch_add(1, std::memory_order_release);
+			begin_tcp_async_io([&sock] { sock->begin_async_connect(); });
 			try {
 				sock->get_raw().async_connect(ep, [sock, state](const asio::error_code &ec) {
 					state->ec = ec;
+					sock->end_async_connect();
 					state->has_done.store(true, std::memory_order_release);
-					sock->async_jobs.fetch_sub(1, std::memory_order_release);
 				});
 			}
 			catch (...) {
-				sock->async_jobs.fetch_sub(1, std::memory_order_release);
+				sock->end_async_connect();
 				throw;
 			}
 			return state;
@@ -879,26 +926,27 @@ namespace network_cs_ext {
 			state_t state = std::make_shared<state_type>();
 			state->init = true;
 			auto ssl_options = parse_ssl_options(options);
+			begin_tcp_tls_handshake(sock);
 			try {
 				sock->prepare_ssl(host, ssl_options);
 			}
 			catch (const std::exception &e) {
+				sock->end_tls_handshake();
 				throw cs::lang_error(e.what());
 			}
-			sock->async_jobs.fetch_add(1, std::memory_order_release);
 			try {
 				sock->get_tls_raw().async_handshake(asio::ssl::stream_base::client,
-				[sock, state](const asio::error_code &ec) {
+				asio::bind_executor(sock->get_tls_strand(), [sock, state](const asio::error_code &ec) {
 					if (ec)
 						sock->reset_ssl();
 					state->ec = ec;
+					sock->end_tls_handshake();
 					state->has_done.store(true, std::memory_order_release);
-					sock->async_jobs.fetch_sub(1, std::memory_order_release);
-				});
+				}));
 			}
 			catch (const std::exception &e) {
 				sock->reset_ssl();
-				sock->async_jobs.fetch_sub(1, std::memory_order_release);
+				sock->end_tls_handshake();
 				throw cs::lang_error(e.what());
 			}
 			return state;
@@ -906,50 +954,65 @@ namespace network_cs_ext {
 
 		void read_until(tcp::socket_t &sock, state_t &state, const std::string &pattern)
 		{
-			if (!state->init) {
-				state->init = true;
-				state->is_read = true;
-			}
-			else if (!state->has_done.load(std::memory_order_acquire))
+			if (state->init && !state->has_done.load(std::memory_order_acquire))
 				throw cs::lang_error("Last asynchronous operation have not done yet.");
+			begin_tcp_async_io([&sock] { sock->begin_async_read(); });
+			const bool previous_init = state->init;
+			const bool previous_is_read = state->is_read;
+			const bool previous_has_done = state->has_done.load(std::memory_order_relaxed);
+			const asio::error_code previous_ec = state->ec;
+			state->init = true;
+			state->is_read = true;
 			state->has_done = false;
 			state->ec.clear();
-			sock->async_jobs.fetch_add(1, std::memory_order_release);
-			auto on_done = [sock, state](const asio::error_code &ec, std::size_t bytes) {
-				// async_read_until already committed data to the streambuf
-				// internally; we must NOT call commit() again here.
-				state->bytes_transferred = bytes;
-				state->ec = ec;
-				state->has_done.store(true, std::memory_order_release);
-				sock->async_jobs.fetch_sub(1, std::memory_order_release);
-			};
-			if (sock->is_ssl())
-				asio::async_read_until(sock->get_tls_raw(), state->buffer, pattern, on_done);
-			else
-				asio::async_read_until(sock->get_raw(), state->buffer, pattern, on_done);
+			try {
+				auto on_done = [sock, state](const asio::error_code &ec, std::size_t bytes) {
+					// async_read_until already committed data to the streambuf
+					// internally; we must NOT call commit() again here.
+					state->bytes_transferred = bytes;
+					state->ec = ec;
+					sock->end_async_read();
+					state->has_done.store(true, std::memory_order_release);
+				};
+				if (sock->is_ssl())
+					asio::async_read_until(sock->get_tls_raw(), state->buffer, pattern,
+					                       asio::bind_executor(sock->get_tls_strand(), on_done));
+				else
+					asio::async_read_until(sock->get_raw(), state->buffer, pattern, on_done);
+			}
+			catch (...) {
+				sock->end_async_read();
+				state->init = previous_init;
+				state->is_read = previous_is_read;
+				state->ec = previous_ec;
+				state->has_done.store(previous_has_done, std::memory_order_release);
+				throw;
+			}
 		}
 
-		state_t read(tcp::socket_t &sock, std::size_t n)
+		state_t read(tcp::socket_t &sock, number requested_size)
 		{
+			auto n = checked_io_buffer_size(requested_size);
 			state_t state = std::make_shared<state_type>();
 			state->init = true;
 			state->is_read = true;
-			sock->async_jobs.fetch_add(1, std::memory_order_release);
+			begin_tcp_async_io([&sock] { sock->begin_async_read(); });
 			try {
 				auto on_done = [sock, state](const asio::error_code &ec, std::size_t bytes) {
 					state->buffer.commit(bytes);
 					state->bytes_transferred = bytes;
 					state->ec = ec;
+					sock->end_async_read();
 					state->has_done.store(true, std::memory_order_release);
-					sock->async_jobs.fetch_sub(1, std::memory_order_release);
 				};
 				if (sock->is_ssl())
-					asio::async_read(sock->get_tls_raw(), state->buffer.prepare(n), on_done);
+					asio::async_read(sock->get_tls_raw(), state->buffer.prepare(n),
+					                 asio::bind_executor(sock->get_tls_strand(), on_done));
 				else
 					asio::async_read(sock->get_raw(), state->buffer.prepare(n), on_done);
 			}
 			catch (...) {
-				sock->async_jobs.fetch_sub(1, std::memory_order_release);
+				sock->end_async_read();
 				throw;
 			}
 			return state;
@@ -959,48 +1022,50 @@ namespace network_cs_ext {
 		{
 			state_t state = std::make_shared<state_type>();
 			state->init = true;
-			std::ostream os(&state->buffer);
-			os.write(data.data(), data.size());
-			sock->async_jobs.fetch_add(1, std::memory_order_release);
-			auto on_done = [sock, state](const asio::error_code &ec, std::size_t bytes) {
-				state->buffer.consume(bytes);
-				state->bytes_transferred = bytes;
-				state->ec = ec;
-				state->has_done.store(true, std::memory_order_release);
-				sock->async_jobs.fetch_sub(1, std::memory_order_release);
-			};
+			begin_tcp_async_io([&sock] { sock->begin_async_write(); });
 			try {
+				std::ostream os(&state->buffer);
+				os.exceptions(std::ostream::badbit | std::ostream::failbit);
+				os.write(data.data(), data.size());
+				auto on_done = [sock, state](const asio::error_code &ec, std::size_t bytes) {
+					state->bytes_transferred = bytes;
+					state->ec = ec;
+					sock->end_async_write();
+					state->has_done.store(true, std::memory_order_release);
+				};
 				if (sock->is_ssl())
-					asio::async_write(sock->get_tls_raw(), state->buffer, on_done);
+					asio::async_write(sock->get_tls_raw(), state->buffer,
+					                  asio::bind_executor(sock->get_tls_strand(), on_done));
 				else
 					asio::async_write(sock->get_raw(), state->buffer, on_done);
 			}
 			catch (...) {
-				sock->async_jobs.fetch_sub(1, std::memory_order_release);
+				sock->end_async_write();
 				throw;
 			}
 			return state;
 		}
 
-		state_t receive_from(udp::socket_t &sock, std::size_t n)
+		state_t receive_from(udp::socket_t &sock, number requested_size)
 		{
+			auto n = checked_io_buffer_size(requested_size);
 			state_t state = std::make_shared<state_type>();
 			state->init = true;
 			state->is_udp = true;
 			state->is_read = true;
-			sock->async_jobs.fetch_add(1, std::memory_order_release);
+			begin_udp_async_io([&sock] { sock->begin_async_receive(); });
 			try {
 				sock->get_raw().async_receive_from(state->buffer.prepare(n), state->udp_endpoint,
 				[sock, state](const asio::error_code &ec, std::size_t bytes) {
 					state->buffer.commit(bytes);
 					state->bytes_transferred = bytes;
 					state->ec = ec;
+					sock->end_async_receive();
 					state->has_done.store(true, std::memory_order_release);
-					sock->async_jobs.fetch_sub(1, std::memory_order_release);
 				});
 			}
 			catch (...) {
-				sock->async_jobs.fetch_sub(1, std::memory_order_release);
+				sock->end_async_receive();
 				throw;
 			}
 			return state;
@@ -1012,23 +1077,24 @@ namespace network_cs_ext {
 			state->init = true;
 			state->is_udp = true;
 			state->udp_endpoint = ep;
-			std::ostream os(&state->buffer);
-			os.write(data.data(), data.size());
-			sock->async_jobs.fetch_add(1, std::memory_order_release);
+			begin_udp_async_io([&sock] { sock->begin_async_send(); });
 			// Pass streambuf data() directly as ConstBufferSequence to avoid
 			// truncation when the streambuf spans multiple internal blocks.
 			try {
+				std::ostream os(&state->buffer);
+				os.exceptions(std::ostream::badbit | std::ostream::failbit);
+				os.write(data.data(), data.size());
 				sock->get_raw().async_send_to(state->buffer.data(), state->udp_endpoint,
 				[sock, state](const asio::error_code &ec, std::size_t bytes) {
 					state->buffer.consume(bytes);
 					state->bytes_transferred = bytes;
 					state->ec = ec;
+					sock->end_async_send();
 					state->has_done.store(true, std::memory_order_release);
-					sock->async_jobs.fetch_sub(1, std::memory_order_release);
 				});
 			}
 			catch (...) {
-				sock->async_jobs.fetch_sub(1, std::memory_order_release);
+				sock->end_async_send();
 				throw;
 			}
 			return state;
@@ -1051,28 +1117,21 @@ namespace network_cs_ext {
 
 		void restart()
 		{
-			// Only restart if the io_context is actually stopped.
-			// When io.stopped() is true, no thread can be inside
-			// poll_one()/run_one(), so calling restart() is safe
-			// regardless of whether a thread_worker is active.
-			if (cs_impl::network::get_io_context().stopped())
-				cs_impl::network::get_io_context().restart();
+			auto &settings = get_global_settings();
+			std::lock_guard<std::mutex> lock(settings.lifecycle_mutex);
+			if (settings.thread_executors.load(std::memory_order_acquire) == 0 && settings.io.stopped())
+				settings.io.restart();
 		}
 
 		using work_guard_t = std::shared_ptr<asio::executor_work_guard<asio::io_context::executor_type>>;
 
 		var work_guard()
 		{
-			// When a thread_worker is active, async::restart() refuses to
-			// call io.restart() to avoid racing with the worker's poll_one().
-			// But if the io_context is actually stopped when we arrive here,
-			// the worker is NOT inside poll_one() (it's at the top of its
-			// loop or waiting in run_one_for), so it's safe to restart.
-			// Creating a work_guard on an already-stopped io_context would
-			// leave it permanently stopped even with the guard active.
-			if (cs_impl::network::get_io_context().stopped())
-				cs_impl::network::get_io_context().restart();
-			return std::make_shared<asio::executor_work_guard<asio::io_context::executor_type>>(cs_impl::network::get_io_context().get_executor());
+			auto &settings = get_global_settings();
+			std::lock_guard<std::mutex> lock(settings.lifecycle_mutex);
+			if (settings.thread_executors.load(std::memory_order_acquire) == 0 && settings.io.stopped())
+				settings.io.restart();
+			return std::make_shared<asio::executor_work_guard<asio::io_context::executor_type>>(settings.io.get_executor());
 		}
 
 		using thread_executor_t = std::shared_ptr<thread_executor_type>;
@@ -1186,49 +1245,107 @@ bool network_cs_ext::tcp::socket::safe_shutdown(socket_t &sock)
 {
 	if (!sock->get_raw().is_open())
 		return true;
-	// Double-check loop to prevent TOCTOU race: cs_runtime_yield() may
-	// reschedule a fiber that submits a new async operation, incrementing
-	// async_jobs after we observed 0.
-	// Time-bounded to prevent indefinite blocking under sustained async load.
-	auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(NETWORK_SAFE_SHUTDOWN_TIMEOUT_MS);
-	while (std::chrono::steady_clock::now() < deadline) {
-		while (sock->async_jobs.load(std::memory_order_acquire) > 0) {
-			if (std::chrono::steady_clock::now() >= deadline)
-				break;
+	// Block new I/O atomically, then wait for existing jobs to drain.
+	// No timeout — safe_shutdown blocks until all pending I/O completes
+	// or the peer closes the connection.
+	try {
+		sock->begin_draining_exclusive();
+	}
+	catch (const std::exception &) {
+		return false;
+	}
+	// RAII: release exclusive reservation on any exit path.
+	struct exclusive_guard {
+		socket_t &s;
+		explicit exclusive_guard(socket_t &sock_ref) : s(sock_ref) {}
+		~exclusive_guard()
+		{
+			s->end_draining_exclusive();
+		}
+	} guard(sock);
+	network_cs_ext::async::restart();
+	while (sock->async_jobs.load(std::memory_order_acquire) > 0) {
+		network_cs_ext::async::get_global_settings().poll();
+		cs_runtime_yield();
+	}
+	bool success = true;
+	// TLS: async_shutdown avoids blocking the OS thread.
+	// A strand-bound timer closes the raw socket on timeout so the
+	// shutdown operation completes before TLS state is destroyed.
+	if (sock->is_ssl()) {
+		struct tls_shutdown_state {
+			asio::error_code ec;
+			std::atomic<bool> done{false};
+			bool timed_out = false;
+		};
+		auto state = std::make_shared<tls_shutdown_state>();
+		auto timer = std::make_shared<asio::steady_timer>(
+		                 cs_impl::network::get_io_context(),
+		                 std::chrono::milliseconds(NETWORK_TLS_SHUTDOWN_TIMEOUT_MS));
+		auto cancellation = std::make_shared<asio::cancellation_signal>();
+		bool shutdown_started = false;
+		try {
+			sock->get_tls_raw().async_shutdown(
+			    asio::bind_cancellation_slot(cancellation->slot(),
+			                                 asio::bind_executor(sock->get_tls_strand(),
+			[state, timer, cancellation](const asio::error_code &ec) {
+				state->ec = ec;
+				timer->cancel();
+				state->done.store(true, std::memory_order_release);
+			})));
+			shutdown_started = true;
+			timer->async_wait(asio::bind_executor(sock->get_tls_strand(),
+			[sock, state, cancellation](const asio::error_code &ec) {
+				if (ec || state->done.load(std::memory_order_acquire))
+					return;
+				state->timed_out = true;
+				cancellation->emit(asio::cancellation_type::terminal);
+				asio::error_code ignored;
+				sock->get_raw().cancel(ignored);
+				sock->get_raw().close(ignored);
+			}));
+		}
+		catch (const std::exception &) {
+			success = false;
+			timer->cancel();
+			if (shutdown_started) {
+				cancellation->emit(asio::cancellation_type::terminal);
+				asio::error_code ignored;
+				sock->get_raw().cancel(ignored);
+				sock->get_raw().close(ignored);
+			}
+			else
+				state->done.store(true, std::memory_order_release);
+		}
+		while (!state->done.load(std::memory_order_acquire)) {
 			network_cs_ext::async::get_global_settings().poll();
 			cs_runtime_yield();
 		}
-		if (sock->async_jobs.load(std::memory_order_acquire) == 0)
-			break;
+		if (state->timed_out || (state->ec && state->ec != asio::error::eof))
+			success = false;
+		sock->reset_ssl();
 	}
-	// Refuse to close if async jobs are still pending after the timeout.
-	// This prevents destroying TLS state while async handlers may still
-	// reference the stream.
-	if (sock->async_jobs.load(std::memory_order_acquire) > 0)
-		return false;
-	bool shutdown_ok = true;
-	bool close_ok = true;
-	try {
-		sock->shutdown();
+	// Raw socket shutdown
+	if (sock->get_raw().is_open()) {
+		asio::error_code ec;
+		sock->get_raw().shutdown(asio::ip::tcp::socket::shutdown_both, ec);
+		if (ec && ec != asio::error::not_connected)
+			success = false;
 	}
-	catch (const std::exception &) {
-		shutdown_ok = false;
+	// Close
+	if (sock->get_raw().is_open()) {
+		asio::error_code ec;
+		sock->get_raw().close(ec);
+		if (ec)
+			success = false;
 	}
-	try {
-		sock->close();
-	}
-	catch (const std::exception &) {
-		close_ok = false;
-	}
-	return shutdown_ok && close_ok;
+	return success;
 }
-
 bool network_cs_ext::udp::socket::safe_close(socket_t &sock)
 {
 	if (!sock->get_raw().is_open())
 		return true;
-	// Double-check loop to prevent TOCTOU race (same pattern as tcp::safe_shutdown)
-	// Time-bounded to prevent indefinite blocking under sustained async load.
+	// Spin until async_jobs drains or timeout expires.
 	auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(NETWORK_SAFE_SHUTDOWN_TIMEOUT_MS);
 	while (std::chrono::steady_clock::now() < deadline) {
 		while (sock->async_jobs.load(std::memory_order_acquire) > 0) {
@@ -1240,9 +1357,15 @@ bool network_cs_ext::udp::socket::safe_close(socket_t &sock)
 		if (sock->async_jobs.load(std::memory_order_acquire) == 0)
 			break;
 	}
-	asio::error_code ec;
-	sock->get_raw().close(ec);
-	return !static_cast<bool>(ec);
+	if (sock->async_jobs.load(std::memory_order_acquire) > 0)
+		return false;
+	try {
+		sock->close();
+		return true;
+	}
+	catch (const std::exception &) {
+		return false;
+	}
 }
 
 namespace cs_impl {

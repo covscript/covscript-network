@@ -162,6 +162,7 @@ parser.set_defaults("--port", 8080)
 | 位置参数名称包含 `-` | `ArgumentParser: arguments can not contains "-"` |
 | 选项名称不包含 `-` | `ArgumentParser: options must contains "-"` |
 | 未定义的选项 | `ArgumentParser: option "xxx" not supported.` |
+| 需要值的选项位于末尾 | `ArgumentParser: option "xxx" requires a value.` |
 | 参数过多 | `ArgumentParser: too much arguments.` |
 | 必选参数缺失 | `ArgumentParser: argument "xxx" required.` |
 | 必选选项缺失 | `ArgumentParser: option "xxx" required.` |

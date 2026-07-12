@@ -98,45 +98,104 @@ sock_d.bind(udp.endpoint_v4(port3 + 1))
 var recv_state = async.receive_from(sock_c, 100)
 
 var send_state = async.send_to(sock_d, "async-udp-test", udp.endpoint("127.0.0.1", port3))
+var second_send_rejected = false
+try
+    async.send_to(sock_d, "duplicate", udp.endpoint("127.0.0.1", port3))
+catch e
+    second_send_rejected = true
+end
+check("U03-01: second pending send rejected", second_send_rejected)
 
 if recv_state.wait_for(3000)
-    check("U03-01: async receive completed", true)
+    check("U03-02: async receive completed", true)
     var data = recv_state.get_result()
-    check_eq("U03-02: async received data", data, "async-udp-test")
+    check_eq("U03-03: async received data", data, "async-udp-test")
 
     var sender_ep = recv_state.get_endpoint()
-    check("U03-03: sender endpoint is_v4", sender_ep.is_v4())
-    check_eq("U03-04: sender port", sender_ep.port(), port3 + 1)
+    check("U03-04: sender endpoint is_v4", sender_ep.is_v4())
+    check_eq("U03-05: sender port", sender_ep.port(), port3 + 1)
 else
-    check("U03-01: async receive completed", false)
+    check("U03-02: async receive completed", false)
     system.out.println("  Receive timed out")
 end
 
 if send_state.wait_for(3000)
-    check("U03-05: async send completed", send_state.get_error() == null)
+    check("U03-06: async send completed", send_state.get_error() == null)
 else
-    check("U03-05: async send completed", false)
+    check("U03-06: async send completed", false)
 end
 
 sock_c.close()
 sock_d.close()
 
-section("U04: socket options")
+section("U04: safe_close rejects pending receive")
+
+var sock_e = new udp.socket
+var sock_f = new udp.socket
+sock_e.open_v4()
+sock_f.open_v4()
+sock_e.bind(udp.endpoint_v4(port3 + 2))
+sock_f.bind(udp.endpoint_v4(port3 + 3))
+
+var pending_receive = async.receive_from(sock_e, 100)
+var second_receive_rejected = false
+try
+    async.receive_from(sock_e, 100)
+catch e
+    second_receive_rejected = true
+end
+check("U04-01: second pending receive rejected", second_receive_rejected)
+var close_rejected = false
+try
+    sock_e.close()
+catch e
+    close_rejected = true
+end
+check("U04-02: close rejected while receive pending", close_rejected)
+check("U04-03: safe_close reports pending receive", sock_e.safe_close() == false)
+check("U04-04: socket remains open after rejected close", sock_e.is_open())
+
+sock_f.send_to("release", udp.endpoint("127.0.0.1", port3 + 2))
+check("U04-05: pending receive completes", pending_receive.wait_for(3000))
+check("U04-06: safe_close succeeds after receive", sock_e.safe_close())
+check("U04-07: socket closed after safe_close", !sock_e.is_open())
+sock_f.close()
+
+section("U05: socket options")
 
 var sock4 = new udp.socket
 sock4.open_v4()
 sock4.set_opt_reuse_address(true)
 sock4.set_opt_broadcast(true)
-check("U04-01: options set without error", true)
+check("U05-01: options set without error", true)
 sock4.close()
 
-section("U05: resolve")
+section("U06: resolve")
 
 var results = udp.resolve("127.0.0.1", "53")
-check("U05-01: resolve returns results", !results.empty())
+check("U06-01: resolve returns results", !results.empty())
 if !results.empty()
-    check("U05-02: resolved endpoint is_v4", results[0].is_v4())
+    check("U06-02: resolved endpoint is_v4", results[0].is_v4())
 end
+
+section("U07: buffer size limits")
+
+var limit_sock = new udp.socket
+var negative_receive_rejected = false
+try
+    async.receive_from(limit_sock, -1)
+catch e
+    negative_receive_rejected = true
+end
+check("U07-01: negative async receive size rejected", negative_receive_rejected)
+
+var oversized_receive_rejected = false
+try
+    async.receive_from(limit_sock, 67108865)
+catch e
+    oversized_receive_rejected = true
+end
+check("U07-02: oversized async receive rejected", oversized_receive_rejected)
 
 system.out.println("")
 system.out.println("=== Results ===")

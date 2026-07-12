@@ -217,6 +217,49 @@ check("F04-03: poll_once returns boolean", polled_one == true || polled_one == f
 
 guard4 = null
 
+section("F05: safe_shutdown yields inside fiber")
+
+var srv5 = new tcp.socket
+var acpt5 = tcp.acceptor(tcp.endpoint_v4(server_port + 2))
+var guard5 = new async.work_guard
+var accept_state5 = async.accept(srv5, acpt5)
+var cli5 = new tcp.socket
+cli5.connect(tcp.endpoint("127.0.0.1", server_port + 2))
+check_true("F05-01: client connected", cli5.is_open())
+check_true("F05-02: server accepted", accept_state5.wait_for(2000))
+
+var shutdown_started5 = false
+var shutdown_done5 = false
+var shutdown_ok5 = false
+
+function shutdown_fiber_func5(sock)
+    async.read(sock, 1)
+    shutdown_started5 = true
+    shutdown_ok5 = sock.safe_shutdown()
+    shutdown_done5 = true
+end
+
+var shutdown_fiber5 = fiber.create(shutdown_fiber_func5, cli5)
+shutdown_fiber5.resume()
+check_true("F05-03: safe_shutdown started in fiber", shutdown_started5)
+check_false("F05-04: pending read caused fiber yield", shutdown_done5)
+
+srv5.write("x")
+var start_f05 = runtime.time()
+loop
+    shutdown_fiber5.resume()
+    async.poll_once()
+    runtime.delay(1)
+    if runtime.time() - start_f05 >= 5000
+        break
+    end
+until shutdown_done5
+
+check_true("F05-05: safe_shutdown resumed after read", shutdown_done5)
+check_true("F05-06: safe_shutdown returned true", shutdown_ok5)
+check_false("F05-07: socket closed after safe_shutdown", cli5.is_open())
+srv5.safe_shutdown()
+guard5 = null
 system.out.println("")
 system.out.println("=== Results ===")
 system.out.println("PASS: " + _pass)

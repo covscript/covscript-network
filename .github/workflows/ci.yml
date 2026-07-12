@@ -213,6 +213,7 @@ jobs:
         run: |
           set -e
           cs tests/test_url_parse.csc
+          cs tests/test_argparse.csc
           cs tests/test_header_parser.csc
           cs tests/test_utils.csc
           cs tests/test_tcp_sync.csc
@@ -235,6 +236,7 @@ jobs:
         run: |
           set -e
           cs tests/test_http_roundtrip.csc
+          cs tests/test_http_server.csc
 
       # ------------------------------------------------------------------ #
       # 14. Run fiber + socket tests                                       #

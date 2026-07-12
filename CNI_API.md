@@ -37,6 +37,8 @@ TLS 连接通过 `ssl_options` 配置信任行为。`ssl_options` 是一个 `has
 
 > **注意**：`verify_peer` 和 `verify_host` 选项在 CNI 层被屏蔽。如需禁用对等验证，使用 `trust_mode = "insecure"`。
 
+> **环境变量缓存**：`auto` 和 `openssl` 模式下，环境变量 `SSL_CERT_FILE` 和 `SSL_CERT_DIR` 在**首次 TLS 初始化时读取并缓存**。之后对进程环境变量的修改不会影响后续 TLS 连接。如需动态切换信任源，使用 `trust_mode = "custom"` 并显式传入 `ca_file` / `ca_path`。
+
 ### 示例
 
 ```ecs
@@ -105,14 +107,14 @@ sock.connect_ssl("localhost", {"trust_mode": "insecure"}.to_hash_map())
 | `available` | `() → int` | 可读取的字节数（非阻塞） |
 | `receive` | `(max: int) → string` | 读取最多 `max` 字节。阻塞直到至少 1 字节可读 |
 | `read` | `(size: int) → string` | 读取恰好 `size` 字节。阻塞直到全部读完 |
-| `send` | `(data: string)` | 发送数据（尽力而为，可能部分写入） |
+| `send` | `(data: string) → int` | 发送数据（单次部分写入，返回实际写入字节数）。需完整发送时使用 `write` |
 | `write` | `(data: string)` | 发送数据（保证全部写入，阻塞直到完成） |
 | `shutdown` | `()` | 关闭套接字通信通道。与 `close()` 的区别：`shutdown()` 仅关闭通信，socket 保持打开且资源不释放；`close()` 释放所有资源 |
-| `safe_shutdown` | `() → boolean` | 安全关闭：等待异步操作完成（最多 200ms），然后关闭 TLS 和 TCP。成功返回 `true`；超时仍有异步操作未完成返回 `false` |
+| `safe_shutdown` | `() → boolean` | 安全关闭：协作式等待异步操作全部完成后关闭 TLS 和 TCP。成功返回 `true`；关闭过程中发生错误返回 `false`。在 fiber 环境中通过 `poll` + `yield` 协作等待，不阻塞 OS 线程 |
 | `local_endpoint` | `() → endpoint` | 获取本地端点地址 |
 | `remote_endpoint` | `() → endpoint` | 获取远程端点地址 |
 
-> **`send` 与 `write` 的区别**：`send` 使用 `write_some`，是尽力而为的非阻塞发送，可能只发送部分数据。`write` 使用 `asio::write`，循环写入直到全部数据发送完毕。**当你需要保证数据完整发送时，请使用 `write`**。这是刻意设计的接口区分，类似 POSIX `send()` vs 阻塞 `write()`。
+> **`send` 与 `write` 的区别**：`send` 使用 `write_some`，执行单次写入并返回实际写入的字节数，可能只发送部分数据。`write` 使用 `asio::write`，循环写入直到全部数据发送完毕。**当你需要保证数据完整发送时，请使用 `write`**。此设计对应 BSD socket `send()` vs `write()` 的语义差异。
 
 ### socket 静态方法
 
@@ -154,8 +156,8 @@ sock.connect_ssl("localhost", {"trust_mode": "insecure"}.to_hash_map())
 | `open_v6` | `()` | 打开 IPv6 套接字 |
 | `bind` | `(ep: endpoint)` | 绑定到指定端点 |
 | `connect` | `(ep: endpoint)` | 连接到指定端点（设置默认目标） |
-| `close` | `()` | 关闭套接字 |
-| `safe_close` | `() → boolean` | 安全关闭：等待所有异步操作完成后关闭 |
+| `close` | `()` | 关闭套接字。若存在进行中的 I/O 会抛出异常（提示使用 `safe_close()`） |
+| `safe_close` | `() → boolean` | 安全关闭：等待异步操作完成（默认最多 200ms，可在构建时配置）后独占关闭；超时或独占竞争失败返回 `false` |
 | `is_open` | `() → boolean` | 套接字是否打开 |
 | `set_opt_reuse_address` | `(value: boolean)` | 设置 `SO_REUSEADDR` |
 | `set_opt_broadcast` | `(value: boolean)` | 设置 `SO_BROADCAST` |
@@ -191,13 +193,13 @@ sock.connect_ssl("localhost", {"trust_mode": "insecure"}.to_hash_map())
 |------|------|--------|------|
 | `has_done` | `() → boolean` | `boolean` | 异步操作是否已完成 |
 | `get_result` | `() → string or null` | `string` 或 `null` | 获取读取操作的结果。未完成时返回 `null`。**消耗性操作**：每次调用消耗已读数据 |
-| `get_buffer` | `(max_bytes: int) → string or null` | `string` 或 `null` | 从缓冲区读取最多 `max_bytes` 字节。未完成时返回 `null`。**消耗性操作** |
+| `get_buffer` | `(max_bytes: int) → string or null` | `string` 或 `null` | 从缓冲区读取最多 `max_bytes` 字节。未完成时返回 `null`。**消耗性操作**。单次请求默认上限为 64 MiB |
 | `available` | `() → int` | `integer` | 缓冲区中可读字节数（仅对读取操作有效） |
 | `eof` | `() → boolean` | `boolean` | 是否遇到 EOF 或连接重置 |
 | `get_error` | `() → string or null` | `string` 或 `null` | 获取错误消息。无错误返回 `null` |
 | `get_endpoint` | `() → endpoint` | `udp_endpoint` | 获取 UDP 发送方端点（仅 `receive_from` 操作有效） |
-| `wait` | `() → boolean` | `boolean` | 阻塞等待操作完成。成功返回 `true`，失败返回 `false` |
-| `wait_for` | `(timeout_ms: int) → boolean` | `boolean` | 带超时等待。超时返回 `false` |
+| `wait` | `() → boolean` | `boolean` | 阻塞等待操作完成。`true` 表示操作已完成且成功；`false` 表示操作已完成但失败。需获取失败原因时使用 `get_error()` |
+| `wait_for` | `(timeout_ms: int) → boolean` | `boolean` | 带超时等待。`true` 表示操作已完成且成功；`false` 表示超时**或**操作已完成但失败。需区分时先用 `has_done()` 判断是否超时，再用 `get_error()` 获取失败原因 |
 
 ### 异步 TCP 操作
 
@@ -337,8 +339,10 @@ end
 
 1. **异步操作生命周期**：异步操作期间 socket 必须保持存活。创建 `work_guard` 可防止事件循环在所有异步操作完成前停止。
 2. **TLS 连接**：同步 `connect_ssl` 方法先建立 TCP 连接再执行 TLS 握手；异步 `async.connect_ssl` 仅执行 TLS 握手（socket 必须先建立 TCP 连接）。握手失败时 SSL 上下文会被自动清理。
-3. **`send` vs `write`**：`send` 是尽力而为的部分写入（类似 POSIX `send()`），`write` 保证全部写入。需要可靠传输时使用 `write`。
-4. **`shutdown` vs `close` vs `safe_shutdown`**：`shutdown` 关闭通信通道但不释放资源（socket 保持 `is_open()` 为 true）；`close` 立即关闭并释放 TLS 上下文；`safe_shutdown` 等待异步操作完成（最多 200ms），然后关闭。如有异步操作仍在进行则返回 `false` 且不关闭（推荐用于异步场景）。
+3. **`send` vs `write`**：`send` 执行单次写入并返回实际写入字节数，类似 BSD `send()`；`write` 保证全部写入，类似 POSIX `write()`。需要可靠传输时使用 `write`。
+4. **`shutdown` vs `close` vs `safe_shutdown`**：`shutdown` 关闭通信通道但不释放资源（socket 保持 `is_open()` 为 true）；`close` 立即关闭并释放 TLS 上下文（如有进行中的异步操作会抛出异常）；`safe_shutdown` 协作式等待所有异步操作完成后关闭 TLS 和 TCP。异步任务等待无超时；TLS close-notify 超时默认 5000ms（`NETWORK_TLS_SHUTDOWN_TIMEOUT_MS`）。在 fiber 环境中通过 `poll` + `yield` 协作等待，不阻塞 OS 线程；非 fiber 环境调用线程一直阻塞到关闭完成。推荐在异步场景中使用 `safe_shutdown`。
 5. **信任报告**：建议使用 `sock.get_ssl_trust_report()`（每个 socket 独立），而非全局的 `get_last_global_ssl_trust_report()`（线程级别，可能被覆盖）。
-6. **线程安全**：同一 socket 不应并发进行同步和异步操作。特别是 TLS socket，混合使用同步和异步操作可能导致 OpenSSL 流状态损坏或数据竞争。`std::getenv` 在 TLS 连接初始化时调用，静态缓存后不再重复调用。多线程高并发场景下建议使用 `async.thread_worker` 管理事件循环线程。
+6. **线程安全**：同一 socket 不应并发混合同步和异步操作。异步 API 最多允许一个 pending read/receive 和一个 pending write/send；同方向重叠操作会被拒绝，读写可全双工并行。TLS 异步 handler 绑定到每个 socket 的 strand，可由多个 `async.thread_worker` 安全驱动。
 7. **netutils HTTPS 行为变更 (v1.2.1)**：`netutils.http_get` 和 `netutils.http_post` 现在默认启用 SSL 证书验证（`netutils.ssl_verify = true`）。旧版本无条件跳过验证。连接自签名证书或内部 PKI 的 HTTPS 服务器时，需显式设置 `netutils.ssl_verify = false`。
+8. **异步部分数据**：读取操作可能同时返回错误和已传输数据，例如对端在发送部分内容后关闭连接。完成后应先用 `get_error()`/`eof()` 判断结束原因；`get_result()`、`get_buffer()` 和 `available()` 仍允许读取错误发生前已收到的数据。
+9. **缓冲区上限**：TCP/UDP 的同步读取、异步读取及 `state.get_buffer()` 单次默认最多请求 64 MiB；可通过 CMake 的 `NETWORK_MAX_IO_BUFFER_SIZE` 调整。非正数或超限请求会在分配前抛出异常。

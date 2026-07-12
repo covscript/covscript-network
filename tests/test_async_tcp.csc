@@ -244,6 +244,313 @@ catch e
     null
 end
 
+section("partial data preserved after EOF")
+
+var port3 = 0
+var acceptor3 = null
+var server3 = new tcp.socket
+test_port = 12200
+while test_port < 12300
+    try
+        acceptor3 = tcp.acceptor(tcp.endpoint_v4(test_port))
+        port3 = test_port
+        break
+    catch e
+        test_port += 1
+    end
+end
+
+check("T18: partial-read test found free port", port3 != 0)
+if port3 != 0
+    guard = new async.work_guard
+    var accept_state3 = async.accept(server3, acceptor3)
+    var client3 = new tcp.socket
+    client3.connect(tcp.endpoint("127.0.0.1", port3))
+    check("T19: partial-read server accepted", wait_for(accept_state3, 5000))
+
+    var read_state3 = async.read(server3, 8192)
+    var partial_payload = ""
+    foreach i in range(4096)
+        partial_payload += "x"
+    end
+    client3.write(partial_payload)
+    client3.close()
+
+    check("T20: partial read completed after peer close", wait_for(read_state3, 5000))
+    check("T21: partial read reports EOF/error", read_state3.get_error() != null)
+    check_eq("T22: partial bytes remain available", read_state3.available(), partial_payload.size)
+    check_eq("T23: get_result returns partial bytes", read_state3.get_result(), partial_payload)
+
+    try
+        server3.close()
+    catch e
+        null
+    end
+end
+
+section("TLS upgrade rejects pending I/O")
+
+var port4 = 0
+var acceptor4 = null
+var server4 = new tcp.socket
+test_port = 12300
+while test_port < 12400
+    try
+        acceptor4 = tcp.acceptor(tcp.endpoint_v4(test_port))
+        port4 = test_port
+        break
+    catch e
+        test_port += 1
+    end
+end
+
+check("T24: TLS upgrade test found free port", port4 != 0)
+if port4 != 0
+    guard = new async.work_guard
+    var accept_state4 = async.accept(server4, acceptor4)
+    var client4 = new tcp.socket
+    client4.connect(tcp.endpoint("127.0.0.1", port4))
+    check("T25: TLS upgrade server accepted", wait_for(accept_state4, 5000))
+
+    var read_state4 = async.read(server4, 1)
+    var close_rejected = false
+    try
+        server4.close()
+    catch e
+        close_rejected = true
+    end
+    check("T26: close rejected while read pending", close_rejected)
+
+    var upgrade_rejected = false
+    try
+        server4.connect_ssl("localhost", {"trust_mode": "insecure"}.to_hash_map())
+    catch e
+        upgrade_rejected = true
+    end
+    check("T27: TLS upgrade rejected while read pending", upgrade_rejected)
+    check("T28: rejected upgrade leaves plain socket", !server4.is_ssl())
+
+    client4.write("x")
+    check("T29: original read still completes", wait_for(read_state4, 5000))
+    check_eq("T30: original read result preserved", read_state4.get_result(), "x")
+
+    client4.close()
+    server4.close()
+end
+
+section("TLS handshake blocks new I/O")
+
+var port5 = 0
+var acceptor5 = null
+var server5 = new tcp.socket
+test_port = 12400
+while test_port < 12500
+    try
+        acceptor5 = tcp.acceptor(tcp.endpoint_v4(test_port))
+        port5 = test_port
+        break
+    catch e
+        test_port += 1
+    end
+end
+
+check("T31: pending handshake test found free port", port5 != 0)
+if port5 != 0
+    guard = new async.work_guard
+    var accept_state5 = async.accept(server5, acceptor5)
+    var client5 = new tcp.socket
+    client5.connect(tcp.endpoint("127.0.0.1", port5))
+    check("T32: pending handshake server accepted", wait_for(accept_state5, 5000))
+
+    var reusable_state5 = new async.state
+    client5.write("ready\n")
+    async.read_until(server5, reusable_state5, "\n")
+    check("T33: reusable state primed", wait_for(reusable_state5, 5000))
+    check_eq("T34: reusable state initial result", reusable_state5.get_result(), "ready\n")
+
+    var handshake_state5 = async.connect_ssl(server5, "localhost", {"trust_mode": "insecure"}.to_hash_map())
+    var fresh_state5 = new async.state
+    var fresh_error_first = ""
+    var fresh_error_second = ""
+    try
+        async.read_until(server5, fresh_state5, "\n")
+    catch e
+        fresh_error_first = e.what
+    end
+    try
+        async.read_until(server5, fresh_state5, "\n")
+    catch e
+        fresh_error_second = e.what
+    end
+    check("T35: fresh state rejects while handshake pending", !fresh_error_first.empty())
+    check("T36: rejected fresh state is not poisoned", fresh_error_second.find("Last asynchronous operation", 0) == -1)
+
+    var async_read_rejected = false
+    try
+        async.read_until(server5, reusable_state5, "\n")
+    catch e
+        async_read_rejected = true
+    end
+    check("T37: read_until rejected during handshake", async_read_rejected)
+    check("T38: rejected read_until keeps state reusable", reusable_state5.has_done())
+    check_eq("T39: available returns zero during handshake", server5.available(), 0)
+
+    var sync_write_rejected = false
+    try
+        server5.write("x")
+    catch e
+        sync_write_rejected = true
+    end
+    check("T40: sync write rejected during handshake", sync_write_rejected)
+
+    client5.close()
+    check("T41: failed handshake completes", wait_for(handshake_state5, 5000))
+    check("T42: failed handshake reports error", handshake_state5.get_error() != null)
+    check("T43: failed handshake clears TLS state", !server5.is_ssl())
+    check("T44: failed handshake preserves trust report", server5.get_ssl_trust_report().find("insecure", 0) != -1)
+    server5.close()
+end
+
+section("TLS configuration failure restores socket")
+
+var port6 = 0
+var acceptor6 = null
+var server6 = new tcp.socket
+test_port = 12500
+while test_port < 12600
+    try
+        acceptor6 = tcp.acceptor(tcp.endpoint_v4(test_port))
+        port6 = test_port
+        break
+    catch e
+        test_port += 1
+    end
+end
+
+check("T45: TLS configuration test found free port", port6 != 0)
+if port6 != 0
+    guard = new async.work_guard
+    var accept_state6 = async.accept(server6, acceptor6)
+    var client6 = new tcp.socket
+    client6.connect(tcp.endpoint("127.0.0.1", port6))
+    check("T46: TLS configuration server accepted", wait_for(accept_state6, 5000))
+
+    var config_rejected = false
+    try
+        client6.connect_ssl("localhost", {"trust_mode": "custom", "ca_file": "__covscript_network_missing_ca__.pem"}.to_hash_map())
+    catch e
+        config_rejected = true
+    end
+    check("T47: invalid custom CA rejected", config_rejected)
+    check("T48: configuration failure clears TLS state", !client6.is_ssl())
+    check("T49: configuration error report preserved", client6.get_ssl_trust_report().find("trust_mode=error", 0) != -1)
+
+    client6.write("x")
+    check_eq("T50: plain TCP remains usable after failure", server6.receive(1), "x")
+    client6.close()
+    server6.close()
+end
+
+section("overlapping reads rejected, full duplex preserved")
+
+var port7 = 0
+var acceptor7 = null
+var server7 = new tcp.socket
+test_port = 12600
+while test_port < 12700
+    try
+        acceptor7 = tcp.acceptor(tcp.endpoint_v4(test_port))
+        port7 = test_port
+        break
+    catch e
+        test_port += 1
+    end
+end
+
+check("T51: directional admission test found free port", port7 != 0)
+if port7 != 0
+    guard = new async.work_guard
+    var accept_state7 = async.accept(server7, acceptor7)
+    var client7 = new tcp.socket
+    client7.connect(tcp.endpoint("127.0.0.1", port7))
+    check("T52: directional admission server accepted", wait_for(accept_state7, 5000))
+
+    var first_read7 = async.read(server7, 1)
+    var second_read_rejected7 = false
+    try
+        async.read(server7, 1)
+    catch e
+        second_read_rejected7 = true
+    end
+    check("T53: second pending read rejected", second_read_rejected7)
+
+    var read_until_state7 = new async.state
+    var read_until_rejected7 = false
+    try
+        async.read_until(server7, read_until_state7, "\n")
+    catch e
+        read_until_rejected7 = true
+    end
+    check("T54: read_until rejected while read pending", read_until_rejected7)
+    check("T55: rejected read_until state remains fresh", !read_until_state7.has_done())
+
+    var concurrent_write7 = async.write(server7, "duplex")
+    check_eq("T56: write can overlap pending read", client7.read(6), "duplex")
+    check("T57: concurrent write completes", wait_for(concurrent_write7, 5000))
+
+    var first_write7 = async.write(server7, "w")
+    var second_write_rejected7 = false
+    try
+        async.write(server7, "z")
+    catch e
+        second_write_rejected7 = true
+    end
+    check("T58: second pending write rejected", second_write_rejected7)
+    check_eq("T59: first pending write preserved", client7.read(1), "w")
+    wait_for(first_write7, 5000)
+
+    client7.write("x")
+    wait_for(first_read7, 5000)
+    client7.close()
+    server7.close()
+end
+
+section("buffer size limits")
+
+var limit_sock = new tcp.socket
+var negative_async_read_rejected = false
+try
+    async.read(limit_sock, -1)
+catch e
+    negative_async_read_rejected = true
+end
+check("T60: negative async read size rejected", negative_async_read_rejected)
+
+var oversized_async_read_rejected = false
+try
+    async.read(limit_sock, 67108865)
+catch e
+    oversized_async_read_rejected = true
+end
+check("T61: oversized async read rejected", oversized_async_read_rejected)
+
+var oversized_sync_read_rejected = false
+try
+    limit_sock.read(67108865)
+catch e
+    oversized_sync_read_rejected = true
+end
+check("T62: oversized sync read rejected", oversized_sync_read_rejected)
+
+var limit_state = new async.state
+var negative_get_buffer_rejected = false
+try
+    limit_state.get_buffer(-1)
+catch e
+    negative_get_buffer_rejected = true
+end
+check("T63: negative get_buffer size rejected", negative_get_buffer_rejected)
+
 system.out.println("")
 system.out.println("=== Results ===")
 system.out.println("PASS: " + _pass)

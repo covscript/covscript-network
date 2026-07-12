@@ -116,10 +116,12 @@ var cli2 = new tcp.socket
 cli2.connect(tcp.endpoint("127.0.0.1", server_port + 1))
 ast2.wait_for(5000)
 
-cli2.send("test")
+var sent = cli2.send("test")
+check_eq("S02-01: send() returns payload length", sent, 4)
 var buf2 = srv2.receive(10)
-check_not_null("S02-01: send() delivered some data", buf2)
-check("S02-02: send() delivered non-empty", !buf2.empty())
+check_not_null("S02-02: send() delivered some data", buf2)
+check("S02-03: send() delivered non-empty", !buf2.empty())
+check_eq("S02-04: received matches sent length", buf2.size, 4)
 
 cli2.close()
 srv2.close()

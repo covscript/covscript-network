@@ -1,6 +1,6 @@
 # CovScript NetUtils 协议文档
 
-版本：1.2.0
+版本：1.4
 
 作者：Covariant Script OSC
 
@@ -27,7 +27,7 @@
 ## 2. 基本常量与工具函数
 
 * `server_name = "CovScript-NetUtils"`
-* `server_version = "1.2.0"`
+* `server_version = "1.4"`
 
 与协议/实现相关的重要工具函数：
 
@@ -263,6 +263,8 @@ Master 分配 `rank`：先尝试使用 `deprecated_rank`（回收的编号），
 实现备注：
 
 * `read_http_header` / `read POST body` 等函数会识别 `state.eof()` 并记录 EOF 情况，Master/Slave 会据此决定是否回写错误并关闭 socket。
+* HTTP framing 默认限制单行 8 KiB、完整 header 64 KiB、缓冲 body 64 MiB。服务端拒绝不支持的 `Transfer-Encoding`、重复/非法 `Content-Length`；客户端拒绝冲突 framing、非法 chunk size 和包含 CR/LF 的自定义 header。
+* 每个 keep-alive 连接复用同一个异步 read state，保留 `async_read_until` 预读到下一请求的字节；请求 body 按 `Content-Length` 消费，不依赖 method。响应写入按连接串行等待，避免流水请求产生重叠 `async.write`。
 * Master 在某些错误（非 EOF）情况下会直接用 `async.write(sock, compose_response(error_code))` 回写客户端。
 
 ---

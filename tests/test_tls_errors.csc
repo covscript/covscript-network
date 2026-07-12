@@ -1,4 +1,5 @@
 import network.tcp as tcp
+import network.async as async
 import network
 
 var _pass = 0
@@ -84,9 +85,12 @@ if !connected
     skip("E02-all", "cannot reach " + test_host + ":" + to_string(test_port))
 else
     var handshake_ok = false
+    var guard2 = new async.work_guard
+    var worker2a = new async.thread_worker
+    var worker2b = new async.thread_worker
     try
-        sock2.connect_ssl(test_host, {"trust_mode": "insecure"}.to_hash_map())
-        handshake_ok = true
+        var handshake_state2 = async.connect_ssl(sock2, test_host, {"trust_mode": "insecure"}.to_hash_map())
+        handshake_ok = handshake_state2.wait_for(10000)
     catch e
         system.out.println("  Handshake error: " + e.what)
     end
@@ -100,7 +104,12 @@ else
         check("E02-04: insecure report mentions insecure", report.find("insecure", 0) != -1)
     end
 
-    sock2.safe_shutdown()
+    var shutdown_result2 = sock2.safe_shutdown()
+    check_false("E02-05: safe_shutdown closes socket with workers", sock2.is_open())
+    check("E02-06: safe_shutdown reports a boolean", shutdown_result2 == true || shutdown_result2 == false)
+    guard2 = null
+    worker2a = null
+    worker2b = null
 end
 
 section("E03: TLS invalid hostname")
@@ -172,12 +181,14 @@ else
 
         var global_report = network.get_last_global_ssl_trust_report()
         check_not_null("E04-03: global report snapshot non-null", global_report)
+        check_eq("E04-04: global report matches socket report", global_report, report)
 
-        check("E04-04: report mentions trust_mode", report.find("trust_mode", 0) != -1)
+        check("E04-05: report mentions trust_mode", report.find("trust_mode", 0) != -1)
 
         sock4.safe_shutdown()
     catch e
-        skip("E04-all", "TLS handshake failed: " + e.what)
+        system.out.println("  TLS handshake failed: " + e.what)
+        check("E04-all: connected TLS handshake succeeds", false)
     end
 end
 
@@ -214,7 +225,8 @@ else
 
         sock5.close()
     catch e
-        skip("E05-all", "TLS handshake failed: " + e.what)
+        system.out.println("  TLS handshake failed: " + e.what)
+        check("E05-all: connected TLS handshake succeeds", false)
     end
 end
 
@@ -253,10 +265,12 @@ else
             system.out.println("  Expected: " + e.what)
         end
         check_false("E06-02: double connect_ssl rejected", double_ok)
+        check_true("E06-03: rejected upgrade preserves TLS state", sock6.is_ssl())
 
         sock6.close()
     catch e
-        skip("E06-all", "TLS handshake failed: " + e.what)
+        system.out.println("  TLS handshake failed: " + e.what)
+        check("E06-all: connected TLS handshake succeeds", false)
     end
 end
 
