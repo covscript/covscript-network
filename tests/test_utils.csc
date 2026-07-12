@@ -54,10 +54,10 @@ var host = network.host_name()
 check_not_null("U02-01: host_name returns non-null", host)
 check("U02-02: host_name is non-empty", !host.empty())
 
-section("U03: get_last_ssl_trust_report")
+section("U03: get_last_global_ssl_trust_report")
 
-var report = network.get_last_ssl_trust_report()
-check_not_null("U03-01: get_last_ssl_trust_report returns non-null", report)
+var report = network.get_last_global_ssl_trust_report()
+check_not_null("U03-01: get_last_global_ssl_trust_report returns non-null", report)
 check("U03-02: report is non-empty string", !report.empty())
 check("U03-03: default report mentions unset", report.find("unset", 0) != -1 || report.find("trust_mode", 0) != -1)
 

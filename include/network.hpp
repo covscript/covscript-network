@@ -167,6 +167,21 @@ namespace cs_impl {
 					try_add_verify_path(ctx, cert_dir, report, "env:SSL_CERT_DIR");
 			}
 
+			// Platform-specific fallback certificate paths.
+			//
+			// These are tried ONLY when OpenSSL's set_default_verify_paths() fails
+			// (e.g., OpenSSL was built with a non-default OPENSSLDIR, or the system
+			// cert store is in an unexpected location). The paths listed here are
+			// common defaults for each platform and may drift over time as package
+			// managers change layouts.
+			//
+			// The "auto" trust mode uses a layered strategy for resilience:
+			//   1. OpenSSL's set_default_verify_paths() (compile-time OPENSSLDIR)
+			//   2. Environment variables SSL_CERT_FILE / SSL_CERT_DIR
+			//   3. Platform-specific fallback paths (this function)
+			//
+			// If you need a specific cert file or directory, use trust_mode="custom"
+			// with ca_file / ca_path instead of relying on these fallbacks.
 			static void try_load_platform_fallback_trust_sources(asio::ssl::context &ctx, trust_load_report &report)
 			{
 #if defined(__linux__)
@@ -329,13 +344,13 @@ namespace cs_impl {
 				}
 			}
 
+			// Precondition: options.verify_host && !options.verify_peer must be
+			// rejected by the caller (init_ssl) before reaching this point.
 			template <typename stream_t>
 			static void configure_client_stream(stream_t &stream, const std::string &host, const ssl_options &options)
 			{
 				if (!SSL_set_tlsext_host_name(stream.native_handle(), host.c_str()))
 					throw std::runtime_error("Failed to set TLS SNI host name.");
-				if (options.verify_host && !options.verify_peer)
-					throw std::runtime_error("TLS host verification requires peer verification.");
 				if (options.trust_mode == ssl_trust_mode::insecure || !options.verify_peer)
 					stream.set_verify_mode(asio::ssl::verify_none);
 				else
@@ -380,6 +395,9 @@ namespace cs_impl {
 						throw std::runtime_error("TCP socket is not connected.");
 					if (tls_stream)
 						throw std::runtime_error("TLS has already been enabled on this socket.");
+					// Validate options before allocating OpenSSL state for fail-fast behavior
+					if (options.verify_host && !options.verify_peer)
+						throw std::runtime_error("TLS host verification requires peer verification.");
 					auto new_ctx = std::make_unique<asio::ssl::context>(asio::ssl::context::tls_client);
 					try {
 						last_tls_trust_report = detail::configure_client_context(*new_ctx, options);

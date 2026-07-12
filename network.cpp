@@ -80,9 +80,8 @@ namespace network_cs_ext {
 					options.trust_mode = cs_impl::network::ssl_trust_mode::auto_mode;
 				else if (mode == "openssl")
 					options.trust_mode = cs_impl::network::ssl_trust_mode::openssl;
-				else if (mode == "custom") {
+				else if (mode == "custom")
 					options.trust_mode = cs_impl::network::ssl_trust_mode::custom;
-				}
 				else if (mode == "insecure") {
 					options.trust_mode = cs_impl::network::ssl_trust_mode::insecure;
 					options.verify_peer = false;
@@ -90,29 +89,27 @@ namespace network_cs_ext {
 				}
 				else
 					throw lang_error("Unsupported TLS trust_mode: " + mode);
-				continue;
 			}
-			if (key == "ca_file") {
+			else if (key == "ca_file") {
 				if (is_null_var(value))
 					options.ca_file.clear();
 				else if (value.is_type_of<string>())
 					options.ca_file = value.const_val<string>();
 				else
 					throw lang_error("TLS option \"ca_file\" must be string or null.");
-				continue;
 			}
-			if (key == "ca_path") {
+			else if (key == "ca_path") {
 				if (is_null_var(value))
 					options.ca_path.clear();
 				else if (value.is_type_of<string>())
 					options.ca_path = value.const_val<string>();
 				else
 					throw lang_error("TLS option \"ca_path\" must be string or null.");
-				continue;
 			}
-			if (key == "verify_peer" || key == "verify_host")
+			else if (key == "verify_peer" || key == "verify_host")
 				throw lang_error("TLS option \"" + key + "\" is not exposed through CNI.");
-			throw lang_error("Unknown TLS option: " + key);
+			else
+				throw lang_error("Unknown TLS option: " + key);
 		}
 		if (!options.ca_file.empty() || !options.ca_path.empty()) {
 			if (!has_trust_mode)
@@ -162,7 +159,7 @@ namespace network_cs_ext {
 		return asio::ip::host_name();
 	}
 
-	string get_last_ssl_trust_report()
+	string get_last_global_ssl_trust_report()
 	{
 		return cs_impl::network::detail::get_last_tls_trust_report();
 	}
@@ -1092,7 +1089,7 @@ namespace network_cs_ext {
 		.add_var("tcp", make_namespace(tcp::tcp_ext))
 		.add_var("udp", make_namespace(udp::udp_ext))
 		.add_var("host_name", make_cni(host_name))
-		.add_var("get_last_ssl_trust_report", make_cni(get_last_ssl_trust_report))
+		.add_var("get_last_global_ssl_trust_report", make_cni(get_last_global_ssl_trust_report))
 		.add_var("to_fixed_hex", make_cni(to_fixed_hex))
 		.add_var("from_fixed_hex", make_cni(from_fixed_hex))
 		.add_var("async", make_namespace(async::async_ext));

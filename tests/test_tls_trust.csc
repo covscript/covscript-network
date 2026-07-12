@@ -132,9 +132,14 @@ end
 run_trust_check("auto", {"trust_mode": "auto"}.to_hash_map())
 
 # Test openssl mode
+# Windows uses its own system certificate store (ROOT/CA/AuthRoot) via
+# load_windows_root_certs, not OpenSSL's set_default_verify_paths.
+# The "openssl" trust mode relies solely on OpenSSL defaults, which are
+# typically not configured on Windows — so we skip it there. The "auto"
+# mode already exercises Windows cert store loading.
 if system.is_platform_windows()
     system.out.println("")
-    system.out.println("[Mode openssl] skipped (not supported on Windows)")
+    system.out.println("[Mode openssl] skipped (Windows uses system cert store, not OpenSSL defaults)")
     _skip += 1
 else
     run_trust_check("openssl", {"trust_mode": "openssl"}.to_hash_map())

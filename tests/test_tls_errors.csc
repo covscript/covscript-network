@@ -1,4 +1,5 @@
 import network.tcp as tcp
+import network
 
 var _pass = 0
 var _fail = 0
@@ -169,8 +170,8 @@ else
         var report = sock4.get_ssl_trust_report()
         check_not_null("E04-02: per-socket report non-null", report)
 
-        var global_report = sock4.get_ssl_trust_report()
-        check_not_null("E04-03: report snapshot non-null", global_report)
+        var global_report = network.get_last_global_ssl_trust_report()
+        check_not_null("E04-03: global report snapshot non-null", global_report)
 
         check("E04-04: report mentions trust_mode", report.find("trust_mode", 0) != -1)
 

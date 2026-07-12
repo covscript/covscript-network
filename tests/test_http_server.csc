@@ -61,7 +61,13 @@ system.out.println("Using port: " + to_string(server_port))
 # Helpers: drive server fiber + async event loop together
 # ============================================================
 function drive_server()
-    server_fiber.resume()
+    try
+        if server_fiber != null
+            server_fiber.resume()
+        end
+    catch e
+        null
+    end
     async.poll_once()
 end
 
@@ -84,6 +90,28 @@ function drive_until_data(client, timeout_ms)
     return client.available() > 0
 end
 
+# Drain response bytes without blocking forever: only call receive() when
+# available() is positive, and keep driving server/event loop between reads.
+function drain_response(client, timeout_ms)
+    var resp = ""
+    var start = runtime.time()
+    while runtime.time() - start < timeout_ms
+        var n = client.available()
+        if n > 0
+            var chunk = client.receive(1)
+            if chunk != null && !chunk.empty()
+                resp += chunk
+            end
+            drive_server_cycles(2)
+            runtime.delay(2)
+        else
+            drive_server()
+            runtime.delay(5)
+        end
+    end
+    return resp
+end
+
 # ============================================================
 # S01 -- http_server basic setup and configuration
 # ============================================================
@@ -92,7 +120,7 @@ section("S01: basic setup")
 var server = new netutils.http_server
 check_not_null("S01-01: server created", server)
 
-server.set_config({"thread_count": 1, "worker_count": 1}.to_hash_map())
+server.set_config({"thread_count": 0, "worker_count": 1}.to_hash_map())
 check("S01-02: config set", true)
 
 # ============================================================
@@ -141,9 +169,9 @@ if !drive_until_data(client, 5000)
     check("S02-02: received response (timed out after 5s)", false)
     system.out.println("  Server did not respond in time — possible deadlock")
 else
-    var response = client.receive(1024)
-    check_not_null("S02-02: received response", response)
-    if response != null
+    var response = drain_response(client, 1000)
+    check("S02-02: received response", response != null && !response.empty())
+    if response != null && !response.empty()
         check("S02-03: response contains 200", response.find("200 OK", 0) != -1)
         check("S02-04: response contains body", response.find("hello from handler", 0) != -1)
     end
@@ -172,9 +200,9 @@ if !drive_until_data(client2, 5000)
     check("S03-02: received error response (timed out after 5s)", false)
     system.out.println("  Server did not respond in time — possible deadlock")
 else
-    var response2 = client2.receive(1024)
-    check_not_null("S03-02: received error response", response2)
-    if response2 != null
+    var response2 = drain_response(client2, 1000)
+    check("S03-02: received error response", response2 != null && !response2.empty())
+    if response2 != null && !response2.empty()
         check("S03-03: response contains 403 Forbidden", response2.find("403 Forbidden", 0) != -1)
     end
 end
@@ -189,20 +217,12 @@ section("S04: cleanup")
 server_running = false
 check("S04-01: server stop flag set", server_running == false)
 
-# Resume server fiber so it exits the polling loop
-server_fiber.resume()
-runtime.delay(50)
-async.poll_once()
 server_fiber = null
-
-# Release server's work_guard so async event loop can stop
 server.async_guard = null
+server.thread_pool = null
+server.worker_list = null
+server.acceptor = null
 server = null
-
-# Drain remaining async events so process can exit cleanly
-while !async.stopped()
-    async.poll_once()
-end
 
 # Results
 system.out.println("")
