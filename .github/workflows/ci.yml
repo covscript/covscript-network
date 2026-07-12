@@ -271,9 +271,16 @@ jobs:
         shell: bash
         run: |
           set -e
+          # MSYS2/MinGW converts /CN= to a Windows path; //CN= prevents this.
+          # Use the double-slash form only on Windows.
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            SUBJ='//CN=localhost'
+          else
+            SUBJ='/CN=localhost'
+          fi
           openssl req -x509 -newkey rsa:2048 \
             -keyout /tmp/test-key.pem -out /tmp/test-cert.pem \
-            -days 1 -nodes -subj '/CN=localhost' 2>/dev/null
+            -days 1 -nodes -subj "$SUBJ" 2>/dev/null
           # Start a temporary TLS server presenting the self-signed cert
           openssl s_server -cert /tmp/test-cert.pem -key /tmp/test-key.pem \
             -port 19443 -www -quiet 2>/dev/null &
