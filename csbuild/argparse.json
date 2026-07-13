@@ -3,7 +3,7 @@
     "Name": "argparse",
     "Info": "Argument Parser",
     "Author": "CovScript Organization",
-    "Version": "1.0",
+    "Version": "1.1",
     "Target": "argparse.csp",
     "Dependencies": [
         "ecs"

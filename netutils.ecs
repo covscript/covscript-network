@@ -5,7 +5,7 @@ import network.*, regex, curl
 import codec.json
 
 constant server_name = "CovScript-NetUtils"
-constant server_version = "1.4"
+constant server_version = "1.5"
 
 # ============================================================================
 # Configuration constants — override before use to adjust behavior
@@ -998,9 +998,37 @@ class http_client
     var sock = null
     var pending = ""
     var tls_options = null
+    var timeout_ms = null
 
     function set_tls_options(options)
         tls_options = options
+    end
+
+    function set_timeout_ms(ms)
+        timeout_ms = ms
+    end
+
+    function _async_recv(size)
+        var state = async.read(sock, size)
+        if timeout_ms != null
+            if !state.wait_for(timeout_ms)
+                return null
+            end
+        else
+            if !state.wait()
+                return null
+            end
+        end
+        return state.get_result()
+    end
+
+    function _async_send(data)
+        var state = async.write(sock, data)
+        if timeout_ms != null
+            return state.wait_for(timeout_ms)
+        else
+            return state.wait()
+        end
     end
 
     function close()
@@ -1052,7 +1080,16 @@ class http_client
             var connected = false
             foreach ep in endpoints
                 try
-                    sock.connect(ep)
+                    var state = async.connect(sock, ep)
+                    if timeout_ms != null
+                        if !state.wait_for(timeout_ms)
+                            continue
+                        end
+                    else
+                        if !state.wait()
+                            continue
+                        end
+                    end
                     connected = true
                     break
                 catch e
@@ -1087,7 +1124,7 @@ class http_client
             end
             var chunk = null
             try
-                chunk = sock.receive(http_client_read_chunk)
+                chunk = _async_recv(http_client_read_chunk)
             catch e
                 return null
             end
@@ -1130,7 +1167,7 @@ class http_client
             end
             var chunk = null
             try
-                chunk = sock.receive(step)
+                chunk = _async_recv(step)
             catch e
                 return null
             end
@@ -1339,7 +1376,11 @@ class http_client
         req.append("\r\n")
         req.append(req_body)
         try
-            sock.write(req)
+            if !_async_send(req)
+                log("HTTP write error: timeout or I/O failure")
+                close()
+                return null
+            end
         catch e
             log("HTTP write error: " + e.what)
             close()
