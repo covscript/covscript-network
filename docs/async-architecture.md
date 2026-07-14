@@ -126,7 +126,7 @@ sequenceDiagram
     Note over Script,Net: === 5. 安全关闭 ===
     Script->>CNI: sock.safe_shutdown()
     CNI->>Socket: begin_draining_exclusive()<br/>(先阻止新 I/O)
-    loop while async_jobs > 0 (无超时)
+    loop while async_jobs > 0 (NETWORK_SAFE_SHUTDOWN_TIMEOUT_MS)
         CNI->>Asio: io.poll()
         CNI->>Script: cs_runtime_yield()
     end
@@ -410,7 +410,7 @@ sequenceDiagram
     Script->>Sock: sock.safe_shutdown()
     Sock->>Sock: begin_draining_exclusive()
     Note over Sock: 新 I/O 被 exclusive_operation 拒绝
-    loop async_jobs > 0 (无超时)
+    loop async_jobs > 0 (NETWORK_SAFE_SHUTDOWN_TIMEOUT_MS)
         Script->>IO: io.poll()
         Script->>Script: runtime.yield()
     end
@@ -431,7 +431,7 @@ sequenceDiagram
     Sock-->>Script: return success
 ```
 
-> **设计要点**：`close()` 和 `shutdown()` 通过 `scoped_exclusive_operation` 原子地占用 socket 独占权，防止 TOCTOU 窗口。普通 I/O 先预约 read/write 方向，再双检 `exclusive_operation`；同方向重叠直接拒绝，一读一写仍可全双工并行。TLS composed operation 的 handler 绑定到每个 socket 的 strand，多个 worker 不会并发访问同一 SSL stream。TCP `safe_shutdown()` 无超时等待异步任务完成，TLS close-notify 阶段有独立超时（默认 5000ms，可通过 CMake 的 `NETWORK_TLS_SHUTDOWN_TIMEOUT_MS` 调整）。UDP `safe_close()` 的超时（默认 200ms）通过 CMake 的 `NETWORK_SAFE_SHUTDOWN_TIMEOUT_MS` 调整，仅控制 UDP。
+> **设计要点**：`close()` 和 `shutdown()` 通过 `scoped_exclusive_operation` 原子地占用 socket 独占权，防止 TOCTOU 窗口。普通 I/O 先预约 read/write 方向，再双检 `exclusive_operation`；同方向重叠直接拒绝，一读一写仍可全双工并行。TLS composed operation 的 handler 绑定到每个 socket 的 strand，多个 worker 不会并发访问同一 SSL stream。TCP `safe_shutdown()` 和 UDP `safe_close()` 的 drain 超时（默认 200ms）均通过 CMake 的 `NETWORK_SAFE_SHUTDOWN_TIMEOUT_MS` 调整。TLS close-notify 阶段的超时独立使用 `NETWORK_TLS_SHUTDOWN_TIMEOUT_MS`（默认 5000ms）。
 
 ---
 
@@ -515,5 +515,5 @@ UDP 的同步 `receive_from` / `send_to` 使用 `scoped_io_job`，`close` 使用
 | `thread_worker` | 后台线程持续 drive 事件循环 |
 | `poll()` / `poll_once()` | 单线程模式的手动事件驱动 |
 | `restart()` | 重启已停止的 io_context (需 `thread_executors==0`) |
-| `safe_shutdown()` | TCP: 先原子设置 draining-exclusive 阻止新 I/O，再协作式等待 async_jobs 清零后关闭。异步任务无超时；TLS close-notify 超时默认 5000ms（`NETWORK_TLS_SHUTDOWN_TIMEOUT_MS`） |
+| `safe_shutdown()` | TCP: 先原子设置 draining-exclusive 阻止新 I/O，再协作式等待 async_jobs 清零后关闭（drain 超时 `NETWORK_SAFE_SHUTDOWN_TIMEOUT_MS`，默认 200ms）。TLS close-notify 超时默认 5000ms（`NETWORK_TLS_SHUTDOWN_TIMEOUT_MS`） |
 | `safe_close()` | UDP: 等待 async_jobs=0 后关闭（默认 200ms 超时，通过 `NETWORK_SAFE_SHUTDOWN_TIMEOUT_MS` 配置） |

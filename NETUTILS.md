@@ -1,6 +1,6 @@
 # CovScript NetUtils 协议文档
 
-版本：1.7
+版本：1.8
 
 作者：Covariant Script OSC
 
@@ -27,7 +27,7 @@
 ## 2. 基本常量与工具函数
 
 * `server_name = "CovScript-NetUtils"`
-* `server_version = "1.7"`
+* `server_version = "1.8"`
 
 与协议/实现相关的重要工具函数：
 
@@ -82,7 +82,8 @@ Master 与 Slave 之间用 JSON 表示请求（由 `http_session.serialize()` / 
   "method": "GET",
   "version": "1.1",
   "connection": "keep-alive",
-  "content_length": 0
+  "content_length": 0,
+  "request_headers": ["Host: 127.0.0.1", "Accept: application/json"]
 }
 ```
 
@@ -97,6 +98,7 @@ Master 与 Slave 之间用 JSON 表示请求（由 `http_session.serialize()` / 
 | `version`        | HTTP 协议版本（如 `1.0`, `1.1`）                    |
 | `connection`     | `keep-alive` 或 `close`                       |
 | `content_length` | 当 `method == "POST"` 时表示随后的 POST body 长度（字节） |
+| `request_headers`| 原始请求头数组（可选，代理转发时使用）                     |
 
 注意：`post_data`（POST 的主体）**不包含在 JSON 里**，以减少 JSON 编/解码开销；发送端在序列化 JSON 后紧跟二进制 POST 数据发送（见上节 IPC 帧格式）。
 
@@ -116,13 +118,22 @@ Master 分配 `rank`：先尝试使用 `deprecated_rank`（回收的编号），
 
 ### 5.2 状态定义（Slave / connection 等）
 
+通用连接/节点状态（`http_conn.state`、`slave_node.state`）：
+
 | 状态值  | 含义            |
 | ---- | ------------- |
 | `-1` | 错误 / 已断开（不可用） |
 | `0`  | 已连接且空闲（ready） |
 | `1`  | 忙碌（busy）      |
 
-（Master 的 `http_conn.state` 使用：`-1`=closed, `0`=established, `1`=busy）
+`worker_type.state`（单机多纤程工作器）额外有 `1 = wait` 状态，用于区分"等待新连接"和"处理请求中"：
+
+| 状态值  | 含义            |
+| ---- | ------------- |
+| `-1` | 错误（error）     |
+| `0`  | 空闲（ready）     |
+| `1`  | 等待 accept（wait） |
+| `2`  | 忙碌（busy）      |
 
 ### 5.3 心跳（Health Check）
 
@@ -202,7 +213,7 @@ Master 分配 `rank`：先尝试使用 `deprecated_rank`（回收的编号），
   设置静态文件根目录（并 normalize），返回 `this` 以链式调用。
 
 * `set_config(conf : hash_map)`
-  通过 `hash_map` 设置多个配置项，通常将 JSON 配置文件读取后传至这里，返回 `this`。
+  通过 `hash_map` 设置多个配置项，通常将 JSON 配置文件读取后传至这里。可识别的键包括 `"thread_count"`、`"worker_count"`、`"wwwroot"`、`"max_keep_alive"`、`"keep_alive_timeout"`、`"max_connections"`、`"heartbeat_interval"`、`"slave_spawn_timeout"`、`"slave_keep_alive_timeout"`、`"multi_process"`、`"master_worker_count"`，返回 `this`。
 
 * `bind_page(url : string, path : string)`
   将某 URL 绑定到 `wwwroot/path`，当请求到该 URL 时返回该文件内容。
@@ -221,6 +232,15 @@ Master 分配 `rank`：先尝试使用 `deprecated_rank`（回收的编号），
 
 * `listen(port : integer)`
   启动单进程模式，并在本地监听 `port`。
+
+* `bind_proxy(prefix : string, target : string, timeout_ms : number)`
+  将 `prefix` 开头的 URL 代理转发到 `target`（如 `"http://127.0.0.1:3000"`）。
+
+* `stop()`
+  优雅关闭服务器：停止所有 worker、释放 async_guard、关闭 acceptor。
+
+* `run()`
+  启动事件循环（`listen` 或 `set_master` 后调用）。
 
 * `poll()`
   启动服务（非阻塞），仅轮询一次。需循环调用才能使服务正常运行。
@@ -270,9 +290,32 @@ Master 分配 `rank`：先尝试使用 `deprecated_rank`（回收的编号），
 
 ---
 
-## 11. 辅助网络接口
+## 11. HTTP 客户端 (`http_client` / `openai_client`)
 
-* `http_get(url)` / `http_post(url, post_fields)`：基于内部 `curl` 封装的简单 HTTP 客户端，受 `proxy`, `timeout_ms`, `low_speed_limit` 全局变量控制（若未设则使用默认行为）。这适用于框架内部需要发起外部请求的场景。
+`netutils` 提供了基于异步 I/O 的 HTTP 客户端类，不依赖外部 curl 库。
+
+### 11.1 `http_client`
+
+基础的异步 HTTP/HTTPS 客户端，核心方法：
+
+* `set_timeout_ms(ms)` — 设置每个异步 I/O 操作的超时（毫秒），`null` 表示无超时。
+* `set_tls_options(options)` — 设置 TLS 选项（`{"trust_mode": "auto"}` 等）。
+* `parse_url(url)` — 解析 URL，返回 `{scheme, host, port, path}.to_hash_map()`。
+* `connect_target(target)` — 解析目标并建立 TCP/TLS 连接，首次调用时创建内部 `async.work_guard` 以保持 io_context 存活。
+* `http_request(method, url, headers, body)` — 发起 HTTP 请求，返回 `{status_code, headers, body}.to_hash_map()` 或 `null`。
+* `post(url, headers, body)` — POST 快捷方法，等价于 `http_request("POST", ...)`。
+* `close()` — 关闭底层 socket（`safe_shutdown`）。
+
+### 11.2 `openai_client extends http_client`
+
+兼容 OpenAI / DeepSeek 等 Chat Completions API 的客户端：
+
+* `set_api_key(key)` / `set_base(url)` / `set_model(name)` — 配置认证、endpoint、模型。
+* `message(role, content)` — 创建 `{role, content}.to_hash_map()` 消息。
+* `chat(messages)` — 调用 `/chat/completions`，返回 JSON 解析后的 `hash_map` 或 `null`。
+* `chat_text(messages)` — 调用 `chat()` 并提取 `response.choices[0].message.content`。
+
+默认值：`api_base = "https://api.openai.com/v1"`，`model = "gpt-4o-mini"`。
 
 * `local_addr()`：使用 UDP connect 到 `8.8.8.8:53` 来探测本机公网/本地出口地址（不发送数据，只用 socket local endpoint）。
 

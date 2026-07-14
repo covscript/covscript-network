@@ -5,7 +5,7 @@ import network.*, regex
 import codec.json
 
 constant server_name = "CovScript-NetUtils"
-constant server_version = "1.7"
+constant server_version = "1.8"
 
 # ============================================================================
 # Configuration constants — override before use to adjust behavior
@@ -1149,6 +1149,7 @@ var transfer_chunked_reg = regex.build_optimize(".*chunked.*")
 
 class http_client
     var sock = null
+    var async_guard = null
     var pending = ""
     var tls_options = null
     var timeout_ms = null
@@ -1210,6 +1211,9 @@ class http_client
     function connect_target(target)
         close()
         pending = ""
+        if async_guard == null
+            async_guard = new async.work_guard
+        end
         try
             var host = target["host"]
             var port = target["port"]

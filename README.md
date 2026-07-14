@@ -8,8 +8,8 @@ A high-performance network extension for the [Covariant Script](http://covscript
 
 | Package | Type | Version | Description |
 |---|---|---|---|
-| `network` | C++ Extension | `1.38.0_v6.3` | TCP/UDP sockets, TLS/SSL, async I/O, event loop |
-| `netutils` | CovScript | `1.7` | HTTP server framework with single-process and distributed master/slave modes |
+| `network` | C++ Extension | `1.38.0_v6.4` | TCP/UDP sockets, TLS/SSL, async I/O, event loop |
+| `netutils` | CovScript | `1.8` | HTTP server/client framework with single-process, distributed master/slave, and OpenAI API modes |
 | `argparse` | CovScript | `1.1` | Lightweight command-line argument parser |
 
 > **Note:** `netutils` and `argparse` are provided as both source (`.ecs`), compiled package (`.csp`), and bytecode module (`.csym`) — place them in your project's `imports/` directory.
@@ -23,7 +23,10 @@ A high-performance network extension for the [Covariant Script](http://covscript
 - **TLS/SSL** — encrypted TCP with configurable trust modes (`auto`, `openssl`, `custom`, `insecure`) and detailed trust reporting
 - **Asynchronous I/O** — non-blocking `async` namespace with `poll`/`poll_once` event loop, `thread_worker`, `work_guard`, and fiber-cooperative patterns
 - **HTTP Server** (`netutils`) — multi-worker, configurable keep-alive, static file serving, custom route binding, and SQLite integration
+- **HTTP Client** (`netutils`) — asynchronous HTTP/HTTPS client with TLS, timeouts, header parsing, and keep-alive
+- **OpenAI Client** (`netutils`) — OpenAI/DeepSeek API-compatible chat client built on the HTTP client
 - **Distributed Multi-Node** — master/slave architecture with TCP IPC for horizontal scaling of HTTP services
+- **Reverse Proxy** — prefix-based request forwarding to backend servers
 - **SM2 Key Support** — GM/T Chinese cryptographic key generation and simple TLS via `gmssl`
 - **Utilities** — `host_name`, `to_fixed_hex`/`from_fixed_hex` for framing protocols
 
@@ -58,6 +61,9 @@ csbuild/make.bat
 ```
 
 The compiled shared library (`network.cse`) will be placed in `build/imports/`.
+
+> On some Linux distributions you may need to install OpenSSL manually
+> (e.g., `apt install libssl-dev` on Ubuntu/Debian).
 
 ### Manual CMake
 
@@ -281,7 +287,7 @@ The extension connects to Covariant Script via the CNI (Covariant Native Interfa
 
 ## Testing
 
-The [tests/](tests/) directory contains 14 test suites covering TCP, UDP, HTTP, TLS, async I/O, and API integration:
+The [tests/](tests/) directory contains 17 test suites covering TCP, UDP, HTTP, TLS, async I/O, OpenAI client, and API integration:
 
 ```bash
 # Unix
