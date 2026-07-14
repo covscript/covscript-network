@@ -1,12 +1,12 @@
-#$cSYM/1.0(.\netutils.ecs):-,-,-,-,-,1697,1697,1697,1697,1697,1697,1697,1698,1697,1697,1704,1704,1704,1704,1704,1704,1704,1704,1704,1705,1704,1704,0,2,3,3,3,4,6,7,14,15,16,17,20,23,24,28,29,31,32,33,34,35,36,37,38,39,40,41,45,50,52,53,54,55,56,57,58,59,60,61,63,64,71,72,74,77,78,80,82,83,84,85,86,88,89,90,92,93,94,95,96,97,98,99,100,101,102,103,104,105,107,108,109,110,111,112,113,114,115,116,117,118,119,120,121,122,123,124,125,126,127,128,129,130,131,132,133,134,135,136,138,139,140,141,143,144,145,146,148,150,151,152,153,154,155,156,157,158,159,160,161,162,163,164,165,166,167,168,169,170,171,172,173,174,175,176,177,178,179,180,181,182,183,184,185,186,187,188,189,190,191,192,193,194,195,196,197,198,199,200,201,202,203,204,205,206,207,207,208,209,209,210,211,211,211,212,213,214,215,216,217,218,219,232,234,235,236,237,238,239,240,241,242,243,244,245,247,248,249,250,251,252,253,255,256,258,259,260,262,263,264,265,266,267,268,269,270,271,272,273,274,275,276,277,278,279,280,281,282,283,284,285,286,287,288,289,290,291,292,293,294,295,296,297,298,299,300,301,302,304,305,306,307,308,309,310,311,312,313,314,315,316,317,318,319,320,321,322,323,324,325,326,327,328,329,330,331,332,333,334,335,336,335,335,335,335,335,337,337,338,337,339,340,341,342,343,344,347,348,349,350,351,352,353,354,355,356,358,360,361,362,363,364,365,366,367,368,369,370,371,372,373,374,375,376,377,378,379,380,381,382,383,384,385,386,387,388,389,390,391,392,393,394,395,396,397,398,399,400,401,402,403,404,405,406,407,409,410,411,412,413,414,415,416,417,418,420,421,422,423,424,425,426,427,428,429,430,431,432,433,434,435,436,437,438,439,440,441,442,443,444,445,446,447,448,449,450,451,452,453,454,455,456,458,459,460,461,462,462,463,464,465,468,469,470,471,472,473,474,475,476,477,478,479,480,481,482,483,484,485,486,487,488,489,490,491,491,492,493,494,495,496,497,498,499,500,501,502,503,507,508,509,511,512,513,515,516,517,519,520,521,522,523,524,525,526,527,528,529,530,531,532,533,534,535,536,537,538,539,541,542,543,544,545,546,547,548,549,551,552,553,554,555,556,557,558,559,561,562,563,565,566,567,568,569,570,571,572,574,575,576,577,579,580,582,583,585,586,587,588,589,590,591,592,593,594,595,596,597,598,599,600,601,603,604,605,606,607,608,609,610,611,612,613,614,615,616,617,618,619,620,622,623,624,625,626,627,628,629,630,631,632,633,634,635,636,637,638,639,640,641,642,644,645,646,647,648,649,650,651,652,653,654,655,656,657,658,659,660,661,662,663,664,665,666,667,668,669,670,671,672,673,674,675,677,678,679,680,680,681,682,683,683,684,686,687,688,689,690,691,692,693,695,696,697,698,699,700,701,702,703,704,705,706,707,708,709,710,711,712,713,714,715,716,717,718,719,720,721,722,723,724,725,726,727,728,729,730,731,732,733,734,735,736,737,738,739,740,741,743,744,745,746,747,748,749,750,751,752,753,754,755,756,757,758,759,760,761,762,763,764,765,766,767,768,769,770,771,772,773,774,775,776,777,778,779,780,782,783,784,785,786,787,788,789,790,791,792,793,794,795,796,797,798,800,801,802,803,804,805,806,807,808,809,810,811,812,813,814,815,816,817,818,819,820,821,822,823,824,826,827,828,830,831,832,833,834,835,836,837,838,840,841,842,843,844,845,846,847,848,849,850,851,852,853,854,855,856,857,858,859,860,861,862,863,864,865,866,867,868,869,870,871,872,873,874,875,876,877,878,879,881,882,883,884,885,886,888,889,890,894,895,896,897,898,899,900,901,902,903,904,905,907,908,909,910,911,912,913,914,915,916,917,919,920,921,922,923,924,925,926,927,928,928,929,930,931,932,933,934,935,936,936,937,938,939,941,942,943,944,945,946,947,948,949,950,951,952,953,954,955,956,957,958,959,960,961,962,963,964,965,966,967,968,969,970,971,972,973,974,975,976,977,978,979,980,981,982,984,985,991,992,993,994,996,997,998,999,1000,1002,1003,1004,1006,1007,1008,1010,1011,1012,1013,1014,1015,1016,1017,1018,1019,1020,1021,1022,1024,1025,1026,1027,1028,1029,1030,1031,1033,1034,1035,1036,1037,1039,1040,1041,1042,1043,1044,1045,1046,1047,1048,1049,1050,1051,1052,1053,1054,1056,1057,1058,1059,1060,1061,1062,1068,1069,1071,1072,1073,1074,1075,1076,1077,1078,1079,1080,1081,1082,1083,1084,1085,1086,1087,1088,1089,1090,1091,1092,1093,1081,1081,1081,1081,1081,1094,1094,1095,1094,1096,1097,1098,1099,1100,1101,1102,1103,1104,1105,1075,1075,1075,1075,1075,1106,1106,1107,1108,1109,1106,1110,1111,1113,1114,1115,1116,1117,1118,1119,1120,1121,1122,1123,1124,1125,1126,1125,1125,1125,1125,1125,1127,1127,1128,1127,1129,1130,1131,1132,1133,1134,1135,1136,1137,1138,1140,1141,1142,1144,1145,1146,1147,1148,1149,1150,1151,1152,1153,1154,1155,1156,1157,1158,1159,1160,1161,1162,1163,1164,1165,1166,1167,1168,1169,1168,1168,1168,1168,1168,1170,1170,1171,1170,1172,1173,1174,1175,1176,1177,1178,1179,1180,1182,1183,1184,1185,1186,1187,1188,1189,1190,1191,1192,1193,1194,1195,1196,1197,1198,1199,1200,1201,1202,1203,1204,1205,1206,1207,1208,1209,1210,1211,1212,1213,1214,1215,1216,1217,1218,1219,1220,1221,1222,1223,1224,1225,1226,1227,1228,1229,1230,1232,1233,1234,1235,1236,1237,1238,1239,1240,1241,1242,1243,1244,1245,1246,1247,1248,1249,1250,1251,1252,1253,1254,1255,1256,1257,1258,1259,1260,1261,1262,1263,1262,1262,1262,1262,1262,1264,1264,1265,1264,1266,1267,1268,1269,1270,1271,1272,1273,1274,1275,1276,1277,1278,1279,1280,1281,1287,1288,1290,1291,1292,1293,1294,1295,1296,1297,1298,1299,1300,1301,1302,1303,1304,1305,1306,1307,1306,1306,1306,1306,1306,1308,1308,1309,1308,1310,1311,1312,1313,1314,1315,1316,1317,1318,1319,1320,1321,1322,1323,1324,1325,1326,1327,1328,1330,1331,1332,1333,1334,1335,1336,1337,1340,1341,1342,1343,1344,1345,1346,1347,1348,1349,1350,1351,1352,1353,1354,1355,1356,1357,1358,1359,1360,1361,1362,1363,1364,1366,1367,1368,1369,1370,1371,1372,1373,1374,1375,1376,1377,1378,1379,1380,1381,1382,1377,1377,1377,1377,1377,1383,1383,1384,1385,1386,1383,1387,1389,1390,1391,1392,1393,1394,1396,1397,1398,1399,1400,1401,1403,1404,1405,1406,1407,1412,1413,1415,1416,1417,1418,1420,1421,1422,1423,1425,1426,1427,1429,1430,1431,1433,1434,1435,1437,1438,1439,1441,1442,1443,1444,1445,1446,1447,1448,1449,1449,1450,1451,1451,1453,1454,1455,1456,1457,1458,1459,1461,1466,1467,1468,1469,1470,1471,1472,1473,1474,1475,1476,1477,1476,1476,1476,1476,1476,1478,1478,1479,1480,1478,1481,1482,1484,1488,1489,1490,1492,1493,1494,1495,1496,1497,1498,1499,1500,1501,1502,1503,1505,1506,1507,1508,1509,1510,1511,1512,1513,1514,1515,1516,1517,1518,1519,1520,1521,1522,1523,1524,1525,1526,1527,1528,1529,1530,1532,1533,1534,1535,1536,1537,1538,1539,1540,1541,1542,1543,1544,1545,1546,1547,1548,1549,1550,1551,1552,1553,1554,1555,1556,1557,1558,1559,1561,1562,1563,1564,1565,1566,1567,1569,1570,1571,1572,1573,1574,1575,1576,1577,1578,1579,1580,1581,1583,1584,1585,1586,1587,1588,1589,1590,1591,1592,1593,1594,1596,1597,1598,1599,1600,1601,1602,1603,1604,1605,1606,1607,1608,1609,1610,1611,1612,1613,1614,1615,1616,1617,1618,1619,1621,1622,1623,1624,1625,1626,1627,1629,1630,1631,1632,1633,1634,1635,1636,1637,1638,1639,1640,1641,1642,1643,1644,1645,1646,1647,1648,1649,1650,1652,1652,1653,1654,1655,1656,1657,1658,1659,1660,1661,1662,1662,1663,1664,1665,1666,1667,1668,1669,1670,1671,1672,1673,1674,1675,1676,1677,1678,1679,1680,1681,1682,1683,1684,1685,1686,1687,1688,1689,1690,1691,1692,1693,1694,1695,1695,1695,1696,1699,1700,1701,1702,1702,1702,1703,1706,1707,1708,1709,1709,1709,1710,1711,1712,1713,1713,1714,1715,1716,1717,1718,1719,1720,1720,1720,1721,1722,1723,1724,1725,1726,1727,1727,1728,1729,1730,1731,1732,1733,1734,1735,1736,1737,1738,1739,1740,1741,1742,1743,1744,1745,1746,1747,1748
+#$cSYM/1.0(.\netutils.ecs):-,-,-,-,-,1871,1871,1871,1871,1871,1871,1871,1872,1871,1871,1878,1878,1878,1878,1878,1878,1878,1878,1878,1879,1878,1878,1888,1888,1888,1888,1888,1888,1888,1888,1888,1889,1890,1892,1893,1894,1895,1896,1898,1899,1900,1907,1908,1909,1910,1911,1912,1913,1914,1915,1916,1917,1918,1919,1920,1921,1922,1923,1918,1918,1918,1918,1918,1924,1924,1925,1926,1924,1927,1928,1930,1931,1932,1933,1934,1935,1936,1937,1938,1939,1940,1941,1942,1943,1944,1945,1946,1947,1948,1949,1950,1951,1952,1953,1954,1955,1956,1957,1958,1959,1960,1961,1962,1963,1964,1965,1966,1967,1968,1969,1970,1888,1888,0,2,3,3,4,6,7,14,15,16,17,20,23,24,28,29,31,32,33,34,35,36,37,38,39,40,41,45,50,52,53,54,55,56,57,58,59,60,61,63,64,71,72,74,77,78,80,82,83,84,85,86,90,91,92,93,94,95,96,97,99,100,101,102,103,104,105,106,107,108,109,110,111,112,113,114,115,116,117,118,119,120,121,100,100,100,100,100,122,122,123,124,122,125,126,128,129,130,131,132,133,134,135,136,137,138,139,140,141,142,143,144,145,146,147,148,149,150,151,152,153,154,155,156,157,158,159,160,161,162,163,164,165,166,130,130,130,130,130,167,167,168,169,167,170,171,173,174,175,176,178,179,180,181,183,185,186,187,188,189,190,191,192,193,194,195,196,197,198,199,200,201,202,203,204,205,206,207,208,209,210,211,212,213,214,215,216,217,218,219,220,221,222,223,224,225,226,227,228,229,230,231,232,233,234,235,236,237,238,239,240,241,242,242,243,244,244,245,246,246,246,247,248,249,250,251,252,253,254,267,269,270,271,272,273,274,275,276,277,278,279,280,282,283,284,285,286,287,288,290,291,293,295,296,297,299,300,301,302,303,304,305,306,307,308,309,310,311,312,313,314,315,316,317,318,319,320,321,322,323,324,325,326,327,328,329,330,331,332,333,334,335,336,337,338,339,340,341,342,343,344,345,346,347,348,349,350,351,352,353,354,356,357,358,359,360,361,362,363,364,365,366,367,368,369,370,371,372,373,374,375,376,377,378,379,380,381,382,383,384,385,386,387,388,389,390,391,390,390,390,390,390,392,392,393,392,394,395,396,397,398,399,402,403,404,406,407,408,409,410,411,412,413,414,415,417,419,420,421,422,423,424,425,426,427,428,429,430,431,432,433,434,435,436,437,438,439,440,441,442,443,444,445,446,447,448,449,450,451,452,453,454,455,456,457,458,459,460,461,462,463,464,465,466,467,469,470,471,472,473,474,475,476,477,478,479,481,482,483,484,485,486,487,488,489,490,491,492,493,494,495,496,497,498,499,500,501,502,503,504,505,506,507,508,509,510,511,512,513,514,515,516,517,518,520,521,522,523,524,530,531,532,533,534,535,536,537,538,539,540,542,543,544,545,546,547,548,549,550,551,552,553,554,555,556,557,558,559,560,561,564,565,566,567,568,569,570,571,572,573,574,575,576,577,578,579,580,581,582,583,584,585,586,587,588,589,590,591,592,593,594,595,596,597,598,599,600,601,602,606,607,608,610,611,612,614,615,616,617,618,619,621,622,623,624,625,626,627,628,629,630,631,632,633,634,635,636,637,638,639,640,641,642,643,644,645,647,648,649,650,651,652,653,654,655,657,658,659,660,661,662,663,664,665,667,668,669,671,672,673,674,675,676,677,678,680,681,682,683,685,686,688,689,690,691,692,694,695,696,697,698,699,700,701,702,703,704,705,706,707,708,709,710,712,713,714,715,716,717,718,719,720,721,722,723,724,725,726,727,728,729,730,731,732,733,734,735,737,738,739,740,741,742,743,744,745,746,747,748,749,750,751,752,753,754,755,756,757,758,759,760,762,763,764,765,766,767,768,769,770,771,772,773,774,775,776,777,778,779,780,781,782,783,784,785,786,787,788,789,790,791,792,793,794,795,796,798,799,800,801,801,802,803,804,804,805,807,808,809,810,811,812,813,814,816,817,818,819,820,821,822,823,824,825,826,827,828,829,830,831,832,833,834,835,836,837,838,839,840,841,842,843,844,845,846,847,848,849,850,851,852,853,854,855,856,857,858,859,860,861,862,863,864,865,866,868,869,870,871,872,873,874,875,876,877,878,879,880,881,882,883,884,885,886,887,888,889,890,891,892,893,894,895,896,897,898,899,900,901,902,903,904,905,906,907,908,910,911,912,913,914,915,916,917,918,919,920,921,922,923,924,925,926,928,929,930,931,932,933,934,935,936,937,938,939,940,941,942,943,944,945,946,947,948,949,950,951,952,953,954,955,957,958,959,960,961,962,964,965,966,967,968,969,970,971,972,974,975,976,977,978,979,980,981,982,983,984,985,986,987,988,989,990,991,992,993,994,995,996,997,998,999,1000,1001,1002,1003,1004,1005,1006,1007,1008,1009,1010,1011,1012,1013,1014,1015,1016,1017,1018,1019,1020,1021,1022,1023,1025,1026,1027,1028,1029,1030,1032,1033,1034,1038,1039,1040,1041,1042,1043,1044,1045,1046,1047,1048,1049,1051,1052,1053,1054,1055,1056,1057,1058,1059,1060,1061,1063,1064,1065,1066,1067,1068,1069,1070,1071,1072,1072,1073,1074,1075,1076,1077,1078,1079,1081,1082,1083,1084,1085,1086,1087,1087,1088,1089,1090,1092,1093,1094,1095,1096,1097,1098,1099,1100,1101,1102,1103,1104,1105,1106,1107,1108,1109,1110,1111,1112,1113,1114,1115,1116,1117,1118,1119,1120,1121,1122,1123,1124,1125,1126,1127,1128,1129,1130,1131,1132,1133,1140,1141,1142,1143,1145,1146,1147,1148,1149,1151,1152,1153,1155,1156,1157,1159,1160,1161,1162,1163,1164,1165,1167,1168,1169,1170,1171,1173,1174,1175,1176,1177,1178,1179,1180,1181,1182,1183,1184,1185,1186,1187,1188,1190,1191,1192,1193,1194,1195,1196,1202,1203,1205,1206,1207,1208,1209,1210,1211,1212,1213,1214,1215,1216,1217,1218,1219,1220,1221,1222,1223,1224,1225,1226,1227,1228,1229,1215,1215,1215,1215,1215,1230,1230,1231,1230,1232,1233,1234,1235,1236,1237,1238,1239,1240,1241,1208,1208,1208,1208,1208,1242,1242,1243,1244,1245,1242,1246,1247,1249,1250,1251,1252,1253,1254,1255,1256,1257,1258,1259,1260,1261,1262,1263,1264,1265,1266,1267,1268,1269,1270,1275,1276,1277,1278,1279,1280,1281,1260,1260,1260,1260,1260,1282,1282,1283,1284,1282,1285,1286,1287,1288,1289,1290,1292,1293,1294,1296,1297,1298,1299,1300,1301,1302,1303,1304,1305,1306,1307,1308,1309,1310,1311,1312,1313,1314,1315,1316,1317,1318,1319,1320,1321,1322,1323,1324,1325,1326,1327,1328,1329,1319,1319,1319,1319,1319,1330,1330,1331,1332,1330,1333,1334,1335,1336,1338,1339,1340,1341,1342,1343,1344,1345,1346,1347,1348,1349,1350,1351,1352,1353,1354,1355,1356,1357,1358,1359,1360,1361,1362,1363,1364,1365,1366,1367,1368,1369,1370,1371,1372,1373,1374,1375,1376,1377,1378,1379,1380,1381,1382,1383,1384,1385,1386,1387,1389,1390,1391,1392,1393,1394,1395,1396,1397,1398,1399,1400,1401,1402,1403,1404,1405,1406,1407,1408,1409,1410,1411,1412,1413,1414,1415,1416,1417,1418,1419,1420,1419,1419,1419,1419,1419,1421,1421,1422,1421,1423,1424,1425,1426,1427,1428,1429,1432,1433,1434,1435,1436,1437,1438,1439,1440,1441,1442,1443,1449,1450,1452,1453,1454,1455,1456,1457,1458,1459,1460,1461,1462,1463,1464,1465,1466,1467,1468,1469,1471,1472,1473,1474,1475,1476,1477,1478,1479,1480,1481,1482,1483,1484,1485,1486,1467,1467,1467,1467,1467,1487,1487,1488,1489,1487,1490,1491,1492,1493,1494,1495,1496,1497,1498,1499,1500,1501,1503,1504,1505,1506,1507,1508,1509,1510,1513,1514,1515,1516,1517,1518,1519,1520,1521,1522,1523,1524,1525,1526,1527,1528,1529,1530,1531,1532,1533,1534,1535,1536,1537,1539,1540,1541,1542,1543,1544,1545,1546,1547,1548,1549,1550,1551,1552,1553,1554,1555,1556,1550,1550,1550,1550,1550,1557,1557,1558,1559,1560,1557,1561,1565,1566,1567,1568,1569,1570,1571,1572,1574,1575,1576,1577,1578,1579,1581,1584,1585,1586,1587,1588,1589,1590,1591,1592,1593,1596,1597,1598,1599,1600,1601,1602,1603,1604,1605,1606,1611,1612,1614,1615,1616,1617,1619,1620,1621,1622,1624,1625,1626,1628,1629,1630,1632,1633,1634,1636,1637,1638,1640,1641,1642,1643,1644,1645,1646,1647,1648,1648,1649,1650,1650,1652,1653,1654,1655,1656,1657,1658,1660,1665,1666,1667,1668,1669,1670,1671,1672,1673,1674,1675,1676,1675,1675,1675,1675,1675,1677,1677,1678,1679,1677,1680,1681,1683,1687,1688,1689,1691,1692,1693,1694,1695,1696,1697,1698,1699,1700,1701,1702,1704,1705,1706,1707,1708,1709,1710,1712,1713,1714,1715,1716,1717,1718,1719,1720,1721,1722,1723,1724,1726,1727,1728,1729,1730,1731,1732,1733,1734,1735,1736,1737,1738,1740,1741,1742,1743,1744,1745,1746,1747,1748,1749,1750,1751,1752,1753,1754,1755,1756,1757,1758,1759,1760,1761,1762,1763,1764,1765,1766,1768,1769,1770,1771,1772,1773,1774,1776,1777,1778,1779,1780,1781,1782,1783,1784,1785,1786,1787,1788,1789,1790,1791,1792,1793,1794,1795,1796,1797,1799,1799,1800,1801,1802,1803,1804,1805,1806,1807,1808,1809,1809,1810,1811,1812,1813,1814,1815,1816,1817,1818,1819,1820,1821,1822,1823,1824,1825,1826,1827,1828,1829,1830,1831,1832,1833,1834,1835,1836,1837,1838,1839,1840,1841,1842,1843,1844,1845,1846,1847,1848,1849,1850,1851,1852,1853,1854,1855,1856,1857,1858,1859,1860,1861,1862,1863,1864,1865,1866,1867,1868,1869,1869,1869,1870,1873,1874,1875,1876,1876,1876,1877,1880,1881,1882,1883,1883,1883,1884,1885,1886,1887,1887,1887,1887,1971,1972,1973,1974,1975,1975,1976,1977,1978,1979,1980,1981,1982,1982,1982,1983,1984,1985,1986,1987,1988,1989,1989,1990,1991,1992,1993,1994,1995,1996,1997,1998,1999,2000,2001,2002,2003,2004,2005,2006,2007,2008,2009,2010,2011,2012,2013,2014,2015,2016,2017,2018,2019,2021,2023,2024,2026,2027,2028,2029,2030,2031,2032,2034,2035,2036,2037,2038,2039,2040,2042,2043,2044,2045,2046,2049,2050,2051,2052,2053
 package netutils
 
 import codec.json.value as json_value
-import network.*, regex, curl
+import network.*, regex
 import codec.json
 
 constant server_name = "CovScript-NetUtils"
-constant server_version = "1.5"
+constant server_version = "1.6"
 
 # ============================================================================
 # Configuration constants — override before use to adjust behavior
@@ -87,54 +87,89 @@ function log(msg)
     end
 end
 
+# Send a framed message and wait for completion.
+# Returns true on success, false on I/O error.
 function send_content(sock, content)
-    async.write(sock, to_fixed_hex(content.size) + content)
+    var state = async.write(sock, to_fixed_hex(content.size) + content)
+    if !state.wait()
+        log("send_content failed: " + state.get_error())
+        return false
+    end
+    return true
 end
 
 function receive_content(sock)
-    var state = async.read(sock, framing_hex_size)
-    if !state.wait()
-        log("Read content header failed: " + state.get_error())
+    try
+        var state = async.read(sock, framing_hex_size)
+        if !state.wait()
+            log("Read content header failed: " + state.get_error())
+            return null
+        end
+        var hex_str = state.get_result()
+        if hex_str.empty()
+            log("Read content header failed: empty hex string")
+            return null
+        end
+        var size = from_fixed_hex(hex_str)
+        if size <= 0 || size > http_max_body_size
+            log("Read content header failed: invalid frame size " + to_string(size))
+            return null
+        end
+        state = async.read(sock, size)
+        if !state.wait()
+            log("Read content body failed: " + state.get_error())
+            return null
+        end
+        return state.get_result()
+    catch e
+        log("receive_content exception: " + e.what)
         return null
     end
-    var size = from_fixed_hex(state.get_result())
-    state = async.read(sock, size)
-    if !state.wait()
-        log("Read content body failed: " + state.get_error())
-        return null
-    end
-    return state.get_result()
 end
 
 function receive_content_s(sock, timeout)
     var start_time = runtime.time()
-    var state = async.read(sock, framing_hex_size)
-    if !state.wait_for(timeout)
-        if state.has_done()
-            log("Read content header failed: " + state.get_error())
-            return {state_codes.code_500, null}
-        else
-            log("Read content header failed: Timeout")
-            return {state_codes.code_408, null}
+    try
+        var state = async.read(sock, framing_hex_size)
+        if !state.wait_for(timeout)
+            if state.has_done()
+                log("Read content header failed: " + state.get_error())
+                return {state_codes.code_500, null}
+            else
+                log("Read content header failed: Timeout")
+                return {state_codes.code_408, null}
+            end
         end
-    end
-    var size = from_fixed_hex(state.get_result())
-    state = async.read(sock, size)
-    var remain = timeout - (runtime.time() - start_time)
-    if remain <= 0
-        log("Read content body failed: Timeout")
-        return {state_codes.code_408, null}
-    end
-    if !state.wait_for(remain)
-        if state.has_done()
-            log("Read content body failed: " + state.get_error())
+        var hex_str = state.get_result()
+        if hex_str.empty()
+            log("Read content header failed: empty hex string")
             return {state_codes.code_500, null}
-        else
+        end
+        var size = from_fixed_hex(hex_str)
+        if size <= 0 || size > http_max_body_size
+            log("Read content header failed: invalid frame size " + to_string(size))
+            return {state_codes.code_500, null}
+        end
+        state = async.read(sock, size)
+        var remain = timeout - (runtime.time() - start_time)
+        if remain <= 0
             log("Read content body failed: Timeout")
             return {state_codes.code_408, null}
         end
+        if !state.wait_for(remain)
+            if state.has_done()
+                log("Read content body failed: " + state.get_error())
+                return {state_codes.code_500, null}
+            else
+                log("Read content body failed: Timeout")
+                return {state_codes.code_408, null}
+            end
+        end
+        return {null, state.get_result()}
+    catch e
+        log("receive_content_s exception: " + e.what)
+        return {state_codes.code_500, null}
     end
-    return {null, state.get_result()}
 end
 
 function read_file(path)
@@ -256,6 +291,8 @@ class http_session
     # POST data
     var post_data = null
     var content_length = null
+    # Original request headers (for proxy forwarding)
+    var request_headers = null
     # for handler
     var sock = null
     var write_response = async.write
@@ -283,8 +320,15 @@ class http_session
         obj.set_member("method", json_value.make_string(method))
         obj.set_member("version", json_value.make_string(version))
         obj.set_member("connection", json_value.make_string(connection))
-        if method == "POST"
+        if content_length != null && content_length > 0
             obj.set_member("content_length", json_value.make_int(content_length))
+        end
+        if request_headers != null
+            var hdrs = json_value.make_object()
+            foreach it in request_headers
+                hdrs.set_member(it.first, json_value.make_string(it.second))
+            end
+            obj.set_member("request_headers", hdrs)
         end
         return json.to_string(obj)
     end
@@ -296,8 +340,16 @@ class http_session
         method = obj.get_member("method").as_string()
         version = obj.get_member("version").as_string()
         connection = obj.get_member("connection").as_string()
-        if method == "POST"
+        if obj.get_member("content_length") != null
             content_length = obj.get_member("content_length").as_int()
+        end
+        if obj.get_member("request_headers") != null
+            request_headers = new hash_map
+            var hdrs = obj.get_member("request_headers")
+            var keys = hdrs.get_member_names()
+            foreach key in keys
+                request_headers[key] = hdrs.get_member(key).as_string()
+            end
         end
         write_response = send_content
     end
@@ -319,15 +371,18 @@ function create_http_session(request_header)
         session.url = "/"
     end
     var has_content_length = false
+    session.request_headers = new hash_map
     foreach line in request_header
         var match = request_header_reg.match(line)
         if !match.empty()
-            switch match.str(1).tolower()
+            var header_name = match.str(1).tolower()
+            var header_value = match.str(2)
+            switch header_name
                 case "host"
-                    session.host = match.str(2)
+                    session.host = header_value
                 end
                 case "connection"
-                    session.connection = match.str(2).tolower()
+                    session.connection = header_value.tolower()
                 end
                 case "content-length"
                     if has_content_length
@@ -335,7 +390,7 @@ function create_http_session(request_header)
                     end
                     has_content_length = true
                     try
-                        session.content_length = match.str(2) as integer
+                        session.content_length = header_value as integer
                     catch e
                         return null
                     end
@@ -347,6 +402,10 @@ function create_http_session(request_header)
                     # Chunked request bodies are not implemented. Ignoring this
                     # header would leave bytes to be parsed as a new request.
                     return null
+                end
+                default
+                    # Store all other headers for proxy forwarding
+                    session.request_headers[header_name] = header_value
                 end
             end
         end
@@ -403,7 +462,8 @@ function read_http_header(sock, state, keep_alive_timeout)
     end
     if error_code != null
         if error_code != state_codes.code_eof
-            async.write(sock, compose_response(error_code))
+            var err_state = async.write(sock, compose_response(error_code))
+            err_state.wait()
         end
         return null
     end
@@ -411,7 +471,8 @@ function read_http_header(sock, state, keep_alive_timeout)
     var session = create_http_session(header)
     if session == null
         log("Parse request header error.")
-        async.write(sock, compose_response(state_codes.code_400))
+        var err_state = async.write(sock, compose_response(state_codes.code_400))
+        err_state.wait()
         return null
     end
     log("Received: Method = " + session.method + ", URL = " + session.url + ", Host = " + session.host + ", Connection = " + session.connection)
@@ -449,7 +510,8 @@ function read_http_header(sock, state, keep_alive_timeout)
         end
         if error_code != null
             if error_code != state_codes.code_eof
-                async.write(sock, compose_response(error_code))
+                var err_state = async.write(sock, compose_response(error_code))
+                err_state.wait()
             end
             return null
         end
@@ -461,42 +523,79 @@ function call_http_handler(session, server)
     var error_code = null
     if server->url_map.exist(session.url)
         server->url_map[session.url](*server, session)
-    else if server->wwwroot_path != null
-        var base_path = server->wwwroot_path
-        var full_path = path_normalize(base_path + "/" + session.url)
-        log("Resolved path: " + full_path)
-        # Boundary check: accept only exact match or base_path followed by '/'
-        # to prevent sibling-directory escape (e.g. www_evil matching root www).
-        if full_path == base_path || full_path.find(base_path + "/", 0) == 0
-            if system.path.is_directory(full_path)
-                if full_path[-1] != '/'
-                    full_path.append('/')
-                end
-                full_path.append("index.html")
-                log("Directory request, try to serve: " + full_path)
-            end
-            if system.path.is_file(full_path) && system.file.can_read(full_path)
-                log("Serving file: " + full_path)
-                session.send_response(state_codes.code_200, server->read_file(full_path), get_mime(full_path))
-            else
-                if system.file.exist(full_path)
-                    error_code = state_codes.code_403
-                else
-                    error_code = state_codes.code_404
-                end
-            end
-        else
-            error_code = state_codes.code_403
-        end
     else
-        error_code = state_codes.code_403
+        # Check for prefix match (used by bind_proxy).
+        # Sort candidate keys by length descending so the longest prefix wins.
+        # Enforce a path-component boundary to prevent /api from matching
+        # /api-v2: either the key ends with '/' already, or the character
+        # after the prefix must be '/' or end-of-string.
+        var candidates = new array
+        foreach it in server->url_map
+            var key = it.first
+            if session.url.find(key, 0) == 0
+                var after_size = session.url.size - key.size
+                if after_size == 0 || key[-1] == '/' || session.url.substr(key.size, 1) == "/"
+                    candidates.push_back(key)
+                end
+            end
+        end
+        if !candidates.empty()
+            # Sort by length descending — longest prefix wins
+            var changed = true
+            while changed
+                changed = false
+                var i = 0
+                while i + 1 < candidates.size
+                    if candidates[i].size < candidates[i + 1].size
+                        var tmp = candidates[i]
+                        candidates[i] = candidates[i + 1]
+                        candidates[i + 1] = tmp
+                        changed = true
+                    end
+                    i += 1
+                end
+            end
+            server->url_map[candidates[0]](*server, session)
+        else
+            if server->wwwroot_path != null
+                var base_path = server->wwwroot_path
+                var full_path = path_normalize(base_path + "/" + session.url)
+                log("Resolved path: " + full_path)
+                # Boundary check: accept only exact match or base_path followed by '/'
+                # to prevent sibling-directory escape (e.g. www_evil matching root www).
+                if full_path == base_path || full_path.find(base_path + "/", 0) == 0
+                    if system.path.is_directory(full_path)
+                        if full_path[-1] != '/'
+                            full_path.append('/')
+                        end
+                        full_path.append("index.html")
+                        log("Directory request, try to serve: " + full_path)
+                    end
+                    if system.path.is_file(full_path) && system.file.can_read(full_path)
+                        log("Serving file: " + full_path)
+                        session.send_response(state_codes.code_200, server->read_file(full_path), get_mime(full_path))
+                    else
+                        if system.file.exist(full_path)
+                            error_code = state_codes.code_403
+                        else
+                            error_code = state_codes.code_404
+                        end
+                    end
+                else
+                    error_code = state_codes.code_403
+                end
+            else
+                error_code = state_codes.code_403
+            end
+        end
     end
     if error_code != null
         log("Resolving resource error: " + error_code)
         if server->url_map.exist(error_code)
             server->url_map[error_code](*server, session)
         else
-            async.write(session.sock, compose_response(error_code))
+            var err_state = async.write(session.sock, compose_response(error_code))
+            err_state.wait()
         end
         return false
     else
@@ -516,6 +615,9 @@ end
 
 function simple_worker(self)
     loop
+        if self->server->stopped
+            return
+        end
         self->state = 1
         # Accept new connection
         var sock = new tcp.socket
@@ -530,9 +632,13 @@ function simple_worker(self)
         var request_count = 0
         var read_state = new async.state
         loop
-            if ++request_count >= self->server->max_keep_alive
+            if self->server->stopped
+                break
+            end
+            if ++request_count > self->server->max_keep_alive
                 log("Keep-alive exceeded max request count.")
-                async.write(sock, compose_response(state_codes.code_408))
+                var err_state = async.write(sock, compose_response(state_codes.code_408))
+                err_state.wait()
                 break
             end
             var session = read_http_header(sock, read_state, last_request_time + self->server->keep_alive_timeout)
@@ -583,6 +689,9 @@ end
 
 function master_spawn_worker(self)
     loop
+        if self->server->stopped
+            return
+        end
         # Accept new connection
         log("Accepting new worker...")
         var sock = new tcp.socket
@@ -603,16 +712,22 @@ function master_spawn_worker(self)
         log("Starting handshake with worker rank " + node->rank)
         # Start handshake
         var rank_str = to_string(node->rank)
-        send_content(sock, {"SERVER", server_version, rank_str}.join(" "))
+        if !send_content(sock, {"SERVER", server_version, rank_str}.join(" "))
+            log("Handshake error: send_content failed")
+            sock.safe_shutdown()
+            continue
+        end
         var error_code = null, response = null
         (error_code, response) = receive_content_s(sock, self->server->slave_spawn_timeout)
         if error_code != null
             log("Handshake timeout or error.")
+            sock.safe_shutdown()
             continue
         end
         var header = response.split({' '})
         if header.size != 3 || header[0] != "WORKER" || header[1] != server_version || header[2] != rank_str
             log("Handshake error: Invalid response: " + header)
+            sock.safe_shutdown()
             continue
         end
         node->last_conn_time = runtime.time()
@@ -623,6 +738,9 @@ end
 
 function master_accept_worker(self)
     loop
+        if self->server->stopped
+            return
+        end
         if self->server->conn_list.size >= self->server->max_connections
             fiber.yield()
             continue
@@ -646,6 +764,9 @@ end
 function master_request_worker(self)
     link clist = self->server->conn_list
     loop
+        if self->server->stopped
+            return
+        end
         var conn = null
         for it = clist.begin, it != clist.end, null
             var c = it.data
@@ -679,7 +800,7 @@ function master_request_worker(self)
         if runtime.time() - conn->last_request_time >= self->server->keep_alive_timeout
             log("Keep-alive exceeded timeout limit.")
             conn->keep_alive = false
-        else if ++conn->request_count >= self->server->max_keep_alive
+        else if ++conn->request_count > self->server->max_keep_alive
             log("Keep-alive exceeded max request count.")
             conn->keep_alive = false
         end
@@ -697,6 +818,9 @@ end
 function master_response_worker(self)
     link clist = self->server->conn_list
     loop
+        if self->server->stopped
+            return
+        end
         if clist.empty()
             fiber.yield()
             continue
@@ -732,7 +856,8 @@ function master_response_worker(self)
         end
         if conn->request_queue.empty() && !conn->keep_alive
             if !conn->close
-                async.write(conn->sock, compose_response(state_codes.code_408))
+                var err_state = async.write(conn->sock, compose_response(state_codes.code_408))
+                err_state.wait()
             end
             if !conn->sock.safe_shutdown()
                 log("safe_shutdown returned false — async jobs may still be pending")
@@ -745,6 +870,9 @@ end
 function master_dispatch_worker(self)
     link slist = self->server->slave_list
     loop
+        if self->server->stopped
+            return
+        end
         var node = null
         for it = slist.begin, it != slist.end, null
             var n = it.data
@@ -802,8 +930,11 @@ function master_dispatch_worker(self)
             node->state = 1
             link session = conn->request_queue[conn->request_idx++]
             send_content(node->sock, session.serialize())
-            if session.method == "POST"
-                async.write(node->sock, session.post_data)
+            if session.content_length != null && session.content_length > 0
+                var body_state = async.write(node->sock, session.post_data)
+                if !body_state.wait()
+                    log("Failed to send request body: " + body_state.get_error())
+                end
             end
             log("Request dispatched to worker rank " + node->rank + ", waiting for response...")
             var (error_code, response) = receive_content_s(node->sock, timeout)
@@ -827,6 +958,9 @@ end
 
 function slave_worker(self)
     loop
+        if self->server->stopped
+            return
+        end
         self->state = 1
         # Connect to master
         var sock = new tcp.socket
@@ -839,9 +973,16 @@ function slave_worker(self)
         sock.set_opt_no_delay(true)
         sock.set_opt_keep_alive(true)
         # Start handshake
-        var header = receive_content(sock).split({' '})
+        var handshake_data = receive_content(sock)
+        if handshake_data == null
+            log("Handshake error: receive_content returned null")
+            sock.safe_shutdown()
+            continue
+        end
+        var header = handshake_data.split({' '})
         if header.size != 3 || header[0] != "SERVER" || header[1] != server_version
             log("Handshake error: Invalid response: " + header)
+            sock.safe_shutdown()
             continue
         end
         self->rank = header[2] as integer
@@ -850,6 +991,9 @@ function slave_worker(self)
         self->state = 2
         var last_request_time = runtime.time()
         loop
+            if self->server->stopped
+                break
+            end
             var timeout = last_request_time + self->server->slave_keep_alive_timeout - runtime.time()
             if timeout <= 0
                 break
@@ -866,14 +1010,14 @@ function slave_worker(self)
             end
             var session = new http_session
             session.deserialize(data)
-            if session.method == "POST"
+            if session.content_length != null && session.content_length > 0
                 timeout = last_request_time + self->server->slave_keep_alive_timeout - runtime.time()
                 if timeout <= 0
                     break
                 end
                 var state = async.read(sock, session.content_length)
                 if !state.wait_for(timeout)
-                    log("Error when receiving POST data")
+                    log("Error when receiving request body")
                     break
                 end
                 session.post_data = state.get_result()
@@ -928,10 +1072,17 @@ function url_decode(s)
             out += " "
             i += 1
         else if ch == "%" && i + 2 < n
-            var hx = s.substr(i + 1, 2)
-            var byte = hex_to_int(hx)
-            out += char.from_ascii(byte)
-            i += 3
+            var h1 = hex_char_to_int(s.substr(i + 1, 1))
+            var h2 = hex_char_to_int(s.substr(i + 2, 1))
+            if h1 >= 0 && h2 >= 0
+                var byte = h1 * 16 + h2
+                out += char.from_ascii(byte)
+                i += 3
+            else
+                # Invalid percent-encoding per RFC 3986 — keep literal
+                out += ch
+                i += 1
+            end
         else
             out += ch
             i += 1
@@ -983,8 +1134,6 @@ function parse_http_args(input)
     return result
 end
 
-var proxy = null, timeout_ms = null, low_speed_limit = null
-var ssl_verify = true
 
 # ===========================================================
 # OpenAI API Compatible Client
@@ -1009,22 +1158,7 @@ class http_client
         timeout_ms = ms
     end
 
-    function _async_recv(size)
-        var state = async.read(sock, size)
-        if timeout_ms != null
-            if !state.wait_for(timeout_ms)
-                return null
-            end
-        else
-            if !state.wait()
-                return null
-            end
-        end
-        return state.get_result()
-    end
-
-    function _async_send(data)
-        var state = async.write(sock, data)
+    function _await(state)
         if timeout_ms != null
             return state.wait_for(timeout_ms)
         else
@@ -1034,7 +1168,7 @@ class http_client
 
     function close()
         if sock != null && sock.is_open()
-            sock.close()
+            sock.safe_shutdown()
         end
     end
 
@@ -1072,7 +1206,6 @@ class http_client
 
     function connect_target(target)
         close()
-        sock = new tcp.socket
         pending = ""
         try
             var host = target["host"]
@@ -1080,21 +1213,24 @@ class http_client
             var endpoints = tcp.resolve(host, to_string(port))
             var connected = false
             foreach ep in endpoints
+                sock = new tcp.socket
                 try
                     var state = async.connect(sock, ep)
                     if timeout_ms != null
                         if !state.wait_for(timeout_ms)
+                            sock.safe_shutdown()
                             continue
                         end
                     else
                         if !state.wait()
+                            sock.safe_shutdown()
                             continue
                         end
                     end
                     connected = true
                     break
                 catch e
-                    null
+                    sock.safe_shutdown()
                 end
             end
             if !connected
@@ -1123,16 +1259,32 @@ class http_client
                 pending = pending.substr(pos + delim.size, pending.size - pos - delim.size)
                 return data
             end
-            var chunk = null
             try
-                chunk = _async_recv(http_client_read_chunk)
+                var state = new async.state
+                async.read_until(sock, state, delim)
+                if !_await(state)
+                    return null
+                end
+                var chunk = state.get_result()
+                if chunk == null || chunk.empty()
+                    return null
+                end
+                pending.append(chunk)
+                # Drain any bytes the ASIO streambuf may have accumulated beyond the
+                # delimiter (e.g. the start of an HTTP body that arrived in the same
+                # TCP segment as the headers).  They belong in pending for the next
+                # read_exact / read_chunked_body call.
+                var extra = state.available()
+                if extra > 0
+                    var extra_data = state.get_buffer(extra)
+                    if extra_data != null && !extra_data.empty()
+                        pending.append(extra_data)
+                    end
+                end
             catch e
+                log("HTTP read_until error: " + e.what)
                 return null
             end
-            if chunk == null || chunk.empty()
-                return null
-            end
-            pending.append(chunk)
             if pending.size > max_size
                 return null
             end
@@ -1166,17 +1318,21 @@ class http_client
             if step > http_client_read_chunk
                 step = http_client_read_chunk
             end
-            var chunk = null
             try
-                chunk = _async_recv(step)
+                var state = async.read(sock, step)
+                if !_await(state)
+                    return null
+                end
+                var chunk = state.get_result()
+                if chunk.empty()
+                    return null
+                end
+                out.append(chunk)
+                need -= chunk.size
             catch e
+                log("HTTP read_exact error: " + e.what)
                 return null
             end
-            if chunk == null || chunk.empty()
-                return null
-            end
-            out.append(chunk)
-            need -= chunk.size
         end
         return move(out)
     end
@@ -1224,7 +1380,8 @@ class http_client
                 return null
             end
             body.append(chunk)
-            if read_exact(2) == null
+            var terminator = read_exact(2)
+            if terminator == null || terminator != "\r\n"
                 return null
             end
         end
@@ -1272,7 +1429,12 @@ class http_client
         end
         var is_chunked = false
         if headers.exist("transfer-encoding")
-            if !transfer_chunked_reg.match(headers["transfer-encoding"].tolower()).empty()
+            # Parse comma-separated transfer-encodings per RFC 7230 §4.
+            # "chunked" must be the final encoding.
+            var te_value = headers["transfer-encoding"]
+            var tokens = te_value.split({','})
+            var last = tokens.back.trim().tolower()
+            if last == "chunked"
                 is_chunked = true
             else
                 return null
@@ -1304,19 +1466,30 @@ class http_client
                     body_buf.append(pending)
                     pending = ""
                     loop
-                        var chunk = null
                         try
-                            chunk = sock.receive(http_client_read_chunk)
+                            var state = async.read(sock, http_client_read_chunk)
+                            if !_await(state)
+                                # EOF or error — drain partial data before breaking
+                                if state.has_done()
+                                    var partial = state.get_result()
+                                    if partial != null && !partial.empty()
+                                        body_buf.append(partial)
+                                    end
+                                end
+                                break
+                            end
+                            var chunk = state.get_result()
+                            if chunk.empty()
+                                break
+                            end
+                            if body_buf.size > http_max_body_size - chunk.size
+                                return null
+                            end
+                            body_buf.append(chunk)
                         catch e
-                            break
-                        end
-                        if chunk == null || chunk.empty()
-                            break
-                        end
-                        if body_buf.size > http_max_body_size - chunk.size
+                            log("HTTP read body error: " + e.what)
                             return null
                         end
-                        body_buf.append(chunk)
                     end
                     resp_body = move(body_buf)
                 end
@@ -1377,7 +1550,8 @@ class http_client
         req.append("\r\n")
         req.append(req_body)
         try
-            if !_async_send(req)
+            var state = async.write(sock, req)
+            if !_await(state)
                 log("HTTP write error: timeout or I/O failure")
                 close()
                 return null
@@ -1388,21 +1562,46 @@ class http_client
             return null
         end
 
-        var headers_raw = read_until_limited("\r\n\r\n", http_max_header_size)
-        if headers_raw == null
-            log("HTTP read headers error.")
-            close()
-            return null
+        # Read response headers.  Per RFC 7231 §6.2, 1xx responses are interim
+        # (not final) — loop until we receive a final status code.
+        var meta = null
+        loop
+            var headers_raw = read_until_limited("\r\n\r\n", http_max_header_size)
+            if headers_raw == null
+                log("HTTP read headers error.")
+                close()
+                return null
+            end
+
+            meta = parse_response_headers(headers_raw)
+            if meta == null
+                log("HTTP parse headers error.")
+                close()
+                return null
+            end
+
+            var status_code = meta["status_code"]
+            # 1xx interim responses have no body (RFC 7230 §3.3).
+            # Skip to the next response header block.
+            if status_code >= 100 && status_code <= 199
+                if status_code == 101
+                    log("HTTP 101 Switching Protocols not supported.")
+                    close()
+                    return null
+                end
+                continue
+            end
+            break
         end
 
-        var meta = parse_response_headers(headers_raw)
-        if meta == null
-            log("HTTP parse headers error.")
-            close()
-            return null
+        # Per RFC 7230/7231: HEAD responses and 204/304 MUST NOT have a body.
+        var status_code = meta["status_code"]
+        var resp_body = ""
+        if method == "HEAD" || status_code == 204 || status_code == 304
+            resp_body = ""
+        else
+            resp_body = read_body(meta)
         end
-
-        var resp_body = read_body(meta)
         close()
         if resp_body == null
             return null
@@ -1504,62 +1703,6 @@ class openai_client extends http_client
     end
 end
 
-function http_get(url)
-    var buff = new iostream.char_buff
-    var session = curl.make_session_os(buff.get_ostream())
-    session.set_url(url)
-    session.allow_redirect(true)
-    if proxy != null
-        session.set_proxy(proxy)
-    end
-    if !ssl_verify
-        session.set_ssl_verify_host(false)
-        session.set_ssl_verify_peer(false)
-    end
-    if timeout_ms != null
-        session.set_connect_timeout_ms(timeout_ms)
-        session.set_accept_timeout_ms(timeout_ms)
-        session.set_low_speed_time(timeout_ms)
-    end
-    if low_speed_limit != null
-        session.set_low_speed_limit(low_speed_limit)
-    end
-    if runtime.await(session.perform)
-        return buff.get_string()
-    else
-        return null
-    end
-end
-
-function http_post(url, post_fields)
-    var buff = new iostream.char_buff
-    var session = curl.make_session_os(buff.get_ostream())
-    session.set_url(url)
-    session.allow_redirect(true)
-    if proxy != null
-        session.set_proxy(proxy)
-    end
-    session.set_http_post(true)
-    session.set_http_post_fields(post_fields)
-    if !ssl_verify
-        session.set_ssl_verify_host(false)
-        session.set_ssl_verify_peer(false)
-    end
-    if timeout_ms != null
-        session.set_connect_timeout_ms(timeout_ms)
-        session.set_accept_timeout_ms(timeout_ms)
-        session.set_low_speed_time(timeout_ms)
-    end
-    if low_speed_limit != null
-        session.set_low_speed_limit(low_speed_limit)
-    end
-    if runtime.await(session.perform)
-        return buff.get_string()
-    else
-        return null
-    end
-end
-
 function local_addr()
     var sock = new udp.socket
     sock.connect(udp.endpoint("8.8.8.8", 53))
@@ -1594,6 +1737,7 @@ class http_server
     var slave_spawn_timeout = 1000
     var slave_keep_alive_timeout = 5000
     var master_endpoint = null
+    var stopped = false
     # private functions
     function read_file(path)
         var time = runtime.time()
@@ -1619,6 +1763,9 @@ class http_server
         worker_list.push_back(worker)
     end
     function init()
+        if stopped
+            return
+        end
         # Init workers
         async_guard = new async.work_guard
         thread_pool = new array
@@ -1667,30 +1814,57 @@ class http_server
         end
         if conf.exist("thread_count")
             thread_count = conf["thread_count"] as integer
+            if thread_count < 1
+                thread_count = 1
+            end
         end
         if conf.exist("worker_count")
             worker_count = conf["worker_count"] as integer
+            if worker_count < 1
+                worker_count = 1
+            end
         end
         if conf.exist("max_keep_alive")
             max_keep_alive = conf["max_keep_alive"] as integer
+            if max_keep_alive < 1
+                max_keep_alive = 1
+            end
         end
         if conf.exist("keep_alive_timeout")
             keep_alive_timeout = conf["keep_alive_timeout"] as integer
+            if keep_alive_timeout < 0
+                keep_alive_timeout = 0
+            end
         end
         if conf.exist("master_worker_count")
             master_worker_count = conf["master_worker_count"] as integer
+            if master_worker_count < 1
+                master_worker_count = 1
+            end
         end
         if conf.exist("max_connections")
             max_connections = conf["max_connections"] as integer
+            if max_connections < 1
+                max_connections = 1
+            end
         end
         if conf.exist("heartbeat_interval")
             heartbeat_interval = conf["heartbeat_interval"] as integer
+            if heartbeat_interval < 0
+                heartbeat_interval = 0
+            end
         end
         if conf.exist("slave_spawn_timeout")
             slave_spawn_timeout = conf["slave_spawn_timeout"] as integer
+            if slave_spawn_timeout < 0
+                slave_spawn_timeout = 0
+            end
         end
         if conf.exist("slave_keep_alive_timeout")
             slave_keep_alive_timeout = conf["slave_keep_alive_timeout"] as integer
+            if slave_keep_alive_timeout < 1
+                slave_keep_alive_timeout = 1
+            end
         end
         return this
     end
@@ -1710,6 +1884,94 @@ class http_server
     end
     function bind_func(url : string, func : function)
         url_map.insert(url, func)
+        return this
+    end
+    function bind_proxy(prefix : string, target : string, timeout_ms : integer)
+        var handler = [target, timeout_ms](server, session){
+            var client = new global.http_client
+            client.set_timeout_ms(timeout_ms)
+            # Build the target URL, avoiding double slashes
+            var url = target
+            if url[-1] == '/'
+                url.cut(1)
+            end
+            url.append(session.url)
+            # Append query string if present
+            if session.args != null && !session.args.empty()
+                url.append("?" + session.args)
+            end
+            # Forward original request headers, filtering hop-by-hop headers
+            # (Host, Content-Length, Connection, Transfer-Encoding are managed
+            # by http_request internally and must not be forwarded).
+            var hop_by_hop = {"host": 1, "connection": 1, "content-length": 1,
+                "transfer-encoding": 1, "keep-alive": 1, "proxy-connection": 1,
+                "proxy-authenticate": 1, "proxy-authorization": 1, "te": 1,
+                "trailer": 1, "upgrade": 1} as hash_map
+            var req_headers = new array
+            if session.request_headers != null
+                foreach it in session.request_headers
+                    var name = it.first
+                    if !hop_by_hop.exist(name)
+                        req_headers.push_back(name + ": " + it.second)
+                    end
+                end
+            end
+            var resp = null
+            try
+                if session.content_length != null && session.content_length > 0
+                    resp = client.http_request(session.method, url, req_headers, session.post_data)
+                else
+                    resp = client.http_request(session.method, url, req_headers, "")
+                end
+            catch e
+                log("bind_proxy request error: " + e.what)
+                resp = null
+            end
+            if resp == null
+                session.send_response(state_codes.code_503,
+                    "{\"error\": \"Backend unavailable\"}", "application/json")
+            else
+                var content_type = "application/json"
+                if resp["headers"].exist("content-type")
+                    content_type = resp["headers"]["content-type"]
+                end
+                var status = "200 OK"
+                if resp["status_code"] != 200
+                    var code_str = to_string(resp["status_code"])
+                    switch resp["status_code"]
+                        case 400
+                            status = code_str + " Bad Request"
+                        end
+                        case 403
+                            status = code_str + " Forbidden"
+                        end
+                        case 404
+                            status = code_str + " Not Found"
+                        end
+                        case 408
+                            status = code_str + " Request Timeout"
+                        end
+                        case 431
+                            status = code_str + " Request Header Fields Too Large"
+                        end
+                        case 500
+                            status = code_str + " Internal Server Error"
+                        end
+                        case 502
+                            status = code_str + " Bad Gateway"
+                        end
+                        case 503
+                            status = code_str + " Service Unavailable"
+                        end
+                        default
+                            status = code_str + " Unknown"
+                        end
+                    end
+                end
+                session.send_response(status, resp["body"], content_type)
+            end
+        }
+        url_map.insert(prefix, handler)
         return this
     end
     function set_master(port : integer)
@@ -1732,6 +1994,9 @@ class http_server
         return this
     end
     function poll()
+        if stopped
+            return
+        end
         if async_guard is null
             init()
         end
@@ -1740,12 +2005,52 @@ class http_server
         end
     end
     function run()
+        if stopped
+            return
+        end
         init()
         loop
+            if stopped
+                break
+            end
             foreach worker in worker_list
                 worker->co.resume()
             end
         end
+    end
+    function stop()
+        # Signal all workers to exit their loops
+        stopped = true
+        # Close acceptors — cancels pending async_accept, wakes blocked fibers
+        acceptor = null
+        master_acceptor = null
+        # Close all active client connections
+        if conn_list != null
+            foreach conn in conn_list
+                if conn->sock != null && conn->sock.is_open()
+                    conn->sock.safe_shutdown()
+                end
+            end
+        end
+        # Close all slave connections
+        if slave_list != null
+            foreach node in slave_list
+                if node->sock != null && node->sock.is_open()
+                    node->sock.safe_shutdown()
+                end
+            end
+        end
+        # Allow workers one more timeslice to see stopped flag and exit
+        if worker_list != null
+            foreach worker in worker_list
+                worker->co.resume()
+            end
+        end
+        # Release async resources — threads first so ASIO post()
+        # in destructor succeeds (work_guard keeps io_context alive)
+        thread_pool = null
+        async_guard = null
+        worker_list = null
     end
 end
 

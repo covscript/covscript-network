@@ -4,6 +4,7 @@
     "Info": "Argument Parser",
     "Author": "CovScript Organization",
     "Version": "1.1",
+    "Source": "argparse.ecs",
     "Target": "argparse.csp",
     "Dependencies": [
         "ecs"

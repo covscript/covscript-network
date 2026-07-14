@@ -21,7 +21,9 @@ for %%t in (
     tests\test_tcp_sync.csc
     tests\test_udp.csc
     tests\test_http_roundtrip.csc
+    tests\test_http_client.csc
     tests\test_http_server.csc
+    tests\test_proxy.csc
     tests\test_openai_client.csc
     tests\test_fiber_socket.csc
     tests\test_async_tcp.csc
@@ -43,6 +45,11 @@ if errorlevel 1 exit /b 1
 echo.
 echo --- tests\test_tls_errors.csc ---
 %CS% %IMPORT_FLAGS% tests\test_tls_errors.csc
+if errorlevel 1 exit /b 1
+
+echo.
+echo --- tests\test_master_slave.csc ---
+%CS% %IMPORT_FLAGS% tests\test_master_slave.csc
 if errorlevel 1 exit /b 1
 
 if not "%DEEPSEEK_API_KEY%"=="" (

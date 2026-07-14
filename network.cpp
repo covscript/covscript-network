@@ -1264,6 +1264,12 @@ bool network_cs_ext::tcp::socket::safe_shutdown(socket_t &sock)
 		}
 	} guard(sock);
 	network_cs_ext::async::restart();
+	// Cancel pending operations so timed-out reads/writes
+	// do not keep async_jobs > 0 permanently.
+	{
+		asio::error_code ignored;
+		sock->get_raw().cancel(ignored);
+	}
 	while (sock->async_jobs.load(std::memory_order_acquire) > 0) {
 		network_cs_ext::async::get_global_settings().poll();
 		cs_runtime_yield();

@@ -1,11 +1,11 @@
 package netutils
 
 import codec.json.value as json_value
-import network.*, regex, curl
+import network.*, regex
 import codec.json
 
 constant server_name = "CovScript-NetUtils"
-constant server_version = "1.5"
+constant server_version = "1.6"
 
 # ============================================================================
 # Configuration constants — override before use to adjust behavior
@@ -86,54 +86,89 @@ function log(msg)
     end
 end
 
+# Send a framed message and wait for completion.
+# Returns true on success, false on I/O error.
 function send_content(sock, content)
-    async.write(sock, to_fixed_hex(content.size) + content)
+    var state = async.write(sock, to_fixed_hex(content.size) + content)
+    if !state.wait()
+        log("send_content failed: " + state.get_error())
+        return false
+    end
+    return true
 end
 
 function receive_content(sock)
-    var state = async.read(sock, framing_hex_size)
-    if !state.wait()
-        log("Read content header failed: " + state.get_error())
+    try
+        var state = async.read(sock, framing_hex_size)
+        if !state.wait()
+            log("Read content header failed: " + state.get_error())
+            return null
+        end
+        var hex_str = state.get_result()
+        if hex_str.empty()
+            log("Read content header failed: empty hex string")
+            return null
+        end
+        var size = from_fixed_hex(hex_str)
+        if size <= 0 || size > http_max_body_size
+            log("Read content header failed: invalid frame size " + to_string(size))
+            return null
+        end
+        state = async.read(sock, size)
+        if !state.wait()
+            log("Read content body failed: " + state.get_error())
+            return null
+        end
+        return state.get_result()
+    catch e
+        log("receive_content exception: " + e.what)
         return null
     end
-    var size = from_fixed_hex(state.get_result())
-    state = async.read(sock, size)
-    if !state.wait()
-        log("Read content body failed: " + state.get_error())
-        return null
-    end
-    return state.get_result()
 end
 
 function receive_content_s(sock, timeout)
     var start_time = runtime.time()
-    var state = async.read(sock, framing_hex_size)
-    if !state.wait_for(timeout)
-        if state.has_done()
-            log("Read content header failed: " + state.get_error())
-            return {state_codes.code_500, null}
-        else
-            log("Read content header failed: Timeout")
-            return {state_codes.code_408, null}
+    try
+        var state = async.read(sock, framing_hex_size)
+        if !state.wait_for(timeout)
+            if state.has_done()
+                log("Read content header failed: " + state.get_error())
+                return {state_codes.code_500, null}
+            else
+                log("Read content header failed: Timeout")
+                return {state_codes.code_408, null}
+            end
         end
-    end
-    var size = from_fixed_hex(state.get_result())
-    state = async.read(sock, size)
-    var remain = timeout - (runtime.time() - start_time)
-    if remain <= 0
-        log("Read content body failed: Timeout")
-        return {state_codes.code_408, null}
-    end
-    if !state.wait_for(remain)
-        if state.has_done()
-            log("Read content body failed: " + state.get_error())
+        var hex_str = state.get_result()
+        if hex_str.empty()
+            log("Read content header failed: empty hex string")
             return {state_codes.code_500, null}
-        else
+        end
+        var size = from_fixed_hex(hex_str)
+        if size <= 0 || size > http_max_body_size
+            log("Read content header failed: invalid frame size " + to_string(size))
+            return {state_codes.code_500, null}
+        end
+        state = async.read(sock, size)
+        var remain = timeout - (runtime.time() - start_time)
+        if remain <= 0
             log("Read content body failed: Timeout")
             return {state_codes.code_408, null}
         end
+        if !state.wait_for(remain)
+            if state.has_done()
+                log("Read content body failed: " + state.get_error())
+                return {state_codes.code_500, null}
+            else
+                log("Read content body failed: Timeout")
+                return {state_codes.code_408, null}
+            end
+        end
+        return {null, state.get_result()}
+    catch e
+        log("receive_content_s exception: " + e.what)
+        return {state_codes.code_500, null}
     end
-    return {null, state.get_result()}
 end
 
 function read_file(path)
@@ -255,6 +290,8 @@ class http_session
     # POST data
     var post_data = null
     var content_length = null
+    # Original request headers (for proxy forwarding)
+    var request_headers = null
     # for handler
     var sock = null
     var write_response = async.write
@@ -282,8 +319,15 @@ class http_session
         obj.set_member("method", json_value.make_string(method))
         obj.set_member("version", json_value.make_string(version))
         obj.set_member("connection", json_value.make_string(connection))
-        if method == "POST"
+        if content_length != null && content_length > 0
             obj.set_member("content_length", json_value.make_int(content_length))
+        end
+        if request_headers != null
+            var hdrs = json_value.make_object()
+            foreach it in request_headers
+                hdrs.set_member(it.first, json_value.make_string(it.second))
+            end
+            obj.set_member("request_headers", hdrs)
         end
         return json.to_string(obj)
     end
@@ -295,8 +339,16 @@ class http_session
         method = obj.get_member("method").as_string()
         version = obj.get_member("version").as_string()
         connection = obj.get_member("connection").as_string()
-        if method == "POST"
+        if obj.get_member("content_length") != null
             content_length = obj.get_member("content_length").as_int()
+        end
+        if obj.get_member("request_headers") != null
+            request_headers = new hash_map
+            var hdrs = obj.get_member("request_headers")
+            var keys = hdrs.get_member_names()
+            foreach key in keys
+                request_headers[key] = hdrs.get_member(key).as_string()
+            end
         end
         write_response = send_content
     end
@@ -318,15 +370,18 @@ function create_http_session(request_header)
         session.url = "/"
     end
     var has_content_length = false
+    session.request_headers = new hash_map
     foreach line in request_header
         var match = request_header_reg.match(line)
         if !match.empty()
-            switch match.str(1).tolower()
+            var header_name = match.str(1).tolower()
+            var header_value = match.str(2)
+            switch header_name
                 case "host"
-                    session.host = match.str(2)
+                    session.host = header_value
                 end
                 case "connection"
-                    session.connection = match.str(2).tolower()
+                    session.connection = header_value.tolower()
                 end
                 case "content-length"
                     if has_content_length
@@ -334,7 +389,7 @@ function create_http_session(request_header)
                     end
                     has_content_length = true
                     try
-                        session.content_length = match.str(2) as integer
+                        session.content_length = header_value as integer
                     catch e
                         return null
                     end
@@ -346,6 +401,10 @@ function create_http_session(request_header)
                     # Chunked request bodies are not implemented. Ignoring this
                     # header would leave bytes to be parsed as a new request.
                     return null
+                end
+                default
+                    # Store all other headers for proxy forwarding
+                    session.request_headers[header_name] = header_value
                 end
             end
         end
@@ -402,7 +461,8 @@ function read_http_header(sock, state, keep_alive_timeout)
     end
     if error_code != null
         if error_code != state_codes.code_eof
-            async.write(sock, compose_response(error_code))
+            var err_state = async.write(sock, compose_response(error_code))
+            err_state.wait()
         end
         return null
     end
@@ -410,7 +470,8 @@ function read_http_header(sock, state, keep_alive_timeout)
     var session = create_http_session(header)
     if session == null
         log("Parse request header error.")
-        async.write(sock, compose_response(state_codes.code_400))
+        var err_state = async.write(sock, compose_response(state_codes.code_400))
+        err_state.wait()
         return null
     end
     log("Received: Method = " + session.method + ", URL = " + session.url + ", Host = " + session.host + ", Connection = " + session.connection)
@@ -448,7 +509,8 @@ function read_http_header(sock, state, keep_alive_timeout)
         end
         if error_code != null
             if error_code != state_codes.code_eof
-                async.write(sock, compose_response(error_code))
+                var err_state = async.write(sock, compose_response(error_code))
+                err_state.wait()
             end
             return null
         end
@@ -460,42 +522,79 @@ function call_http_handler(session, server)
     var error_code = null
     if server->url_map.exist(session.url)
         server->url_map[session.url](*server, session)
-    else if server->wwwroot_path != null
-        var base_path = server->wwwroot_path
-        var full_path = path_normalize(base_path + "/" + session.url)
-        log("Resolved path: " + full_path)
-        # Boundary check: accept only exact match or base_path followed by '/'
-        # to prevent sibling-directory escape (e.g. www_evil matching root www).
-        if full_path == base_path || full_path.find(base_path + "/", 0) == 0
-            if system.path.is_directory(full_path)
-                if full_path[-1] != '/'
-                    full_path.append('/')
-                end
-                full_path.append("index.html")
-                log("Directory request, try to serve: " + full_path)
-            end
-            if system.path.is_file(full_path) && system.file.can_read(full_path)
-                log("Serving file: " + full_path)
-                session.send_response(state_codes.code_200, server->read_file(full_path), get_mime(full_path))
-            else
-                if system.file.exist(full_path)
-                    error_code = state_codes.code_403
-                else
-                    error_code = state_codes.code_404
-                end
-            end
-        else
-            error_code = state_codes.code_403
-        end
     else
-        error_code = state_codes.code_403
+        # Check for prefix match (used by bind_proxy).
+        # Sort candidate keys by length descending so the longest prefix wins.
+        # Enforce a path-component boundary to prevent /api from matching
+        # /api-v2: either the key ends with '/' already, or the character
+        # after the prefix must be '/' or end-of-string.
+        var candidates = new array
+        foreach it in server->url_map
+            var key = it.first
+            if session.url.find(key, 0) == 0
+                var after_size = session.url.size - key.size
+                if after_size == 0 || key[-1] == '/' || session.url.substr(key.size, 1) == "/"
+                    candidates.push_back(key)
+                end
+            end
+        end
+        if !candidates.empty()
+            # Sort by length descending — longest prefix wins
+            var changed = true
+            while changed
+                changed = false
+                var i = 0
+                while i + 1 < candidates.size
+                    if candidates[i].size < candidates[i + 1].size
+                        var tmp = candidates[i]
+                        candidates[i] = candidates[i + 1]
+                        candidates[i + 1] = tmp
+                        changed = true
+                    end
+                    i += 1
+                end
+            end
+            server->url_map[candidates[0]](*server, session)
+        else
+            if server->wwwroot_path != null
+                var base_path = server->wwwroot_path
+                var full_path = path_normalize(base_path + "/" + session.url)
+                log("Resolved path: " + full_path)
+                # Boundary check: accept only exact match or base_path followed by '/'
+                # to prevent sibling-directory escape (e.g. www_evil matching root www).
+                if full_path == base_path || full_path.find(base_path + "/", 0) == 0
+                    if system.path.is_directory(full_path)
+                        if full_path[-1] != '/'
+                            full_path.append('/')
+                        end
+                        full_path.append("index.html")
+                        log("Directory request, try to serve: " + full_path)
+                    end
+                    if system.path.is_file(full_path) && system.file.can_read(full_path)
+                        log("Serving file: " + full_path)
+                        session.send_response(state_codes.code_200, server->read_file(full_path), get_mime(full_path))
+                    else
+                        if system.file.exist(full_path)
+                            error_code = state_codes.code_403
+                        else
+                            error_code = state_codes.code_404
+                        end
+                    end
+                else
+                    error_code = state_codes.code_403
+                end
+            else
+                error_code = state_codes.code_403
+            end
+        end
     end
     if error_code != null
         log("Resolving resource error: " + error_code)
         if server->url_map.exist(error_code)
             server->url_map[error_code](*server, session)
         else
-            async.write(session.sock, compose_response(error_code))
+            var err_state = async.write(session.sock, compose_response(error_code))
+            err_state.wait()
         end
         return false
     else
@@ -515,6 +614,9 @@ end
 
 function simple_worker(self)
     loop
+        if self->server->stopped
+            return
+        end
         self->state = 1
         # Accept new connection
         var sock = new tcp.socket
@@ -529,9 +631,13 @@ function simple_worker(self)
         var request_count = 0
         var read_state = new async.state
         loop
-            if ++request_count >= self->server->max_keep_alive
+            if self->server->stopped
+                break
+            end
+            if ++request_count > self->server->max_keep_alive
                 log("Keep-alive exceeded max request count.")
-                async.write(sock, compose_response(state_codes.code_408))
+                var err_state = async.write(sock, compose_response(state_codes.code_408))
+                err_state.wait()
                 break
             end
             var session = read_http_header(sock, read_state, last_request_time + self->server->keep_alive_timeout)
@@ -582,6 +688,9 @@ end
 
 function master_spawn_worker(self)
     loop
+        if self->server->stopped
+            return
+        end
         # Accept new connection
         log("Accepting new worker...")
         var sock = new tcp.socket
@@ -602,16 +711,22 @@ function master_spawn_worker(self)
         log("Starting handshake with worker rank " + node->rank)
         # Start handshake
         var rank_str = to_string(node->rank)
-        send_content(sock, {"SERVER", server_version, rank_str}.join(" "))
+        if !send_content(sock, {"SERVER", server_version, rank_str}.join(" "))
+            log("Handshake error: send_content failed")
+            sock.safe_shutdown()
+            continue
+        end
         var error_code = null, response = null
         (error_code, response) = receive_content_s(sock, self->server->slave_spawn_timeout)
         if error_code != null
             log("Handshake timeout or error.")
+            sock.safe_shutdown()
             continue
         end
         var header = response.split({' '})
         if header.size != 3 || header[0] != "WORKER" || header[1] != server_version || header[2] != rank_str
             log("Handshake error: Invalid response: " + header)
+            sock.safe_shutdown()
             continue
         end
         node->last_conn_time = runtime.time()
@@ -622,6 +737,9 @@ end
 
 function master_accept_worker(self)
     loop
+        if self->server->stopped
+            return
+        end
         if self->server->conn_list.size >= self->server->max_connections
             fiber.yield()
             continue
@@ -645,6 +763,9 @@ end
 function master_request_worker(self)
     link clist = self->server->conn_list
     loop
+        if self->server->stopped
+            return
+        end
         var conn = null
         for it = clist.begin, it != clist.end, null
             var c = it.data
@@ -678,7 +799,7 @@ function master_request_worker(self)
         if runtime.time() - conn->last_request_time >= self->server->keep_alive_timeout
             log("Keep-alive exceeded timeout limit.")
             conn->keep_alive = false
-        else if ++conn->request_count >= self->server->max_keep_alive
+        else if ++conn->request_count > self->server->max_keep_alive
             log("Keep-alive exceeded max request count.")
             conn->keep_alive = false
         end
@@ -696,6 +817,9 @@ end
 function master_response_worker(self)
     link clist = self->server->conn_list
     loop
+        if self->server->stopped
+            return
+        end
         if clist.empty()
             fiber.yield()
             continue
@@ -731,7 +855,8 @@ function master_response_worker(self)
         end
         if conn->request_queue.empty() && !conn->keep_alive
             if !conn->close
-                async.write(conn->sock, compose_response(state_codes.code_408))
+                var err_state = async.write(conn->sock, compose_response(state_codes.code_408))
+                err_state.wait()
             end
             if !conn->sock.safe_shutdown()
                 log("safe_shutdown returned false — async jobs may still be pending")
@@ -744,6 +869,9 @@ end
 function master_dispatch_worker(self)
     link slist = self->server->slave_list
     loop
+        if self->server->stopped
+            return
+        end
         var node = null
         for it = slist.begin, it != slist.end, null
             var n = it.data
@@ -801,8 +929,11 @@ function master_dispatch_worker(self)
             node->state = 1
             link session = conn->request_queue[conn->request_idx++]
             send_content(node->sock, session.serialize())
-            if session.method == "POST"
-                async.write(node->sock, session.post_data)
+            if session.content_length != null && session.content_length > 0
+                var body_state = async.write(node->sock, session.post_data)
+                if !body_state.wait()
+                    log("Failed to send request body: " + body_state.get_error())
+                end
             end
             log("Request dispatched to worker rank " + node->rank + ", waiting for response...")
             var (error_code, response) = receive_content_s(node->sock, timeout)
@@ -826,6 +957,9 @@ end
 
 function slave_worker(self)
     loop
+        if self->server->stopped
+            return
+        end
         self->state = 1
         # Connect to master
         var sock = new tcp.socket
@@ -838,9 +972,16 @@ function slave_worker(self)
         sock.set_opt_no_delay(true)
         sock.set_opt_keep_alive(true)
         # Start handshake
-        var header = receive_content(sock).split({' '})
+        var handshake_data = receive_content(sock)
+        if handshake_data == null
+            log("Handshake error: receive_content returned null")
+            sock.safe_shutdown()
+            continue
+        end
+        var header = handshake_data.split({' '})
         if header.size != 3 || header[0] != "SERVER" || header[1] != server_version
             log("Handshake error: Invalid response: " + header)
+            sock.safe_shutdown()
             continue
         end
         self->rank = header[2] as integer
@@ -849,6 +990,9 @@ function slave_worker(self)
         self->state = 2
         var last_request_time = runtime.time()
         loop
+            if self->server->stopped
+                break
+            end
             var timeout = last_request_time + self->server->slave_keep_alive_timeout - runtime.time()
             if timeout <= 0
                 break
@@ -865,14 +1009,14 @@ function slave_worker(self)
             end
             var session = new http_session
             session.deserialize(data)
-            if session.method == "POST"
+            if session.content_length != null && session.content_length > 0
                 timeout = last_request_time + self->server->slave_keep_alive_timeout - runtime.time()
                 if timeout <= 0
                     break
                 end
                 var state = async.read(sock, session.content_length)
                 if !state.wait_for(timeout)
-                    log("Error when receiving POST data")
+                    log("Error when receiving request body")
                     break
                 end
                 session.post_data = state.get_result()
@@ -927,10 +1071,17 @@ function url_decode(s)
             out += " "
             i += 1
         else if ch == "%" && i + 2 < n
-            var hx = s.substr(i + 1, 2)
-            var byte = hex_to_int(hx)
-            out += char.from_ascii(byte)
-            i += 3
+            var h1 = hex_char_to_int(s.substr(i + 1, 1))
+            var h2 = hex_char_to_int(s.substr(i + 2, 1))
+            if h1 >= 0 && h2 >= 0
+                var byte = h1 * 16 + h2
+                out += char.from_ascii(byte)
+                i += 3
+            else
+                # Invalid percent-encoding per RFC 3986 — keep literal
+                out += ch
+                i += 1
+            end
         else
             out += ch
             i += 1
@@ -982,8 +1133,6 @@ function parse_http_args(input)
     return result
 end
 
-var proxy = null, timeout_ms = null, low_speed_limit = null
-var ssl_verify = true
 
 # ===========================================================
 # OpenAI API Compatible Client
@@ -1008,22 +1157,7 @@ class http_client
         timeout_ms = ms
     end
 
-    function _async_recv(size)
-        var state = async.read(sock, size)
-        if timeout_ms != null
-            if !state.wait_for(timeout_ms)
-                return null
-            end
-        else
-            if !state.wait()
-                return null
-            end
-        end
-        return state.get_result()
-    end
-
-    function _async_send(data)
-        var state = async.write(sock, data)
+    function _await(state)
         if timeout_ms != null
             return state.wait_for(timeout_ms)
         else
@@ -1033,7 +1167,7 @@ class http_client
 
     function close()
         if sock != null && sock.is_open()
-            sock.close()
+            sock.safe_shutdown()
         end
     end
 
@@ -1071,7 +1205,6 @@ class http_client
 
     function connect_target(target)
         close()
-        sock = new tcp.socket
         pending = ""
         try
             var host = target["host"]
@@ -1079,21 +1212,24 @@ class http_client
             var endpoints = tcp.resolve(host, to_string(port))
             var connected = false
             foreach ep in endpoints
+                sock = new tcp.socket
                 try
                     var state = async.connect(sock, ep)
                     if timeout_ms != null
                         if !state.wait_for(timeout_ms)
+                            sock.safe_shutdown()
                             continue
                         end
                     else
                         if !state.wait()
+                            sock.safe_shutdown()
                             continue
                         end
                     end
                     connected = true
                     break
                 catch e
-                    null
+                    sock.safe_shutdown()
                 end
             end
             if !connected
@@ -1122,16 +1258,32 @@ class http_client
                 pending = pending.substr(pos + delim.size, pending.size - pos - delim.size)
                 return data
             end
-            var chunk = null
             try
-                chunk = _async_recv(http_client_read_chunk)
+                var state = new async.state
+                async.read_until(sock, state, delim)
+                if !_await(state)
+                    return null
+                end
+                var chunk = state.get_result()
+                if chunk == null || chunk.empty()
+                    return null
+                end
+                pending.append(chunk)
+                # Drain any bytes the ASIO streambuf may have accumulated beyond the
+                # delimiter (e.g. the start of an HTTP body that arrived in the same
+                # TCP segment as the headers).  They belong in pending for the next
+                # read_exact / read_chunked_body call.
+                var extra = state.available()
+                if extra > 0
+                    var extra_data = state.get_buffer(extra)
+                    if extra_data != null && !extra_data.empty()
+                        pending.append(extra_data)
+                    end
+                end
             catch e
+                log("HTTP read_until error: " + e.what)
                 return null
             end
-            if chunk == null || chunk.empty()
-                return null
-            end
-            pending.append(chunk)
             if pending.size > max_size
                 return null
             end
@@ -1165,17 +1317,21 @@ class http_client
             if step > http_client_read_chunk
                 step = http_client_read_chunk
             end
-            var chunk = null
             try
-                chunk = _async_recv(step)
+                var state = async.read(sock, step)
+                if !_await(state)
+                    return null
+                end
+                var chunk = state.get_result()
+                if chunk.empty()
+                    return null
+                end
+                out.append(chunk)
+                need -= chunk.size
             catch e
+                log("HTTP read_exact error: " + e.what)
                 return null
             end
-            if chunk == null || chunk.empty()
-                return null
-            end
-            out.append(chunk)
-            need -= chunk.size
         end
         return move(out)
     end
@@ -1223,7 +1379,8 @@ class http_client
                 return null
             end
             body.append(chunk)
-            if read_exact(2) == null
+            var terminator = read_exact(2)
+            if terminator == null || terminator != "\r\n"
                 return null
             end
         end
@@ -1271,7 +1428,12 @@ class http_client
         end
         var is_chunked = false
         if headers.exist("transfer-encoding")
-            if !transfer_chunked_reg.match(headers["transfer-encoding"].tolower()).empty()
+            # Parse comma-separated transfer-encodings per RFC 7230 §4.
+            # "chunked" must be the final encoding.
+            var te_value = headers["transfer-encoding"]
+            var tokens = te_value.split({','})
+            var last = tokens.back.trim().tolower()
+            if last == "chunked"
                 is_chunked = true
             else
                 return null
@@ -1303,19 +1465,30 @@ class http_client
                     body_buf.append(pending)
                     pending = ""
                     loop
-                        var chunk = null
                         try
-                            chunk = sock.receive(http_client_read_chunk)
+                            var state = async.read(sock, http_client_read_chunk)
+                            if !_await(state)
+                                # EOF or error — drain partial data before breaking
+                                if state.has_done()
+                                    var partial = state.get_result()
+                                    if partial != null && !partial.empty()
+                                        body_buf.append(partial)
+                                    end
+                                end
+                                break
+                            end
+                            var chunk = state.get_result()
+                            if chunk.empty()
+                                break
+                            end
+                            if body_buf.size > http_max_body_size - chunk.size
+                                return null
+                            end
+                            body_buf.append(chunk)
                         catch e
-                            break
-                        end
-                        if chunk == null || chunk.empty()
-                            break
-                        end
-                        if body_buf.size > http_max_body_size - chunk.size
+                            log("HTTP read body error: " + e.what)
                             return null
                         end
-                        body_buf.append(chunk)
                     end
                     resp_body = move(body_buf)
                 end
@@ -1376,7 +1549,8 @@ class http_client
         req.append("\r\n")
         req.append(req_body)
         try
-            if !_async_send(req)
+            var state = async.write(sock, req)
+            if !_await(state)
                 log("HTTP write error: timeout or I/O failure")
                 close()
                 return null
@@ -1387,21 +1561,46 @@ class http_client
             return null
         end
 
-        var headers_raw = read_until_limited("\r\n\r\n", http_max_header_size)
-        if headers_raw == null
-            log("HTTP read headers error.")
-            close()
-            return null
+        # Read response headers.  Per RFC 7231 §6.2, 1xx responses are interim
+        # (not final) — loop until we receive a final status code.
+        var meta = null
+        loop
+            var headers_raw = read_until_limited("\r\n\r\n", http_max_header_size)
+            if headers_raw == null
+                log("HTTP read headers error.")
+                close()
+                return null
+            end
+
+            meta = parse_response_headers(headers_raw)
+            if meta == null
+                log("HTTP parse headers error.")
+                close()
+                return null
+            end
+
+            var status_code = meta["status_code"]
+            # 1xx interim responses have no body (RFC 7230 §3.3).
+            # Skip to the next response header block.
+            if status_code >= 100 && status_code <= 199
+                if status_code == 101
+                    log("HTTP 101 Switching Protocols not supported.")
+                    close()
+                    return null
+                end
+                continue
+            end
+            break
         end
 
-        var meta = parse_response_headers(headers_raw)
-        if meta == null
-            log("HTTP parse headers error.")
-            close()
-            return null
+        # Per RFC 7230/7231: HEAD responses and 204/304 MUST NOT have a body.
+        var status_code = meta["status_code"]
+        var resp_body = ""
+        if method == "HEAD" || status_code == 204 || status_code == 304
+            resp_body = ""
+        else
+            resp_body = read_body(meta)
         end
-
-        var resp_body = read_body(meta)
         close()
         if resp_body == null
             return null
@@ -1503,62 +1702,6 @@ class openai_client extends http_client
     end
 end
 
-function http_get(url)
-    var buff = new iostream.char_buff
-    var session = curl.make_session_os(buff.get_ostream())
-    session.set_url(url)
-    session.allow_redirect(true)
-    if proxy != null
-        session.set_proxy(proxy)
-    end
-    if !ssl_verify
-        session.set_ssl_verify_host(false)
-        session.set_ssl_verify_peer(false)
-    end
-    if timeout_ms != null
-        session.set_connect_timeout_ms(timeout_ms)
-        session.set_accept_timeout_ms(timeout_ms)
-        session.set_low_speed_time(timeout_ms)
-    end
-    if low_speed_limit != null
-        session.set_low_speed_limit(low_speed_limit)
-    end
-    if runtime.await(session.perform)
-        return buff.get_string()
-    else
-        return null
-    end
-end
-
-function http_post(url, post_fields)
-    var buff = new iostream.char_buff
-    var session = curl.make_session_os(buff.get_ostream())
-    session.set_url(url)
-    session.allow_redirect(true)
-    if proxy != null
-        session.set_proxy(proxy)
-    end
-    session.set_http_post(true)
-    session.set_http_post_fields(post_fields)
-    if !ssl_verify
-        session.set_ssl_verify_host(false)
-        session.set_ssl_verify_peer(false)
-    end
-    if timeout_ms != null
-        session.set_connect_timeout_ms(timeout_ms)
-        session.set_accept_timeout_ms(timeout_ms)
-        session.set_low_speed_time(timeout_ms)
-    end
-    if low_speed_limit != null
-        session.set_low_speed_limit(low_speed_limit)
-    end
-    if runtime.await(session.perform)
-        return buff.get_string()
-    else
-        return null
-    end
-end
-
 function local_addr()
     var sock = new udp.socket
     sock.connect(udp.endpoint("8.8.8.8", 53))
@@ -1593,6 +1736,7 @@ class http_server
     var slave_spawn_timeout = 1000
     var slave_keep_alive_timeout = 5000
     var master_endpoint = null
+    var stopped = false
     # private functions
     function read_file(path)
         var time = runtime.time()
@@ -1618,6 +1762,9 @@ class http_server
         worker_list.push_back(worker)
     end
     function init()
+        if stopped
+            return
+        end
         # Init workers
         async_guard = new async.work_guard
         thread_pool = new array
@@ -1666,30 +1813,57 @@ class http_server
         end
         if conf.exist("thread_count")
             thread_count = conf["thread_count"] as integer
+            if thread_count < 1
+                thread_count = 1
+            end
         end
         if conf.exist("worker_count")
             worker_count = conf["worker_count"] as integer
+            if worker_count < 1
+                worker_count = 1
+            end
         end
         if conf.exist("max_keep_alive")
             max_keep_alive = conf["max_keep_alive"] as integer
+            if max_keep_alive < 1
+                max_keep_alive = 1
+            end
         end
         if conf.exist("keep_alive_timeout")
             keep_alive_timeout = conf["keep_alive_timeout"] as integer
+            if keep_alive_timeout < 0
+                keep_alive_timeout = 0
+            end
         end
         if conf.exist("master_worker_count")
             master_worker_count = conf["master_worker_count"] as integer
+            if master_worker_count < 1
+                master_worker_count = 1
+            end
         end
         if conf.exist("max_connections")
             max_connections = conf["max_connections"] as integer
+            if max_connections < 1
+                max_connections = 1
+            end
         end
         if conf.exist("heartbeat_interval")
             heartbeat_interval = conf["heartbeat_interval"] as integer
+            if heartbeat_interval < 0
+                heartbeat_interval = 0
+            end
         end
         if conf.exist("slave_spawn_timeout")
             slave_spawn_timeout = conf["slave_spawn_timeout"] as integer
+            if slave_spawn_timeout < 0
+                slave_spawn_timeout = 0
+            end
         end
         if conf.exist("slave_keep_alive_timeout")
             slave_keep_alive_timeout = conf["slave_keep_alive_timeout"] as integer
+            if slave_keep_alive_timeout < 1
+                slave_keep_alive_timeout = 1
+            end
         end
         return this
     end
@@ -1709,6 +1883,94 @@ class http_server
     end
     function bind_func(url : string, func : function)
         url_map.insert(url, func)
+        return this
+    end
+    function bind_proxy(prefix : string, target : string, timeout_ms : integer)
+        var handler = [target, timeout_ms](server, session){
+            var client = new global.http_client
+            client.set_timeout_ms(timeout_ms)
+            # Build the target URL, avoiding double slashes
+            var url = target
+            if url[-1] == '/'
+                url.cut(1)
+            end
+            url.append(session.url)
+            # Append query string if present
+            if session.args != null && !session.args.empty()
+                url.append("?" + session.args)
+            end
+            # Forward original request headers, filtering hop-by-hop headers
+            # (Host, Content-Length, Connection, Transfer-Encoding are managed
+            # by http_request internally and must not be forwarded).
+            var hop_by_hop = {"host": 1, "connection": 1, "content-length": 1,
+                "transfer-encoding": 1, "keep-alive": 1, "proxy-connection": 1,
+                "proxy-authenticate": 1, "proxy-authorization": 1, "te": 1,
+                "trailer": 1, "upgrade": 1} as hash_map
+            var req_headers = new array
+            if session.request_headers != null
+                foreach it in session.request_headers
+                    var name = it.first
+                    if !hop_by_hop.exist(name)
+                        req_headers.push_back(name + ": " + it.second)
+                    end
+                end
+            end
+            var resp = null
+            try
+                if session.content_length != null && session.content_length > 0
+                    resp = client.http_request(session.method, url, req_headers, session.post_data)
+                else
+                    resp = client.http_request(session.method, url, req_headers, "")
+                end
+            catch e
+                log("bind_proxy request error: " + e.what)
+                resp = null
+            end
+            if resp == null
+                session.send_response(state_codes.code_503,
+                    "{\"error\": \"Backend unavailable\"}", "application/json")
+            else
+                var content_type = "application/json"
+                if resp["headers"].exist("content-type")
+                    content_type = resp["headers"]["content-type"]
+                end
+                var status = "200 OK"
+                if resp["status_code"] != 200
+                    var code_str = to_string(resp["status_code"])
+                    switch resp["status_code"]
+                        case 400
+                            status = code_str + " Bad Request"
+                        end
+                        case 403
+                            status = code_str + " Forbidden"
+                        end
+                        case 404
+                            status = code_str + " Not Found"
+                        end
+                        case 408
+                            status = code_str + " Request Timeout"
+                        end
+                        case 431
+                            status = code_str + " Request Header Fields Too Large"
+                        end
+                        case 500
+                            status = code_str + " Internal Server Error"
+                        end
+                        case 502
+                            status = code_str + " Bad Gateway"
+                        end
+                        case 503
+                            status = code_str + " Service Unavailable"
+                        end
+                        default
+                            status = code_str + " Unknown"
+                        end
+                    end
+                end
+                session.send_response(status, resp["body"], content_type)
+            end
+        }
+        url_map.insert(prefix, handler)
         return this
     end
     function set_master(port : integer)
@@ -1731,6 +1993,9 @@ class http_server
         return this
     end
     function poll()
+        if stopped
+            return
+        end
         if async_guard is null
             init()
         end
@@ -1739,11 +2004,51 @@ class http_server
         end
     end
     function run()
+        if stopped
+            return
+        end
         init()
         loop
+            if stopped
+                break
+            end
             foreach worker in worker_list
                 worker->co.resume()
             end
         end
+    end
+    function stop()
+        # Signal all workers to exit their loops
+        stopped = true
+        # Close acceptors — cancels pending async_accept, wakes blocked fibers
+        acceptor = null
+        master_acceptor = null
+        # Close all active client connections
+        if conn_list != null
+            foreach conn in conn_list
+                if conn->sock != null && conn->sock.is_open()
+                    conn->sock.safe_shutdown()
+                end
+            end
+        end
+        # Close all slave connections
+        if slave_list != null
+            foreach node in slave_list
+                if node->sock != null && node->sock.is_open()
+                    node->sock.safe_shutdown()
+                end
+            end
+        end
+        # Allow workers one more timeslice to see stopped flag and exit
+        if worker_list != null
+            foreach worker in worker_list
+                worker->co.resume()
+            end
+        end
+        # Release async resources — threads first so ASIO post()
+        # in destructor succeeds (work_guard keeps io_context alive)
+        thread_pool = null
+        async_guard = null
+        worker_list = null
     end
 end
