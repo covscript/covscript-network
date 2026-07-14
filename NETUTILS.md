@@ -1,6 +1,6 @@
 # CovScript NetUtils 协议文档
 
-版本：1.6
+版本：1.7
 
 作者：Covariant Script OSC
 
@@ -27,7 +27,7 @@
 ## 2. 基本常量与工具函数
 
 * `server_name = "CovScript-NetUtils"`
-* `server_version = "1.6"`
+* `server_version = "1.7"`
 
 与协议/实现相关的重要工具函数：
 
@@ -156,7 +156,8 @@ Master 分配 `rank`：先尝试使用 `deprecated_rank`（回收的编号），
 
 | 配置项                        |                                   含义 |   默认值  |
 | -------------------------- | -----------------------------------: | :----: |
-| `worker_count`             |                      每进程启动的 worker 数 |   `4`  |
+| `thread_count`             |                  底层 Asio I/O 线程数（不等于 handler 并发数） |   `4`  |
+| `worker_count`             |    单进程 HTTP 连接处理 fiber 数（控制可同时服务的活动/keep-alive 连接数） |  `64`  |
 | `max_keep_alive`           |                          每连接允许的最大请求数 |  `100` |
 | `keep_alive_timeout`       |                      保持连接的最大空闲时间（ms） | `5000` |
 | `max_connections`          |                    Master 接入的最大并发连接数 |  `100` |
@@ -336,7 +337,7 @@ slave.set_slave("127.0.0.1", 9000)
 
 * **性能调优建议**
 
-  * `worker_count` 不建议调得过高，单核能力有限，会增加调度开销。
+  * `worker_count` 控制可同时服务的活动/keep-alive 连接数量，默认为 64。高并发部署仍应根据内存、keep-alive 时间和后端延迟调整。不建议无限制调高——每个 worker fiber 持有 accept 操作的异步状态。
   * Master 模式下可以单独调整 `master_worker_count` 以改善 Master 对高并发连接的处理能力。同时，`max_connections` 也需要相应更改，防止大量连接排队的情况。
   * 由于 NetUtils 依赖 Master 节点进行分发，过多的 Slave 节点也会增加系统资源和调度的开销，一般可以取 2~8。
   * 调整 `max_keep_alive`、`keep_alive_timeout` 平衡连接复用与资源占用。

@@ -230,6 +230,80 @@ server.worker_list = null
 server = null
 check("S05-01: server resources released", server == null)
 
+# ============================================================
+# S06 -- Default worker_count is 64
+# ============================================================
+section("S06: default worker_count")
+
+var srv6 = new netutils.http_server
+check_eq("S06-01: default worker_count matches constant", srv6.worker_count, netutils.default_http_worker_count)
+check_eq("S06-02: default thread_count matches constant", srv6.thread_count, netutils.default_http_thread_count)
+# Verify set_config() can override the default
+srv6.set_config({"worker_count": 8, "thread_count": 2}.to_hash_map())
+check_eq("S06-03: worker_count overridden to 8", srv6.worker_count, 8)
+check_eq("S06-04: thread_count overridden to 2", srv6.thread_count, 2)
+srv6 = null
+
+# ============================================================
+# S07 -- 8 concurrent keep-alive connections all served
+# ============================================================
+section("S07: 8 concurrent connections")
+
+var srv7_port = find_free_port()
+if srv7_port == 0
+    check("S07-00: find free port", false)
+else
+    var srv7 = new netutils.http_server
+    srv7.set_config({"thread_count": 2}.to_hash_map())
+    # Use default worker_count (64) — must handle 8 concurrent connections
+
+    var srv7_call_count = 0
+    function srv7_handler(srv, session)
+        srv7_call_count += 1
+        session.send_response("200 OK", "ok", "text/plain")
+    end
+
+    srv7.bind_func("/ping", srv7_handler)
+    srv7.listen(srv7_port)
+
+    # Drive server to start accepting
+    var i7 = 0
+    while i7 < 10
+        srv7.poll()
+        async.poll_once()
+        i7 += 1
+    end
+
+    # Open 8 connections, sending 7 keep-alive requests and 1 final close request
+    var sockets = new array
+    var idx = 0
+    while idx < 8
+        var sock = new tcp.socket
+        sock.connect(tcp.endpoint("127.0.0.1", srv7_port))
+        check("S07-01: socket " + to_string(idx) + " connected", sock.is_open())
+        var conn_type = (idx < 7 ? "keep-alive" : "close")
+        sock.write("GET /ping HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: " + conn_type + "\r\n\r\n")
+        sockets.push_back(sock)
+        idx += 1
+    end
+
+    # Drive server until all 8 requests are processed
+    var start7 = runtime.time()
+    while srv7_call_count < 8 && runtime.time() - start7 < 5000
+        srv7.poll()
+        async.poll_once()
+        runtime.delay(5)
+    end
+    check_eq("S07-02: all 8 requests handled", srv7_call_count, 8)
+
+    # Close all sockets
+    foreach s in sockets
+        s.close()
+    end
+    srv7.acceptor = null
+    srv7 = null
+end
+
 # Results
 system.out.println("")
 system.out.println("=== Results ===")

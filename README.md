@@ -8,8 +8,8 @@ A high-performance network extension for the [Covariant Script](http://covscript
 
 | Package | Type | Version | Description |
 |---|---|---|---|
-| `network` | C++ Extension | `1.38.0_v6.2` | TCP/UDP sockets, TLS/SSL, async I/O, event loop |
-| `netutils` | CovScript | `1.6` | HTTP server framework with single-process and distributed master/slave modes |
+| `network` | C++ Extension | `1.38.0_v6.3` | TCP/UDP sockets, TLS/SSL, async I/O, event loop |
+| `netutils` | CovScript | `1.7` | HTTP server framework with single-process and distributed master/slave modes |
 | `argparse` | CovScript | `1.1` | Lightweight command-line argument parser |
 
 > **Note:** `netutils` and `argparse` are provided as both source (`.ecs`), compiled package (`.csp`), and bytecode module (`.csym`) — place them in your project's `imports/` directory.
@@ -76,7 +76,7 @@ All options can be overridden with `-D<option>=<value>`:
 | `NETWORK_FIXED_HEX_SIZE` | `16` | Hex string length for framing protocol helpers |
 | `NETWORK_MAX_PORT` | `65535` | Maximum valid TCP/UDP port number |
 | `NETWORK_MAX_IO_BUFFER_SIZE` | `67108864` | Max bytes per single read/receive call (64 MiB) |
-| `NETWORK_SAFE_SHUTDOWN_TIMEOUT_MS` | `200` | UDP `safe_close` drain timeout |
+| `NETWORK_SAFE_SHUTDOWN_TIMEOUT_MS` | `200` | Drain-loop deadline for UDP `safe_close` and TCP `safe_shutdown` |
 | `NETWORK_TLS_SHUTDOWN_TIMEOUT_MS` | `5000` | TLS close-notify timeout |
 | `NETWORK_THREAD_WORKER_POLL_MS` | `1` | Thread executor polling interval |
 

@@ -1246,13 +1246,32 @@ bool network_cs_ext::tcp::socket::safe_shutdown(socket_t &sock)
 	if (!sock->get_raw().is_open())
 		return true;
 	// Block new I/O atomically, then wait for existing jobs to drain.
-	// No timeout — safe_shutdown blocks until all pending I/O completes
-	// or the peer closes the connection.
+	// Uses NETWORK_SAFE_SHUTDOWN_TIMEOUT_MS as a deadline for both
+	// the exclusive-lock retry path (TLS handshake collision) and the
+	// drain-queued-I/O path.
 	try {
 		sock->begin_draining_exclusive();
 	}
 	catch (const std::exception &) {
-		return false;
+		// Another exclusive operation (e.g. TLS handshake) is in flight.
+		// Cancel the raw socket to force its completion handler to fire,
+		// then retry the lock.
+		asio::error_code ignored;
+		sock->get_raw().cancel(ignored);
+		network_cs_ext::async::restart();
+		auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(NETWORK_SAFE_SHUTDOWN_TIMEOUT_MS);
+		while (sock->async_jobs.load(std::memory_order_acquire) > 0) {
+			if (std::chrono::steady_clock::now() >= deadline)
+				break;
+			network_cs_ext::async::get_global_settings().poll();
+			cs_runtime_yield();
+		}
+		try {
+			sock->begin_draining_exclusive();
+		}
+		catch (const std::exception &) {
+			return false;
+		}
 	}
 	// RAII: release exclusive reservation on any exit path.
 	struct exclusive_guard {
@@ -1263,6 +1282,7 @@ bool network_cs_ext::tcp::socket::safe_shutdown(socket_t &sock)
 			s->end_draining_exclusive();
 		}
 	} guard(sock);
+	bool success = true;
 	network_cs_ext::async::restart();
 	// Cancel pending operations so timed-out reads/writes
 	// do not keep async_jobs > 0 permanently.
@@ -1270,11 +1290,17 @@ bool network_cs_ext::tcp::socket::safe_shutdown(socket_t &sock)
 		asio::error_code ignored;
 		sock->get_raw().cancel(ignored);
 	}
+	auto drain_dl = std::chrono::steady_clock::now() + std::chrono::milliseconds(NETWORK_SAFE_SHUTDOWN_TIMEOUT_MS);
 	while (sock->async_jobs.load(std::memory_order_acquire) > 0) {
+		if (std::chrono::steady_clock::now() >= drain_dl) {
+			success = false;
+			break;
+		}
 		network_cs_ext::async::get_global_settings().poll();
 		cs_runtime_yield();
 	}
-	bool success = true;
+	if (!success)
+		return false;
 	// TLS: async_shutdown avoids blocking the OS thread.
 	// A strand-bound timer closes the raw socket on timeout so the
 	// shutdown operation completes before TLS state is destroyed.

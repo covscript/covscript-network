@@ -51,9 +51,13 @@ function skip(label, reason)
     system.out.println("[SKIP] " + _section + " | " + label + " -- " + reason)
 end
 
+var _httpclient_port = 15300
+
 function find_free_port()
-    var port = 15000
-    while port < 15100
+    var port = _httpclient_port
+    _httpclient_port += 1
+    var max_port = port + 100
+    while port < max_port
         try
             var acpt = tcp.acceptor(tcp.endpoint_v4(port))
             acpt = null
@@ -369,6 +373,121 @@ end
 client14.close()
 srv_sock8.close()
 acpt8 = null
+
+# ============================================================
+# C09 -- TLS handshake failure against plain TCP server
+# ============================================================
+section("C09: TLS handshake failure")
+
+var port9 = find_free_port()
+if port9 == 0
+    skip("C09-all", "no free port")
+else
+    var acpt9 = tcp.acceptor(tcp.endpoint_v4(port9))
+    var srv9 = new tcp.socket
+    var ast9 = async.accept(srv9, acpt9)
+
+    var client15 = new netutils.http_client
+    client15.set_timeout_ms(2000)
+    var target9 = client15.parse_url("https://127.0.0.1:" + to_string(port9) + "/")
+    check_not_null("C09-01: https target parsed", target9)
+
+    # TLS handshake against a plain TCP server must fail
+    var result9 = client15.connect_target(target9)
+    check_false("C09-02: TLS to plain TCP returns false", result9)
+
+    if ast9.wait_for(1000)
+        srv9.close()
+    end
+    acpt9 = null
+end
+
+# ============================================================
+# C10 -- TLS handshake timeout (server accepts but never responds)
+# ============================================================
+section("C10: TLS handshake timeout")
+
+var port10 = find_free_port()
+if port10 == 0
+    skip("C10-all", "no free port")
+else
+    var acpt10 = tcp.acceptor(tcp.endpoint_v4(port10))
+    var srv10 = new tcp.socket
+    var ast10 = async.accept(srv10, acpt10)
+
+    var client16 = new netutils.http_client
+    client16.set_timeout_ms(500)
+    var target10 = client16.parse_url("https://127.0.0.1:" + to_string(port10) + "/")
+    check_not_null("C10-01: https target parsed", target10)
+
+    var start10 = runtime.time()
+    var result10 = client16.connect_target(target10)
+    var elapsed10 = runtime.time() - start10
+    check_false("C10-02: TLS timeout returns false", result10)
+    check("C10-03: timeout respected (elapsed < 3000ms)", elapsed10 < 3000)
+
+    if ast10.wait_for(1000)
+        srv10.close()
+    end
+    acpt10 = null
+end
+
+# ============================================================
+# C11 -- TLS handshake: other fiber runs while this fiber waits
+# ============================================================
+section("C11: other fiber runs during TLS wait")
+
+var c11_port = find_free_port()
+if c11_port == 0
+    skip("C11-all", "no free port")
+else
+    var c11_tls_done = false
+    var c11_tls_error = false
+
+    function c11_tls_fiber_func(sock)
+        var state = async.connect_ssl(sock, "127.0.0.1", null)
+        state.wait_for(2000)
+        c11_tls_error = !state.has_done() || state.get_error() != null
+        c11_tls_done = true
+    end
+
+    var c11_acpt = tcp.acceptor(tcp.endpoint_v4(c11_port))
+    var c11_srv = new tcp.socket
+    var c11_ast = async.accept(c11_srv, c11_acpt)
+
+    # Pre-establish TCP connection outside the fiber
+    var c11_sock = new tcp.socket
+    c11_sock.connect(tcp.endpoint("127.0.0.1", c11_port))
+
+    # Fiber only does TLS handshake (not TCP connect)
+    var c11_fiber = fiber.create(c11_tls_fiber_func, c11_sock)
+
+    # Resume once — TLS handshake should yield
+    c11_fiber.resume()
+    check("C11-01: TLS not complete after first resume", !c11_tls_done)
+
+    # Drive TLS fiber to completion
+    var c11_start = runtime.time()
+    loop
+        c11_fiber.resume()
+        async.poll_once()
+        runtime.delay(5)
+        if runtime.time() - c11_start >= 4000
+            break
+        end
+    until c11_tls_done
+
+    check("C11-02: TLS fiber completed", c11_tls_done)
+    check("C11-03: TLS reported error (plain TCP server)", c11_tls_error)
+
+    # Cancel pending handshake cleanly — safe_shutdown, not close()
+    c11_sock.safe_shutdown()
+
+    if c11_ast.has_done()
+        c11_srv.close()
+    end
+    c11_acpt = null
+end
 
 # ============================================================
 # Cleanup and results

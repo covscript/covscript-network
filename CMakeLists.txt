@@ -23,7 +23,7 @@ set(NETWORK_MAX_PORT 65535 CACHE STRING
 set(NETWORK_MAX_IO_BUFFER_SIZE 67108864 CACHE STRING
     "Maximum bytes accepted by a single read/receive/get_buffer request")
 set(NETWORK_SAFE_SHUTDOWN_TIMEOUT_MS 200 CACHE STRING
-    "UDP safe_close drain-loop timeout in milliseconds (TCP safe_shutdown waits indefinitely for async jobs)")
+    "Drain-loop deadline in milliseconds for both UDP safe_close and TCP safe_shutdown exclusive-operation and queued-I/O drain")
 set(NETWORK_TLS_SHUTDOWN_TIMEOUT_MS 5000 CACHE STRING
     "TCP safe_shutdown TLS close-notify timeout in milliseconds")
 set(NETWORK_THREAD_WORKER_POLL_MS 1 CACHE STRING

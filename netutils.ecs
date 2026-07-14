@@ -5,7 +5,7 @@ import network.*, regex
 import codec.json
 
 constant server_name = "CovScript-NetUtils"
-constant server_version = "1.6"
+constant server_version = "1.7"
 
 # ============================================================================
 # Configuration constants — override before use to adjust behavior
@@ -23,6 +23,10 @@ constant framing_hex_size = 16                   # length of fixed-hex size head
 # Default ports (IANA-registered; override for non-standard deployments)
 constant default_http_port = 80
 constant default_https_port = 443
+
+# Server defaults — tuning knobs exposed for documentation and test assertions
+constant default_http_thread_count = 4               # Asio I/O threads
+constant default_http_worker_count = 64              # per-process HTTP handler fibers
 
 # Internal Functions
 
@@ -1236,7 +1240,12 @@ class http_client
                 return false
             end
             if target["scheme"] == "https"
-                sock.connect_ssl(host, tls_options)
+                var tls_state = async.connect_ssl(sock, host, tls_options)
+                if !_await(tls_state)
+                    log("TLS handshake failed: " + tls_state.get_error())
+                    sock.safe_shutdown()
+                    return false
+                end
             end
             sock.set_opt_no_delay(true)
             return true
@@ -1716,9 +1725,9 @@ class http_server
     var wwwroot_path = null
     var url_map = new hash_map
     var thread_pool = null
-    var thread_count = 4
+    var thread_count = default_http_thread_count
     var worker_list = null
-    var worker_count = 4
+    var worker_count = default_http_worker_count
     var max_keep_alive = 100
     var keep_alive_timeout = 5000
     var mtime_map = new hash_map
