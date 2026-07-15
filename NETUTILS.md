@@ -1,6 +1,6 @@
 # CovScript NetUtils 协议文档
 
-版本：2.0
+版本：2.1
 
 作者：Covariant Script OSC
 
@@ -27,7 +27,7 @@
 ## 2. 基本常量与工具函数
 
 * `server_name = "CovScript-NetUtils"`
-* `server_version = "2.0"`
+* `server_version = "2.1"`
 
 与协议/实现相关的重要工具函数：
 
