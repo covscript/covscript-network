@@ -3,7 +3,7 @@
     "Name": "netutils",
     "Info": "Network Utilities",
     "Author": "CovScript Organization",
-    "Version": "1.9",
+    "Version": "2.0",
     "Source": "netutils.ecs",
     "Target": "netutils.csp",
     "Dependencies": [

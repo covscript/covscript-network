@@ -1,6 +1,6 @@
 # CovScript NetUtils 协议文档
 
-版本：1.9
+版本：2.0
 
 作者：Covariant Script OSC
 
@@ -27,7 +27,7 @@
 ## 2. 基本常量与工具函数
 
 * `server_name = "CovScript-NetUtils"`
-* `server_version = "1.9"`
+* `server_version = "2.0"`
 
 与协议/实现相关的重要工具函数：
 
@@ -171,6 +171,7 @@ Master 分配 `rank`：先尝试使用 `deprecated_rank`（回收的编号），
 | `worker_count`             |    单进程 HTTP 连接处理 fiber 数（控制可同时服务的活动/keep-alive 连接数） |  `64`  |
 | `max_keep_alive`           |                          每连接允许的最大请求数 |  `100` |
 | `keep_alive_timeout`       |                      保持连接的最大空闲时间（ms） | `5000` |
+| `max_body_size`            |                单个请求体的最大字节数 | `67108864` (64 MiB) |
 | `max_connections`          |                    Master 接入的最大并发连接数 |  `100` |
 | `master_worker_count`      |        Master 模式下并发 request worker 数 |   `4`  |
 | `heartbeat_interval`       |              Master 对 Slave 心跳间隔（ms） | `1000` |
@@ -213,7 +214,7 @@ Master 分配 `rank`：先尝试使用 `deprecated_rank`（回收的编号），
   设置静态文件根目录（并 normalize），返回 `this` 以链式调用。
 
 * `set_config(conf : hash_map)`
-  通过 `hash_map` 设置多个配置项，通常将 JSON 配置文件读取后传至这里。可识别的键包括 `"thread_count"`、`"worker_count"`、`"wwwroot"`、`"max_keep_alive"`、`"keep_alive_timeout"`、`"max_connections"`、`"heartbeat_interval"`、`"slave_spawn_timeout"`、`"slave_keep_alive_timeout"`、`"multi_process"`、`"master_worker_count"`，返回 `this`。
+  通过 `hash_map` 设置多个配置项，通常将 JSON 配置文件读取后传至这里。可识别的键包括 `"thread_count"`、`"worker_count"`、`"wwwroot"`、`"max_keep_alive"`、`"keep_alive_timeout"`、`"max_body_size"`、`"max_connections"`、`"heartbeat_interval"`、`"slave_spawn_timeout"`、`"slave_keep_alive_timeout"`、`"multi_process"`、`"master_worker_count"`，返回 `this`。
 
 * `bind_page(url : string, path : string)`
   将某 URL 绑定到 `wwwroot/path`，当请求到该 URL 时返回该文件内容。
@@ -277,7 +278,11 @@ Master 分配 `rank`：先尝试使用 `deprecated_rank`（回收的编号），
 | `403 Forbidden`             | 资源访问受限（如越界的 wwwroot）      |
 | `404 Not Found`             | 资源不存在                     |
 | `408 Request Timeout`       | Keep-Alive 超时或 Slave 响应超时 |
+| `413 Payload Too Large`     | 请求体超过 `max_body_size` 限制   |
+| `429 Too Many Requests`     | 请求频率过高（可由用户自定义）          |
+| `431 Request Header Fields Too Large` | 请求头超过大小限制      |
 | `500 Internal Server Error` | 服务器内部错误                   |
+| `502 Bad Gateway`           | 上游服务器返回无效响应              |
 | `503 Service Unavailable`   | 无可用 Slave / 负载过高（可由用户自定义） |
 | `000 End of file`           | 流提前结束（EOF）                |
 

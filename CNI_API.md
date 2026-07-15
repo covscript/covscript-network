@@ -343,6 +343,6 @@ end
 4. **`shutdown` vs `close` vs `safe_shutdown`**：`shutdown` 关闭通信通道但不释放资源（socket 保持 `is_open()` 为 true）；`close` 立即关闭并释放 TLS 上下文（如有进行中的异步操作会抛出异常）；`safe_shutdown` 协作式等待所有异步操作完成后关闭 TLS 和 TCP。异步任务等待无超时；TLS close-notify 超时默认 5000ms（`NETWORK_TLS_SHUTDOWN_TIMEOUT_MS`）。在 fiber 环境中通过 `poll` + `yield` 协作等待，不阻塞 OS 线程；非 fiber 环境调用线程一直阻塞到关闭完成。推荐在异步场景中使用 `safe_shutdown`。
 5. **信任报告**：建议使用 `sock.get_ssl_trust_report()`（每个 socket 独立），而非全局的 `get_last_global_ssl_trust_report()`（线程级别，可能被覆盖）。
 6. **线程安全**：同一 socket 不应并发混合同步和异步操作。异步 API 最多允许一个 pending read/receive 和一个 pending write/send；同方向重叠操作会被拒绝，读写可全双工并行。TLS 异步 handler 绑定到每个 socket 的 strand，可由多个 `async.thread_worker` 安全驱动。
-7. **netutils HTTPS 行为变更 (v1.2.1)**：`netutils.http_get` 和 `netutils.http_post` 现在默认启用 SSL 证书验证（`netutils.ssl_verify = true`）。旧版本无条件跳过验证。连接自签名证书或内部 PKI 的 HTTPS 服务器时，需显式设置 `netutils.ssl_verify = false`。
+7. **netutils HTTP 客户端**：`netutils` 提供 `http_client` 类（`http_request` / `post` 方法）和 `openai_client` 子类。TLS 验证通过客户端实例的 `set_tls_options({"trust_mode": "auto"}.to_hash_map())` 控制，不再使用全局 `ssl_verify` 标志。详见 [NETUTILS.md](NETUTILS.md)。
 8. **异步部分数据**：读取操作可能同时返回错误和已传输数据，例如对端在发送部分内容后关闭连接。完成后应先用 `get_error()`/`eof()` 判断结束原因；`get_result()`、`get_buffer()` 和 `available()` 仍允许读取错误发生前已收到的数据。
 9. **缓冲区上限**：TCP/UDP 的同步读取、异步读取及 `state.get_buffer()` 单次默认最多请求 64 MiB；可通过 CMake 的 `NETWORK_MAX_IO_BUFFER_SIZE` 调整。非正数或超限请求会在分配前抛出异常。
