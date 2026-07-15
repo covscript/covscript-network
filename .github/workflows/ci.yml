@@ -215,7 +215,7 @@ jobs:
           for pkg in argparse netutils; do
             echo "=== Checking ${pkg}.csp reproducibility ==="
             cp "${pkg}.csp" "/tmp/${pkg}.csp.bak"
-            cspkg -b "${pkg}.ecs" --compile
+            cspkg build "${pkg}.ecs" --compile
             # The .csp header contains a Date line (line 3) that always
             # differs.  Strip it before comparing; everything else must
             # be byte-identical when the source has not changed.
