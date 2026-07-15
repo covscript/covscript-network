@@ -321,6 +321,11 @@ namespace network_cs_ext {
 				}
 			}
 
+			bool peer_closed(socket_t &sock)
+			{
+				return sock->peer_closed();
+			}
+
 			string receive(socket_t &sock, number max)
 			{
 				auto size = checked_io_buffer_size(max);
@@ -1198,6 +1203,7 @@ namespace network_cs_ext {
 		.add_var("set_opt_no_delay", make_cni(tcp::socket::set_opt_no_delay))
 		.add_var("set_opt_keep_alive", make_cni(tcp::socket::set_opt_keep_alive))
 		.add_var("available", make_cni(tcp::socket::available))
+		.add_var("peer_closed", make_cni(tcp::socket::peer_closed))
 		.add_var("receive", make_cni(tcp::socket::receive))
 		.add_var("read", make_cni(tcp::socket::read))
 		.add_var("send", make_cni(tcp::socket::send))

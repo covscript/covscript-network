@@ -206,26 +206,46 @@ jobs:
           cspkg list
 
       # ------------------------------------------------------------------ #
-      # 10b. Reproducible build check (.csp only — date line is volatile) #
+      # 10b. Reproducible build check (Date header line is volatile)       #
       # ------------------------------------------------------------------ #
       - name: Reproducible build check
         shell: bash
         run: |
           set -e
-          for pkg in argparse netutils; do
+          # Check every source package in the repo, not a hardcoded list.
+          # nullglob avoids iterating the literal glob when nothing matches.
+          shopt -s nullglob
+          for src in *.ecs; do
+            pkg="${src%.ecs}"
             echo "=== Checking ${pkg}.csp reproducibility ==="
             cp "${pkg}.csp" "/tmp/${pkg}.csp.bak"
+            if [ -f "${pkg}.csym" ]; then
+              cp "${pkg}.csym" "/tmp/${pkg}.csym.bak"
+            fi
             cspkg build "${pkg}.ecs" --compile
-            # The .csp header contains a Date line (line 3) that always
-            # differs.  Strip it before comparing; everything else must
+            # The .csp header contains a Date line that always differs.
+            # Strip it by pattern before comparing; everything else must
             # be byte-identical when the source has not changed.
-            sed '3d' "/tmp/${pkg}.csp.bak" > "/tmp/${pkg}.csp.old"
-            sed '3d' "${pkg}.csp"             > "/tmp/${pkg}.csp.new"
+            sed '/^# Date:/d' "/tmp/${pkg}.csp.bak" > "/tmp/${pkg}.csp.old"
+            sed '/^# Date:/d' "${pkg}.csp"          > "/tmp/${pkg}.csp.new"
             if ! diff -q "/tmp/${pkg}.csp.old" "/tmp/${pkg}.csp.new"; then
               echo "ERROR: ${pkg}.csp changed beyond the date line!"
               echo "  Did you forget to recompile after editing ${pkg}.ecs?"
               diff "/tmp/${pkg}.csp.old" "/tmp/${pkg}.csp.new" || true
               exit 1
+            fi
+            # The .csym has no volatile header — it must be byte-identical.
+            if [ -f "/tmp/${pkg}.csym.bak" ]; then
+              if [ ! -f "${pkg}.csym" ]; then
+                echo "ERROR: ${pkg}.csym is missing after build!"
+                echo "  Did you forget to regenerate ${pkg}.csym after editing ${pkg}.ecs?"
+                exit 1
+              fi
+              if ! cmp -s "/tmp/${pkg}.csym.bak" "${pkg}.csym"; then
+                echo "ERROR: ${pkg}.csym is stale!"
+                echo "  Did you forget to regenerate ${pkg}.csym after editing ${pkg}.ecs?"
+                exit 1
+              fi
             fi
             echo "  ${pkg} reproducible — ok"
           done
@@ -294,7 +314,7 @@ jobs:
           cs tests/test_tls_errors.csc
 
       # ------------------------------------------------------------------ #
-      # 16c. Run master-slave integration tests                            #
+      # 16b. Run master-slave integration tests                            #
       # ------------------------------------------------------------------ #
       - name: Run master-slave integration tests
         shell: bash
@@ -304,7 +324,7 @@ jobs:
           cs tests/test_http_compliance.csc
 
       # ------------------------------------------------------------------ #
-      # 16b. Run TLS custom trust mode test (self-signed cert)            #
+      # 16c. Run TLS custom trust mode test (self-signed cert)            #
       # ------------------------------------------------------------------ #
       - name: Run TLS custom trust mode test
         shell: bash

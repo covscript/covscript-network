@@ -100,7 +100,10 @@ function drive_n(server, n)
     end
 end
 
-function read_http_response(client, server, timeout_ms)
+# Shared response reader: polls srv_a (and srv_b when not null) while reading
+# one HTTP response. Body reads are capped at the remaining Content-Length so
+# bytes of a pipelined follow-up response are never consumed and discarded.
+function read_response_from(client, srv_a, srv_b, timeout_ms)
     var buf = ""
     var start = runtime.time()
 
@@ -111,8 +114,17 @@ function read_http_response(client, server, timeout_ms)
             if chunk != null && !chunk.empty()
                 buf += chunk
             end
+        else
+            # No buffered data and the peer has closed: no response is coming
+            if client.peer_closed()
+                break
+            end
         end
-        drive(server)
+        srv_a.poll()
+        if srv_b != null
+            srv_b.poll()
+        end
+        async.poll_once()
         runtime.delay(2)
     end
     if buf.find("\r\n\r\n", 0) == -1
@@ -142,18 +154,34 @@ function read_http_response(client, server, timeout_ms)
         var body_got = buf.size - body_start
         while body_got < cl && runtime.time() - start < timeout_ms
             var n = client.available()
+            if n > cl - body_got
+                n = cl - body_got
+            end
             if n > 0
                 var chunk = client.receive(n)
                 if chunk != null && !chunk.empty()
                     buf += chunk
                     body_got += chunk.size
                 end
+            else
+                # Body truncated by peer close: stop waiting for the rest
+                if client.peer_closed()
+                    break
+                end
             end
-            drive(server)
+            srv_a.poll()
+            if srv_b != null
+                srv_b.poll()
+            end
+            async.poll_once()
             runtime.delay(2)
         end
     end
     return buf
+end
+
+function read_http_response(client, server, timeout_ms)
+    return read_response_from(client, server, null, timeout_ms)
 end
 
 function http_req(method, path, host_port, headers, body)
@@ -187,59 +215,7 @@ function drive_ms_n(master, slave, n)
 end
 
 function read_response_ms(client, master, slave, timeout_ms)
-    var buf = ""
-    var start = runtime.time()
-
-    while buf.find("\r\n\r\n", 0) == -1 && runtime.time() - start < timeout_ms
-        var n = client.available()
-        if n > 0
-            var chunk = client.receive(n)
-            if chunk != null && !chunk.empty()
-                buf += chunk
-            end
-        end
-        drive_ms(master, slave)
-        runtime.delay(2)
-    end
-    if buf.find("\r\n\r\n", 0) == -1
-        return buf
-    end
-
-    var hdr_end = buf.find("\r\n\r\n", 0)
-    var headers = buf.substr(0, hdr_end)
-    var body_start = hdr_end + 4
-
-    var cl = -1
-    var cl_pos = headers.find("Content-Length:", 0)
-    if cl_pos != -1
-        var cl_end = headers.find("\r\n", cl_pos)
-        if cl_end == -1
-            cl_end = headers.size
-        end
-        var cl_str = headers.substr(cl_pos + 15, cl_end - cl_pos - 15).trim()
-        try
-            cl = to_integer(cl_str)
-        catch e
-            cl = -1
-        end
-    end
-
-    if cl >= 0
-        var body_got = buf.size - body_start
-        while body_got < cl && runtime.time() - start < timeout_ms
-            var n = client.available()
-            if n > 0
-                var chunk = client.receive(n)
-                if chunk != null && !chunk.empty()
-                    buf += chunk
-                    body_got += chunk.size
-                end
-            end
-            drive_ms(master, slave)
-            runtime.delay(2)
-        end
-    end
-    return buf
+    return read_response_from(client, master, slave, timeout_ms)
 end
 
 # Shared handler state (reset per section)
@@ -359,7 +335,7 @@ check_contains("C02-02: HTTP/1.1 in status", r, "HTTP/1.1")
 check_contains("C02-03: 200 OK", r, "200 OK")
 # Mandatory headers (RFC 7231)
 check_contains("C02-04: Date header", r, "Date: ")
-check_contains("C02-05: Server header", r, "Server: ")
+check_contains("C02-05: Server header", r, "Server: " + netutils.server_name + "/" + netutils.server_version)
 check_contains("C02-06: Content-Length header", r, "Content-Length: ")
 check_contains("C02-07: Content-Type header", r, "Content-Type: ")
 check_contains("C02-08: Connection header", r, "Connection: ")
@@ -396,7 +372,7 @@ c = new tcp.socket
 c.connect(tcp.endpoint("127.0.0.1", p))
 c.write(http_req("GET", "/no/such/path", "127.0.0.1:" + to_string(p), {"Connection: close"}, null))
 r = read_http_response(c, srv, 5000)
-check_contains("C03-02: 403 or 404", r, "403")
+check("C03-02: 403 or 404", r.find("403", 0) != -1 || r.find("404", 0) != -1)
 c.close()
 drive_n(srv, 5)
 
@@ -760,7 +736,7 @@ c.write(http_req("GET", "/cc", "127.0.0.1", {"Connection: close"}, null))
 r = read_http_response(c, srv, 5000)
 check_contains("C12-03: resp-2 Connection: close", r, "close")
 check_contains("C12-04: resp-2 200 OK", r, "200 OK")
-check_not_contains("C12-05: resp-2 no 408", r, "408")
+check_not_contains("C12-05: resp-2 no 408", r, "408 Request Timeout")
 
 # Request 3: must fail — server already closed
 c.write(http_req("GET", "/cc", "127.0.0.1", {"Connection: keep-alive"}, null))
@@ -1127,18 +1103,18 @@ slave.set_slave("127.0.0.1", slave_p)
 
 drive_ms_n(master, slave, 30)
 
-# Request to unmapped URL → slave returns error via framed protocol.
-# Currently the master receives a framed error response and returns it
-# to the client. The response status code passes through intact.
+# Request to unmapped URL → slave returns the error via the framed
+# protocol and the master delivers it to the client. The original
+# status code (403, no wwwroot configured) must pass through intact
+# instead of degrading to a generic 500.
 c = new tcp.socket
 c.connect(tcp.endpoint("127.0.0.1", http_p))
 c.write(http_req("GET", "/no/route", "127.0.0.1:" + to_string(http_p), {"Connection: close"}, null))
 r = read_response_ms(c, master, slave, 5000)
-# The slave's call_http_handler reports the error; the response is
-# serialized and the master delivers it. The exact status depends on
-# how errors are serialized through the framing layer.
 check("M03-01: error response received", !r.empty())
 check("M03-02: response is HTTP", r.find("HTTP/", 0) != -1)
+check_contains("M03-03: original status propagated", r, "403")
+check_not_contains("M03-04: not degraded to 500", r, "500 Internal Server Error")
 c.close()
 
 slave.stop()
@@ -1328,13 +1304,13 @@ c.connect(tcp.endpoint("127.0.0.1", http_p))
 c.write(http_req("GET", "/ms-cc", "127.0.0.1", {"Connection: keep-alive"}, null))
 r = read_response_ms(c, master, slave, 5000)
 check_contains("M07-01: resp-1 keep-alive", r, "keep-alive")
-check_not_contains("M07-02: resp-1 no 408", r, "408")
+check_not_contains("M07-02: resp-1 no 408", r, "408 Request Timeout")
 
 # Request 2: client close
 c.write(http_req("GET", "/ms-cc", "127.0.0.1", {"Connection: close"}, null))
 r = read_response_ms(c, master, slave, 5000)
 check_contains("M07-03: resp-2 close", r, "close")
-check_not_contains("M07-04: resp-2 no 408", r, "408")
+check_not_contains("M07-04: resp-2 no 408", r, "408 Request Timeout")
 
 # Request 3: must fail
 c.write(http_req("GET", "/ms-cc", "127.0.0.1", {"Connection: keep-alive"}, null))
