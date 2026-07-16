@@ -29,6 +29,7 @@ constant default_http_worker_count    = 32         # per-process HTTP handler fi
 
 var request_line_reg = regex.build_optimize("^([A-Z]+) ([^ ?]+)(?:\\?([^ ]*))? HTTP/([0-9.]+)$")
 var request_header_reg = regex.build_optimize("^([^:]*): ?(.*)$")
+var keep_alive_replace_reg = regex.build_optimize("Connection: keep-alive")
 
 namespace state_codes
     constant code_200 = "200 OK"
@@ -897,6 +898,14 @@ function master_response_worker(self)
         while !conn->request_queue.empty()
             link session = conn->request_queue.front
             if session != null && session.response != null
+                # When keep-alive is disabled the connection must close
+                # regardless of what the slave handler wrote.  Force the
+                # header to prevent a mismatch between the response and
+                # the actual connection lifecycle.
+                if !conn->keep_alive
+                    session.response = regex.replace(keep_alive_replace_reg,
+                        session.response, "Connection: close")
+                end
                 var response_state = async.write(conn->sock, session.response)
                 if !response_state.wait()
                     log("Write response error: " + response_state.get_error())
@@ -1994,7 +2003,8 @@ class http_server
             var hop_by_hop = {"host": 1, "connection": 1, "content-length": 1,
                 "transfer-encoding": 1, "keep-alive": 1, "proxy-connection": 1,
                 "proxy-authenticate": 1, "proxy-authorization": 1, "te": 1,
-                "trailer": 1, "upgrade": 1} as hash_map
+                "trailer": 1, "upgrade": 1,
+                "x-forwarded-for": 1} as hash_map
             var req_headers = new array
             if session.request_headers != null
                 foreach it in session.request_headers
@@ -2004,6 +2014,8 @@ class http_server
                     end
                 end
             end
+            # Append the real client IP so the backend sees per-user addresses instead of the proxy's own IP.
+            req_headers.push_back("X-Forwarded-For: " + session.sock.remote_endpoint().address())
             var resp = null
             try
                 if session.content_length != null && session.content_length > 0
