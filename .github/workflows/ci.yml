@@ -26,13 +26,13 @@ jobs:
 
     steps:
       # ------------------------------------------------------------------ #
-      # 1. Check out this extension repo                                    #
+      # 1. Check out this extension repo                                   #
       # ------------------------------------------------------------------ #
       - name: Checkout extension
         uses: actions/checkout@v5
 
       # ------------------------------------------------------------------ #
-      # 2. Set platform identifiers                                         #
+      # 2. Set platform identifiers                                        #
       # ------------------------------------------------------------------ #
       - name: Set platform identifiers
         id: platform
@@ -54,7 +54,7 @@ jobs:
           esac
 
       # ------------------------------------------------------------------ #
-      # 3. Determine release tag                                            #
+      # 3. Determine release tag                                           #
       # ------------------------------------------------------------------ #
       - name: Determine csbuild release
         id: cs-release
@@ -69,7 +69,7 @@ jobs:
           fi
 
       # ------------------------------------------------------------------ #
-      # 4. Download & extract covscript SDK + cspkg repo                    #
+      # 4. Download & extract covscript SDK + cspkg repo                   #
       # ------------------------------------------------------------------ #
       - name: Download covscript SDK
         id: sdk
@@ -104,7 +104,7 @@ jobs:
           ls -la cspkg-repo/
 
       # ------------------------------------------------------------------ #
-      # 5. Configure cspkg                                                  #
+      # 5. Configure cspkg                                                 #
       # ------------------------------------------------------------------ #
       - name: Configure cspkg
         shell: bash
@@ -134,7 +134,7 @@ jobs:
           cat "$HOME/.cspkg/config.json"
 
       # ------------------------------------------------------------------ #
-      # 6. Persist environment for later steps                              #
+      # 6. Persist environment for later steps                             #
       # ------------------------------------------------------------------ #
       - name: Setup environment
         shell: bash
@@ -144,7 +144,7 @@ jobs:
           echo "${CS_HOME}/bin" >> "$GITHUB_PATH"
 
       # ------------------------------------------------------------------ #
-      # 7. Run cspkg install                                                #
+      # 7. Setup cspkg environment                                         #
       # ------------------------------------------------------------------ #
       - name: Run cspkg install
         shell: bash
@@ -155,10 +155,56 @@ jobs:
           cspkg install --import --yes
           cspkg install ecs_bootstrap --yes
           cspkg version
+          cspkg doctor
           cspkg list
 
       # ------------------------------------------------------------------ #
-      # 8. Setup MSYS2 + OpenSSL (Windows only)                            #
+      # 8. Reproducible build check (Date header line is volatile)         #
+      # ------------------------------------------------------------------ #
+      - name: Reproducible build check
+        shell: bash
+        run: |
+          set -e
+          # Check every source package in the repo, not a hardcoded list.
+          # nullglob avoids iterating the literal glob when nothing matches.
+          shopt -s nullglob
+          for src in *.ecs; do
+            pkg="${src%.ecs}"
+            echo "=== Checking ${pkg}.csp reproducibility ==="
+            cp "${pkg}.csp" "/tmp/${pkg}.csp.bak"
+            if [ -f "${pkg}.csym" ]; then
+              cp "${pkg}.csym" "/tmp/${pkg}.csym.bak"
+            fi
+            cspkg build "${pkg}.ecs" --compile
+            # The .csp header contains a Date line that always differs.
+            # Strip it by pattern before comparing; everything else must
+            # be byte-identical when the source has not changed.
+            sed '/^# Date:/d' "/tmp/${pkg}.csp.bak" > "/tmp/${pkg}.csp.old"
+            sed '/^# Date:/d' "${pkg}.csp"          > "/tmp/${pkg}.csp.new"
+            if ! diff -q "/tmp/${pkg}.csp.old" "/tmp/${pkg}.csp.new"; then
+              echo "ERROR: ${pkg}.csp changed beyond the date line!"
+              echo "  Did you forget to recompile after editing ${pkg}.ecs?"
+              diff "/tmp/${pkg}.csp.old" "/tmp/${pkg}.csp.new" || true
+              exit 1
+            fi
+            # The .csym has no volatile header — it must be byte-identical.
+            if [ -f "/tmp/${pkg}.csym.bak" ]; then
+              if [ ! -f "${pkg}.csym" ]; then
+                echo "ERROR: ${pkg}.csym is missing after build!"
+                echo "  Did you forget to regenerate ${pkg}.csym after editing ${pkg}.ecs?"
+                exit 1
+              fi
+              if ! cmp -s "/tmp/${pkg}.csym.bak" "${pkg}.csym"; then
+                echo "ERROR: ${pkg}.csym is stale!"
+                echo "  Did you forget to regenerate ${pkg}.csym after editing ${pkg}.ecs?"
+                exit 1
+              fi
+            fi
+            echo "  ${pkg} reproducible — ok"
+          done
+
+      # ------------------------------------------------------------------ #
+      # 9a. Setup MSYS2 + OpenSSL (Windows only)                           #
       # ------------------------------------------------------------------ #
       - name: Setup MSYS2
         if: runner.os == 'Windows'
@@ -174,16 +220,6 @@ jobs:
             mingw-w64-ucrt-x86_64-openssl
 
       # ------------------------------------------------------------------ #
-      # 9a. Build extension (Linux / macOS)                                #
-      # ------------------------------------------------------------------ #
-      - name: Build extension
-        if: runner.os != 'Windows'
-        shell: bash
-        env:
-          CS_DEV_PATH: ${{ steps.sdk.outputs.cs_home }}/
-        run: bash csbuild/make.sh
-
-      # ------------------------------------------------------------------ #
       # 9b. Build extension (Windows / MSYS2 UCRT64)                       #
       # ------------------------------------------------------------------ #
       - name: Build extension (Windows)
@@ -195,6 +231,16 @@ jobs:
           export PATH="${{ steps.msys2.outputs.msys2-location }}/ucrt64/bin:${PATH}"
           export CS_DEV_PATH="$(cygpath -u "${{ steps.sdk.outputs.cs_home }}")/"
           bash csbuild/make.sh
+      
+      # ------------------------------------------------------------------ #
+      # 9c. Build extension (Linux / macOS)                                #
+      # ------------------------------------------------------------------ #
+      - name: Build extension
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          CS_DEV_PATH: ${{ steps.sdk.outputs.cs_home }}/
+        run: bash csbuild/make.sh
 
       # ------------------------------------------------------------------ #
       # 10. Install built extension + packages                             #
@@ -229,14 +275,16 @@ jobs:
           cs tests/test_udp.csc
 
       # ------------------------------------------------------------------ #
-      # 13. Run HTTP round-trip tests                                      #
+      # 13. Run HTTP client + server tests                                 #
       # ------------------------------------------------------------------ #
-      - name: Run HTTP round-trip tests
+      - name: Run HTTP client/server tests
         shell: bash
         run: |
           set -e
           cs tests/test_http_roundtrip.csc
+          cs tests/test_http_client.csc
           cs tests/test_http_server.csc
+          cs tests/test_proxy.csc
 
       # ------------------------------------------------------------------ #
       # 14. Run fiber + socket tests                                       #
@@ -257,9 +305,9 @@ jobs:
           cs tests/test_async_tcp.csc
 
       # ------------------------------------------------------------------ #
-      # 16. Run integration tests                                          #
+      # 16. Run TLS integration tests                                      #
       # ------------------------------------------------------------------ #
-      - name: Run integration tests
+      - name: Run TLS integration tests
         shell: bash
         run: |
           set -e
@@ -267,7 +315,17 @@ jobs:
           cs tests/test_tls_errors.csc
 
       # ------------------------------------------------------------------ #
-      # 16b. Run TLS custom trust mode test (self-signed cert)            #
+      # 16b. Run master-slave integration tests                            #
+      # ------------------------------------------------------------------ #
+      - name: Run master-slave integration tests
+        shell: bash
+        run: |
+          set -e
+          cs tests/test_master_slave.csc
+          cs tests/test_http_compliance.csc
+
+      # ------------------------------------------------------------------ #
+      # 16c. Run TLS custom trust mode test (self-signed cert)             #
       # ------------------------------------------------------------------ #
       - name: Run TLS custom trust mode test
         shell: bash

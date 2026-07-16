@@ -44,6 +44,10 @@ echo ""
 echo "--- tests/test_master_slave.csc ---"
 "$CS" $IMPORT_FLAGS tests/test_master_slave.csc
 
+echo ""
+echo "--- tests/test_http_compliance.csc ---"
+"$CS" $IMPORT_FLAGS tests/test_http_compliance.csc
+
 if [ -n "$DEEPSEEK_API_KEY" ]; then
     echo ""
     echo "--- tests/test_deepseek.csc ---"

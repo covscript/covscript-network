@@ -1,6 +1,6 @@
 # CovScript NetUtils 协议文档
 
-版本：2.0
+版本：2.1
 
 作者：Covariant Script OSC
 
@@ -27,7 +27,7 @@
 ## 2. 基本常量与工具函数
 
 * `server_name = "CovScript-NetUtils"`
-* `server_version = "2.0"`
+* `server_version = "2.1"`
 
 与协议/实现相关的重要工具函数：
 
@@ -181,7 +181,7 @@ Master 分配 `rank`：先尝试使用 `deprecated_rank`（回收的编号），
 控制逻辑：
 
 * 若某连接空闲时间超过 `keep_alive_timeout`，Master 会在关闭前尝试回写 `408 Request Timeout`（或直接关闭）。
-* 若单条连接处理的请求数超过 `max_keep_alive`，Master 会主动向客户端发送 `408` 并关闭连接。
+* 若单条连接处理的请求数达到 `max_keep_alive`，服务器会正常处理最后一个请求，并在该响应中携带 `Connection: close`，随后关闭连接（自 2.1 起不再发送 `408`）。
 * Slave 的请求处理若超时（`receive_content_s` 超时），Master 将用错误码构造响应并关闭该 Slave 连接。
 
 ## 7. 静态文件服务与安全（wwwroot、path_normalize）
@@ -443,8 +443,8 @@ sequenceDiagram
         M->>C: 发回 HTTP 回复
     end
 
-    opt 超出 Keep-alive 限制
-        M->>C: 发回 HTTP 回复（408）
+    opt 达到 Keep-alive 请求数上限
+        M->>C: 最后一个 HTTP 回复携带 Connection: close<br/>随后关闭连接
     end
 ```
 

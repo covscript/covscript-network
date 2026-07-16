@@ -5,33 +5,31 @@ import network.*, regex
 import codec.json
 
 constant server_name = "CovScript-NetUtils"
-constant server_version = "2.0"
+constant server_version = "2.1"
 
 # ============================================================================
-# Configuration constants — override before use to adjust behavior
+# Configuration — override before use
 # ============================================================================
 
-# HTTP client low-level I/O
-constant http_client_read_chunk = 8192            # bytes per recv() call
-constant http_max_header_line_size = 8192         # maximum request/status/header line
-constant http_max_header_size = 65536             # maximum complete header block
-constant http_max_body_size = 67108864            # maximum buffered HTTP body (64 MiB)
+constant http_client_read_chunk       = 8192       # bytes per client recv() call
+constant http_max_header_line_size    = 8192       # single header line
+constant http_max_header_size         = 65536      # total header block
+constant http_max_body_size           = 67108864   # buffered body limit (64 MiB)
 
-# Framing protocol (must match C++ side NETWORK_FIXED_HEX_SIZE)
-constant framing_hex_size = 16                   # length of fixed-hex size header
+constant framing_hex_size             = 16         # must match C++ NETWORK_FIXED_HEX_SIZE
+constant default_http_port            = 80
+constant default_https_port           = 443
 
-# Default ports (IANA-registered; override for non-standard deployments)
-constant default_http_port = 80
-constant default_https_port = 443
+constant default_http_thread_count    = 4          # Asio I/O threads
+constant default_http_worker_count    = 32         # per-process HTTP handler fibers
 
-# Server defaults — tuning knobs exposed for documentation and test assertions
-constant default_http_thread_count = 4               # Asio I/O threads
-constant default_http_worker_count = 32              # per-process HTTP handler fibers
-
-# Internal Functions
+# ============================================================================
+# Utilities
+# ============================================================================
 
 var request_line_reg = regex.build_optimize("^([A-Z]+) ([^ ?]+)(?:\\?([^ ]*))? HTTP/([0-9.]+)$")
 var request_header_reg = regex.build_optimize("^([^:]*): ?(.*)$")
+var keep_alive_replace_reg = regex.build_optimize("Connection: keep-alive")
 
 namespace state_codes
     constant code_200 = "200 OK"
@@ -94,6 +92,7 @@ function compose_http_time()
         time_padding(tm.sec, 2) + " GMT"
 end
 
+# Build a minimal HTTP response (always Connection: close, empty body).
 function compose_response(code)
     return "HTTP/1.1 " + code + "\r\n" +
         "Connection: close\r\n" +
@@ -107,6 +106,7 @@ function send_error_response(sock, code)
     state.wait()
 end
 
+# Set to an iostream.fstream to enable server-side logging.
 var log_stream = null
 
 function log(msg)
@@ -126,6 +126,7 @@ function send_content(sock, content)
     return true
 end
 
+# Read a framed message (no timeout). Returns payload or null.
 function receive_content(sock)
     try
         var state = async.read(sock, framing_hex_size)
@@ -155,6 +156,7 @@ function receive_content(sock)
     end
 end
 
+# Read a framed message with timeout. Returns {error_code, payload}.
 function receive_content_s(sock, timeout)
     var start_time = runtime.time()
     try
@@ -212,6 +214,7 @@ end
 
 var path_extractor = regex.build_optimize("^([A-Za-z]:)")
 
+# Normalize a filesystem path: resolve . and .., convert separators.
 function path_normalize(path)
     if path == null || path.empty()
         return "."
@@ -296,6 +299,7 @@ var mime_map = {
     ".json": "application/json"
 } as hash_map
 
+# Map file extension to MIME type.
 function get_mime(path)
     var pos = path.rfind(".", path.size - 1)
     if pos == -1
@@ -309,6 +313,8 @@ function get_mime(path)
     end
 end
 
+# Parsed HTTP request. In single-process mode write_response is async.write;
+# in multi-process mode deserialize() swaps it to send_content.
 class http_session
     var url = null
     var args = null
@@ -383,6 +389,7 @@ class http_session
     end
 end
 
+# Parse raw request header lines into an http_session. Returns null on rejection.
 function create_http_session(request_header)
     var session = new http_session
     var request_line = request_header.pop_front()
@@ -444,18 +451,22 @@ function create_http_session(request_header)
     return move(session)
 end
 
+# Read and parse one HTTP request from sock. Handles timeouts, size limits,
+# and body consumption. Sends error response on failure. Returns session or null.
 function read_http_header(sock, state, keep_alive_timeout, max_body_size)
     # Read HTTP headers
     var header = new array
     var error_code = null
     var header_size = 0
     loop
-        async.read_until(sock, state, "\r\n")
+        # Check the deadline before starting the read: breaking with a
+        # just-started async op pending would leave it dangling past shutdown.
         var timeout = keep_alive_timeout - runtime.time()
         if timeout <= 0
             error_code = state_codes.code_408
             break
         end
+        async.read_until(sock, state, "\r\n")
         if !state.wait_for(timeout)
             if state.has_done()
                 if state.eof()
@@ -516,12 +527,13 @@ function read_http_header(sock, state, keep_alive_timeout, max_body_size)
         session.post_data = state.get_buffer(session.content_length)
         var remaining = session.content_length - session.post_data.size
         while remaining > 0
-            state = async.read(sock, remaining)
+            # Same as above: check the deadline before starting the read.
             var timeout = keep_alive_timeout - runtime.time()
             if timeout <= 0
                 error_code = state_codes.code_408
                 break
             end
+            state = async.read(sock, remaining)
             if !state.wait_for(timeout)
                 if state.has_done()
                     if state.eof()
@@ -550,6 +562,8 @@ function read_http_header(sock, state, keep_alive_timeout, max_body_size)
     return move(session)
 end
 
+# Route session to the matching handler. Falls back to wwwroot static serving.
+# Returns true if a handler was invoked successfully, false on error.
 function call_http_handler(session, server)
     var error_code = null
     if server->url_map.exist(session.url)
@@ -625,7 +639,11 @@ function call_http_handler(session, server)
         if server->url_map.exist(error_code)
             server->url_map[error_code](*server, session)
         else
-            send_error_response(session.sock, error_code)
+            # Route through the session so multi-process mode sends a framed
+            # response to the master instead of raw HTTP bytes on the
+            # slave<->master socket (which would desynchronize the framing).
+            session.connection = "close"
+            session.send_response(error_code, "", "text/html")
         end
         return false
     else
@@ -633,7 +651,9 @@ function call_http_handler(session, server)
     end
 end
 
-# Workers
+# ============================================================================
+# Workers (single-process: coroutine per connection)
+# ============================================================================
 
 struct worker_type
     var co = null
@@ -643,6 +663,7 @@ struct worker_type
     var server = null
 end
 
+# Single-process worker: accept, read, handle, write, keep-alive loop.
 function simple_worker(self)
     loop
         if self->server->stopped
@@ -665,27 +686,33 @@ function simple_worker(self)
             if self->server->stopped
                 break
             end
-            if ++request_count > self->server->max_keep_alive
-                log("Keep-alive exceeded max request count.")
-                send_error_response(sock, state_codes.code_408)
-                break
-            end
             var session = read_http_header(sock, read_state, last_request_time + self->server->keep_alive_timeout, self->server->max_body_size)
             if session == null
                 break
             end
+            # Close cleanly once max_keep_alive requests are served: advertise
+            # Connection: close on the final response
+            var force_close = false
+            if ++request_count >= self->server->max_keep_alive
+                session.connection = "close"
+                force_close = true
+            end
             # Call handler
             session.sock = sock
-            if !call_http_handler(session, self->server)
-                break
-            end
+            var handler_ok = call_http_handler(session, self->server)
+            # Wait for the response write (including error responses sent on
+            # handler failure) before deciding the connection's fate.
             if session.response_state != null && !session.response_state.wait()
                 log("Write response error: " + session.response_state.get_error())
                 break
             end
+            if !handler_ok
+                break
+            end
             last_request_time = runtime.time()
-            # Keep-Alive check
-            if !sock.is_open() || session.connection == "close"
+            # Keep-Alive check — force_close guards against handlers that
+            # overwrite session.connection after the limit was reached
+            if !sock.is_open() || force_close || session.connection == "close"
                 break
             end
         end
@@ -695,12 +722,12 @@ function simple_worker(self)
     end
 end
 
+# Per-connection state for the master process.
 struct http_conn
     var sock = null
     var read_state = null
     # -1 = close, 0 = established, 1 = busy
     var state = 0
-    var close = false
     var keep_alive = true
     var request_count = 0
     var last_request_time = 0
@@ -708,6 +735,7 @@ struct http_conn
     var request_queue = new array
 end
 
+# Per-slave state tracked by the master.
 struct slave_node
     var last_conn_time = null
     var sock = null
@@ -716,6 +744,7 @@ struct slave_node
     var state = 0
 end
 
+# Accept new slave connections and perform handshake.
 function master_spawn_worker(self)
     loop
         if self->server->stopped
@@ -765,6 +794,7 @@ function master_spawn_worker(self)
     end
 end
 
+# Accept HTTP client connections and push onto conn_list.
 function master_accept_worker(self)
     loop
         if self->server->stopped
@@ -790,6 +820,7 @@ function master_accept_worker(self)
     end
 end
 
+# Read HTTP requests from connections and enqueue for dispatch.
 function master_request_worker(self)
     link clist = self->server->conn_list
     loop
@@ -825,25 +856,24 @@ function master_request_worker(self)
             conn->state = -1
             continue
         end
-        # Check keep-alive
-        if runtime.time() - conn->last_request_time >= self->server->keep_alive_timeout
-            log("Keep-alive exceeded timeout limit.")
-            conn->keep_alive = false
-        else if ++conn->request_count > self->server->max_keep_alive
+        # Check keep-alive — read_http_header already enforces the timeout;
+        # only the per-connection request counter needs checking here.
+        if ++conn->request_count >= self->server->max_keep_alive
             log("Keep-alive exceeded max request count.")
-            conn->keep_alive = false
+            session.connection = "close"
         end
         conn->last_request_time = runtime.time()
         # Check connection type
         if session.connection == "close"
             conn->keep_alive = false
-            conn->close = true
         end
         conn->request_queue.push_back(move(session))
         conn->state = 0
     end
 end
 
+# Write completed responses back to clients; closes connections
+# that have exhausted keep-alive.
 function master_response_worker(self)
     link clist = self->server->conn_list
     loop
@@ -868,25 +898,33 @@ function master_response_worker(self)
         while !conn->request_queue.empty()
             link session = conn->request_queue.front
             if session != null && session.response != null
+                # When keep-alive is disabled the connection must close
+                # regardless of what the slave handler wrote.  Force the
+                # header to prevent a mismatch between the response and
+                # the actual connection lifecycle.
+                if !conn->keep_alive
+                    session.response = regex.replace(keep_alive_replace_reg,
+                        session.response, "Connection: close")
+                end
                 var response_state = async.write(conn->sock, session.response)
                 if !response_state.wait()
                     log("Write response error: " + response_state.get_error())
                     conn->keep_alive = false
-                    conn->close = true
                     conn->request_queue = new array
                     break
                 end
                 conn->request_queue.pop_front()
                 --conn->request_idx
+                # Restart the keep-alive idle window only once the response is
+                # written, matching simple_worker: slave processing time must
+                # not eat into the client's idle allowance.
+                conn->last_request_time = runtime.time()
             else
                 fiber.yield()
                 break
             end
         end
         if conn->request_queue.empty() && !conn->keep_alive
-            if !conn->close
-                send_error_response(conn->sock, state_codes.code_408)
-            end
             if !conn->sock.safe_shutdown()
                 log("safe_shutdown returned false — async jobs may still be pending")
             end
@@ -895,6 +933,7 @@ function master_response_worker(self)
     end
 end
 
+# Send queued requests to available slaves; heartbeat idle slaves.
 function master_dispatch_worker(self)
     link slist = self->server->slave_list
     loop
@@ -984,6 +1023,7 @@ function master_dispatch_worker(self)
     end
 end
 
+# Multi-process slave: connect to master, handshake, process dispatched requests.
 function slave_worker(self)
     loop
         if self->server->stopped
@@ -1063,7 +1103,9 @@ function slave_worker(self)
     end
 end
 
-# Public Interfaces
+# ============================================================================
+# Public API
+# ============================================================================
 
 function hex_char_to_int(c)
     if c >= "0" && c <= "9"
@@ -1119,6 +1161,7 @@ function url_decode(s)
     return out
 end
 
+# Parse query string into key-value pairs. Duplicate keys become arrays.
 function parse_http_args(input)
     var qs = input
     var qpos = input.find("?", 0)
@@ -1163,15 +1206,16 @@ function parse_http_args(input)
 end
 
 
-# ===========================================================
-# OpenAI API Compatible Client
-# ===========================================================
+# ============================================================================
+# HTTP Client / OpenAI API Compatible Client
+# ============================================================================
 
 var http_url_reg = regex.build_optimize("^(?i)(https?)://([^/:]+)(?::([0-9]+))?(.*)$")
 var http_status_line_reg = regex.build_optimize("^HTTP/([0-9.]+) ([0-9]{3})(?: (.*))?$")
 var http_header_line_reg = regex.build_optimize("^([^:]+):\\s*(.*)$")
 var transfer_chunked_reg = regex.build_optimize(".*chunked.*")
 
+# Synchronous HTTP/1.1 client with TLS support.
 class http_client
     var sock = null
     var async_guard = null
@@ -1539,6 +1583,7 @@ class http_client
         return resp_body
     end
 
+    # Send an HTTP request and return {status_code, headers, body} or null.
     function http_request(method, url, headers, body)
         var target = parse_url(url)
         if target == null
@@ -1755,6 +1800,7 @@ function local_addr()
     return addr
 end
 
+# HTTP/1.1 server -- single-process (coroutine pool) or master/slave.
 class http_server
     var acceptor = null
     var async_guard = null
@@ -1957,7 +2003,8 @@ class http_server
             var hop_by_hop = {"host": 1, "connection": 1, "content-length": 1,
                 "transfer-encoding": 1, "keep-alive": 1, "proxy-connection": 1,
                 "proxy-authenticate": 1, "proxy-authorization": 1, "te": 1,
-                "trailer": 1, "upgrade": 1} as hash_map
+                "trailer": 1, "upgrade": 1,
+                "x-forwarded-for": 1} as hash_map
             var req_headers = new array
             if session.request_headers != null
                 foreach it in session.request_headers
@@ -1967,6 +2014,8 @@ class http_server
                     end
                 end
             end
+            # Append the real client IP so the backend sees per-user addresses instead of the proxy's own IP.
+            req_headers.push_back("X-Forwarded-For: " + session.sock.remote_endpoint().address())
             var resp = null
             try
                 if session.content_length != null && session.content_length > 0
@@ -2043,7 +2092,7 @@ class http_server
         end
     end
     function stop()
-        # Signal all workers to exit their loops
+        # Signal all workers to exit
         stopped = true
         # Close acceptors — cancels pending async_accept, wakes blocked fibers
         acceptor = null

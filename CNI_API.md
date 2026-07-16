@@ -105,6 +105,7 @@ sock.connect_ssl("localhost", {"trust_mode": "insecure"}.to_hash_map())
 | `set_opt_no_delay` | `(value: boolean)` | 设置 `TCP_NODELAY` 选项（禁用 Nagle 算法） |
 | `set_opt_keep_alive` | `(value: boolean)` | 设置 `SO_KEEPALIVE` 选项 |
 | `available` | `() → int` | 可读取的字节数（非阻塞） |
+| `peer_closed` | `() → boolean` | 对端是否已关闭连接（非阻塞、非破坏性，使用 1 字节 `MSG_PEEK` 探测）。空闲但存活返回 `false`；收到 FIN 或连接已失效返回 `true`。有异步读挂起时返回 `false`（该读操作自身会暴露 EOF）。TLS 套接字上探测的是底层传输而非解密流 |
 | `receive` | `(max: int) → string` | 读取最多 `max` 字节。阻塞直到至少 1 字节可读 |
 | `read` | `(size: int) → string` | 读取恰好 `size` 字节。阻塞直到全部读完 |
 | `send` | `(data: string) → int` | 发送数据（单次部分写入，返回实际写入字节数）。需完整发送时使用 `write` |

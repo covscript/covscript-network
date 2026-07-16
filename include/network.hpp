@@ -717,6 +717,38 @@ namespace cs_impl {
 					return sock.available();
 				}
 
+				// For TLS sockets the probe reflects the raw transport, not
+				// the decrypted stream — MSG_PEEK sees encrypted bytes, so
+				// peer_closed() detects transport-level FIN but not TLS
+				// close_notify. Callers that need TLS-level closure should
+				// read the stream until eof.
+				bool peer_closed() noexcept
+				{
+					if (!try_begin_io_job(io_direction::read))
+						return false;
+					bool closed = false;
+					if (!sock.is_open()) {
+						closed = true;
+					}
+					else {
+						asio::error_code ec;
+						sock.non_blocking(true, ec);
+						if (!ec) {
+							char probe = 0;
+							std::size_t peeked = sock.receive(
+							                         asio::buffer(&probe, 1),
+							                         asio::socket_base::message_peek, ec);
+							asio::error_code restore_ec;
+							sock.non_blocking(false, restore_ec);
+							closed = peeked == 0 &&
+							         ec != asio::error::would_block &&
+							         ec != asio::error::try_again;
+						}
+					}
+					finish_io_job(io_direction::read);
+					return closed;
+				}
+
 				std::string receive(std::size_t maximum)
 				{
 					scoped_io_job job(*this, io_direction::read);

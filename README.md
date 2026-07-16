@@ -8,8 +8,8 @@ A high-performance network extension for the [Covariant Script](http://covscript
 
 | Package | Type | Version | Description |
 |---|---|---|---|
-| `network` | C++ Extension | `1.38.0_v6.4` | TCP/UDP sockets, TLS/SSL, async I/O, event loop |
-| `netutils` | CovScript | `2.0` | HTTP server/client framework with single-process, distributed master/slave, and OpenAI API modes |
+| `network` | C++ Extension | `1.38.0_v6.5` | TCP/UDP sockets, TLS/SSL, async I/O, event loop |
+| `netutils` | CovScript | `2.1` | HTTP server/client framework with single-process, distributed master/slave, and OpenAI API modes |
 | `argparse` | CovScript | `1.1` | Lightweight command-line argument parser |
 
 > **Note:** `netutils` and `argparse` are provided as both source (`.ecs`), compiled package (`.csp`), and bytecode module (`.csym`) — place them in your project's `imports/` directory.
