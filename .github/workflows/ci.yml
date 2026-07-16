@@ -26,13 +26,13 @@ jobs:
 
     steps:
       # ------------------------------------------------------------------ #
-      # 1. Check out this extension repo                                    #
+      # 1. Check out this extension repo                                   #
       # ------------------------------------------------------------------ #
       - name: Checkout extension
         uses: actions/checkout@v5
 
       # ------------------------------------------------------------------ #
-      # 2. Set platform identifiers                                         #
+      # 2. Set platform identifiers                                        #
       # ------------------------------------------------------------------ #
       - name: Set platform identifiers
         id: platform
@@ -54,7 +54,7 @@ jobs:
           esac
 
       # ------------------------------------------------------------------ #
-      # 3. Determine release tag                                            #
+      # 3. Determine release tag                                           #
       # ------------------------------------------------------------------ #
       - name: Determine csbuild release
         id: cs-release
@@ -69,7 +69,7 @@ jobs:
           fi
 
       # ------------------------------------------------------------------ #
-      # 4. Download & extract covscript SDK + cspkg repo                    #
+      # 4. Download & extract covscript SDK + cspkg repo                   #
       # ------------------------------------------------------------------ #
       - name: Download covscript SDK
         id: sdk
@@ -104,7 +104,7 @@ jobs:
           ls -la cspkg-repo/
 
       # ------------------------------------------------------------------ #
-      # 5. Configure cspkg                                                  #
+      # 5. Configure cspkg                                                 #
       # ------------------------------------------------------------------ #
       - name: Configure cspkg
         shell: bash
@@ -134,7 +134,7 @@ jobs:
           cat "$HOME/.cspkg/config.json"
 
       # ------------------------------------------------------------------ #
-      # 6. Persist environment for later steps                              #
+      # 6. Persist environment for later steps                             #
       # ------------------------------------------------------------------ #
       - name: Setup environment
         shell: bash
@@ -144,7 +144,7 @@ jobs:
           echo "${CS_HOME}/bin" >> "$GITHUB_PATH"
 
       # ------------------------------------------------------------------ #
-      # 7. Run cspkg install                                                #
+      # 7. Setup cspkg environment                                         #
       # ------------------------------------------------------------------ #
       - name: Run cspkg install
         shell: bash
@@ -155,58 +155,11 @@ jobs:
           cspkg install --import --yes
           cspkg install ecs_bootstrap --yes
           cspkg version
+          cspkg doctor
           cspkg list
 
       # ------------------------------------------------------------------ #
-      # 8. Setup MSYS2 + OpenSSL (Windows only)                            #
-      # ------------------------------------------------------------------ #
-      - name: Setup MSYS2
-        if: runner.os == 'Windows'
-        id: msys2
-        uses: msys2/setup-msys2@v2
-        with:
-          msystem: UCRT64
-          update: true
-          install: >-
-            mingw-w64-ucrt-x86_64-toolchain
-            mingw-w64-ucrt-x86_64-cmake
-            mingw-w64-ucrt-x86_64-make
-            mingw-w64-ucrt-x86_64-openssl
-
-      # ------------------------------------------------------------------ #
-      # 9a. Build extension (Linux / macOS)                                #
-      # ------------------------------------------------------------------ #
-      - name: Build extension
-        if: runner.os != 'Windows'
-        shell: bash
-        env:
-          CS_DEV_PATH: ${{ steps.sdk.outputs.cs_home }}/
-        run: bash csbuild/make.sh
-
-      # ------------------------------------------------------------------ #
-      # 9b. Build extension (Windows / MSYS2 UCRT64)                       #
-      # ------------------------------------------------------------------ #
-      - name: Build extension (Windows)
-        if: runner.os == 'Windows'
-        shell: bash
-        env:
-          MSYS2_LOCATION: ${{ steps.msys2.outputs.msys2-location }}
-        run: |
-          export PATH="${{ steps.msys2.outputs.msys2-location }}/ucrt64/bin:${PATH}"
-          export CS_DEV_PATH="$(cygpath -u "${{ steps.sdk.outputs.cs_home }}")/"
-          bash csbuild/make.sh
-
-      # ------------------------------------------------------------------ #
-      # 10. Install built extension + packages                             #
-      # ------------------------------------------------------------------ #
-      - name: Install local build
-        shell: bash
-        run: |
-          cspkg build . --install
-          cspkg list
-
-      # ------------------------------------------------------------------ #
-      # 10b. Reproducible build check (Date header line is volatile)       #
+      # 8. Reproducible build check (Date header line is volatile)         #
       # ------------------------------------------------------------------ #
       - name: Reproducible build check
         shell: bash
@@ -249,6 +202,54 @@ jobs:
             fi
             echo "  ${pkg} reproducible — ok"
           done
+
+      # ------------------------------------------------------------------ #
+      # 9a. Setup MSYS2 + OpenSSL (Windows only)                           #
+      # ------------------------------------------------------------------ #
+      - name: Setup MSYS2
+        if: runner.os == 'Windows'
+        id: msys2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-toolchain
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-make
+            mingw-w64-ucrt-x86_64-openssl
+
+      # ------------------------------------------------------------------ #
+      # 9b. Build extension (Windows / MSYS2 UCRT64)                       #
+      # ------------------------------------------------------------------ #
+      - name: Build extension (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        env:
+          MSYS2_LOCATION: ${{ steps.msys2.outputs.msys2-location }}
+        run: |
+          export PATH="${{ steps.msys2.outputs.msys2-location }}/ucrt64/bin:${PATH}"
+          export CS_DEV_PATH="$(cygpath -u "${{ steps.sdk.outputs.cs_home }}")/"
+          bash csbuild/make.sh
+      
+      # ------------------------------------------------------------------ #
+      # 9c. Build extension (Linux / macOS)                                #
+      # ------------------------------------------------------------------ #
+      - name: Build extension
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          CS_DEV_PATH: ${{ steps.sdk.outputs.cs_home }}/
+        run: bash csbuild/make.sh
+
+      # ------------------------------------------------------------------ #
+      # 10. Install built extension + packages                             #
+      # ------------------------------------------------------------------ #
+      - name: Install local build
+        shell: bash
+        run: |
+          cspkg build . --install
+          cspkg list
 
       # ------------------------------------------------------------------ #
       # 11. Run unit tests                                                 #
@@ -324,7 +325,7 @@ jobs:
           cs tests/test_http_compliance.csc
 
       # ------------------------------------------------------------------ #
-      # 16c. Run TLS custom trust mode test (self-signed cert)            #
+      # 16c. Run TLS custom trust mode test (self-signed cert)             #
       # ------------------------------------------------------------------ #
       - name: Run TLS custom trust mode test
         shell: bash
