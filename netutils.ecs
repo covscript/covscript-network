@@ -965,8 +965,9 @@ function master_dispatch_worker(self)
         end
         var node = master_pick_slave(self)
         if node == null
-            log("Waiting for available slave worker")
-            runtime.delay(100)
+            # Pure yield — runtime.delay would block the whole OS thread
+            # (all fibers), collapsing dispatch throughput whenever the
+            # slave pool is busy or empty.
             fiber.yield()
             continue
         end
@@ -1056,7 +1057,7 @@ function master_dispatch_worker(self)
                     end
                     node = master_pick_slave(self)
                     if node == null
-                        runtime.delay(10)
+                        # Pure yield (see the no-node path above)
                         fiber.yield()
                     end
                 end
