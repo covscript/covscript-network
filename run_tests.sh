@@ -48,6 +48,22 @@ echo ""
 echo "--- tests/test_http_compliance.csc ---"
 "$CS" $IMPORT_FLAGS tests/test_http_compliance.csc
 
+echo ""
+echo "--- tests/test_error_paths.csc ---"
+"$CS" $IMPORT_FLAGS tests/test_error_paths.csc
+
+echo ""
+echo "--- tests/test_stress_keepalive.csc ---"
+"$CS" $IMPORT_FLAGS tests/test_stress_keepalive.csc
+
+echo ""
+echo "--- tests/test_stress_concurrent.csc ---"
+"$CS" $IMPORT_FLAGS tests/test_stress_concurrent.csc
+
+echo ""
+echo "--- tests/test_stress_master_slave.csc ---"
+"$CS" $IMPORT_FLAGS tests/test_stress_master_slave.csc
+
 if [ -n "$DEEPSEEK_API_KEY" ]; then
     echo ""
     echo "--- tests/test_deepseek.csc ---"

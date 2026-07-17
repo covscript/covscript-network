@@ -9,7 +9,7 @@ A high-performance network extension for the [Covariant Script](http://covscript
 | Package | Type | Version | Description |
 |---|---|---|---|
 | `network` | C++ Extension | `1.38.0_v6.5` | TCP/UDP sockets, TLS/SSL, async I/O, event loop |
-| `netutils` | CovScript | `2.1` | HTTP server/client framework with single-process, distributed master/slave, and OpenAI API modes |
+| `netutils` | CovScript | `2.2` | HTTP server/client framework with single-process, distributed master/slave, and OpenAI API modes |
 | `argparse` | CovScript | `1.1` | Lightweight command-line argument parser |
 
 > **Note:** `netutils` and `argparse` are provided as both source (`.ecs`), compiled package (`.csp`), and bytecode module (`.csym`) — place them in your project's `imports/` directory.
@@ -26,7 +26,7 @@ A high-performance network extension for the [Covariant Script](http://covscript
 - **HTTP Client** (`netutils`) — asynchronous HTTP/HTTPS client with TLS, timeouts, header parsing, and keep-alive
 - **OpenAI Client** (`netutils`) — OpenAI/DeepSeek API-compatible chat client built on the HTTP client
 - **Distributed Multi-Node** — master/slave architecture with TCP IPC for horizontal scaling of HTTP services
-- **Reverse Proxy** — prefix-based request forwarding to backend servers
+- **Reverse Proxy** — prefix-based request forwarding to backend servers with hop-by-hop header filtering and `X-Forwarded-For` injection
 - **SM2 Key Support** — GM/T Chinese cryptographic key generation and simple TLS via `gmssl`
 - **Utilities** — `host_name`, `to_fixed_hex`/`from_fixed_hex` for framing protocols
 
@@ -287,7 +287,7 @@ The extension connects to Covariant Script via the CNI (Covariant Native Interfa
 
 ## Testing
 
-The [tests/](tests/) directory contains 17 test suites covering TCP, UDP, HTTP, TLS, async I/O, OpenAI client, and API integration:
+The [tests/](tests/) directory contains 22 test suites covering TCP, UDP, HTTP, TLS, async I/O, OpenAI client, API integration, error paths (response shapes, log text, protocol garbage), and stress scenarios (RST injection, scheduling stalls, slave failover):
 
 ```bash
 # Unix

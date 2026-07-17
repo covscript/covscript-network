@@ -1,6 +1,6 @@
 # CovScript NetUtils 协议文档
 
-版本：2.1
+版本：2.2
 
 作者：Covariant Script OSC
 
@@ -27,7 +27,7 @@
 ## 2. 基本常量与工具函数
 
 * `server_name = "CovScript-NetUtils"`
-* `server_version = "2.1"`
+* `server_version = "2.2"`
 
 与协议/实现相关的重要工具函数：
 
@@ -159,7 +159,7 @@ Master 分配 `rank`：先尝试使用 `deprecated_rank`（回收的编号），
    * `request_idx` 自减以保持索引一致（因为之前我们为已派发的请求做了自增）
      因而**保证同一 TCP 连接内请求按队列顺序完成**，即便多个请求被并发派发到不同 Slave。
 
-备注：如果 dispatch/读取响应过程中出现 Slave 超时/错误，Master 会把 `session.response` 设置为由 `compose_response(error_code)` 构造的错误响应并回写给客户端，同时把该 Slave 标记为 `-1` 并关闭。
+备注：如果 dispatch/读取响应过程中出现 Slave 超时/错误，Master 会把该 Slave 标记为 `-1` 并关闭（Rank 回收后可被重连的 Slave 复用）。对幂等方法（GET/HEAD/OPTIONS），Master 会先尝试将请求**重派**给其他可用 Slave（详见第 6 节 `master_dispatch_retry`）；重派耗尽或方法不可重试时，才把 `session.response` 设置为由 `compose_response(error_code)` 构造的错误响应并回写给客户端。
 
 ## 6. 常用配置与默认值
 
@@ -174,6 +174,7 @@ Master 分配 `rank`：先尝试使用 `deprecated_rank`（回收的编号），
 | `max_body_size`            |                单个请求体的最大字节数 | `67108864` (64 MiB) |
 | `max_connections`          |                    Master 接入的最大并发连接数 |  `100` |
 | `master_worker_count`      |        Master 模式下并发 request worker 数 |   `4`  |
+| `master_dispatch_retry`    | Slave 中途失效时幂等请求的最大重派次数（`0` 关闭重派） |   `2`  |
 | `heartbeat_interval`       |              Master 对 Slave 心跳间隔（ms） | `1000` |
 | `slave_spawn_timeout`      |                     Slave 握手超时时间（ms） | `1000` |
 | `slave_keep_alive_timeout` | Master 与 Slave 之间的 keep-alive 超时（ms） | `5000` |
@@ -182,7 +183,7 @@ Master 分配 `rank`：先尝试使用 `deprecated_rank`（回收的编号），
 
 * 若某连接空闲时间超过 `keep_alive_timeout`，Master 会在关闭前尝试回写 `408 Request Timeout`（或直接关闭）。
 * 若单条连接处理的请求数达到 `max_keep_alive`，服务器会正常处理最后一个请求，并在该响应中携带 `Connection: close`，随后关闭连接（自 2.1 起不再发送 `408`）。
-* Slave 的请求处理若超时（`receive_content_s` 超时），Master 将用错误码构造响应并关闭该 Slave 连接。
+* Slave 的请求处理若超时（`receive_content_s` 超时），Master 会关闭该 Slave 连接并回收其 Rank。自 2.2 起，**幂等方法（GET/HEAD/OPTIONS）的在途请求会被重派**给其他（或重连后的）Slave，最多 `master_dispatch_retry` 次，等待新 Slave 的预算为 `slave_keep_alive_timeout + slave_spawn_timeout`；重派语义为 at-least-once（Slave 可能已执行 handler 但响应丢失）。非幂等方法（POST 等）不重派，直接以错误码构造响应，避免重复执行。
 
 ## 7. 静态文件服务与安全（wwwroot、path_normalize）
 
@@ -236,6 +237,7 @@ Master 分配 `rank`：先尝试使用 `deprecated_rank`（回收的编号），
 
 * `bind_proxy(prefix : string, target : string, timeout_ms : number)`
   将 `prefix` 开头的 URL 代理转发到 `target`（如 `"http://127.0.0.1:3000"`）。
+  转发时保留原始请求头，但会过滤 hop-by-hop 头（`Host`、`Connection`、`Content-Length`、`Transfer-Encoding`、`Keep-Alive`、`Proxy-*`、`TE`、`Trailer`、`Upgrade` 等由 `http_request` 内部管理，不透传）；同时**注入 `X-Forwarded-For: <客户端真实 IP>`**（客户端伪造的同名头会被丢弃后重写），后端据此可获得真实来源地址而非代理自身 IP。
 
 * `stop()`
   优雅关闭服务器：停止所有 worker、释放 async_guard、关闭 acceptor。
@@ -282,7 +284,7 @@ Master 分配 `rank`：先尝试使用 `deprecated_rank`（回收的编号），
 | `429 Too Many Requests`     | 请求频率过高（可由用户自定义）          |
 | `431 Request Header Fields Too Large` | 请求头超过大小限制      |
 | `500 Internal Server Error` | 服务器内部错误                   |
-| `502 Bad Gateway`           | 上游服务器返回无效响应              |
+| `502 Bad Gateway`           | 上游服务器返回无效响应 / 向 Slave 发送请求失败    |
 | `503 Service Unavailable`   | 无可用 Slave / 负载过高（可由用户自定义） |
 | `000 End of file`           | 流提前结束（EOF）                |
 
@@ -508,6 +510,10 @@ flowchart TD
         E6[/发送 IPC 报文
         等待 Slave 回复/]
         E6 -- 写回 --> X3
+        E6 -. Slave 失效 .-> E7{{幂等方法且
+        重派次数未耗尽}}
+        E7 -- 是：等待可用 Slave --> E1
+        E7 -- 否：构造错误响应 --> X3
         C2 --> X3
     end
 

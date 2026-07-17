@@ -496,6 +496,7 @@ sequenceDiagram
 | `connect_ssl` | `begin/end_tls_handshake` | 独占 socket，异常路径释放预约 |
 | `close` / `shutdown` | `scoped_exclusive_operation` | 独占 socket |
 | `available` | `try_begin_io_job` (noexcept) | 被拒绝时返回 0 |
+| `peer_closed` | `try_begin_io_job` (noexcept) | 被拒绝时返回 false；非阻塞 `MSG_PEEK` 探测对端关闭，临时切换并恢复 `non_blocking` 模式（仅影响同步操作，异步操作不受该标志影响） |
 
 UDP 的同步 `receive_from` / `send_to` 使用 `scoped_io_job`，`close` 使用独占预约，`available` 在独占关闭期间返回 0。
 

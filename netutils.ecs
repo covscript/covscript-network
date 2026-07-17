@@ -5,7 +5,7 @@ import network.*, regex
 import codec.json
 
 constant server_name = "CovScript-NetUtils"
-constant server_version = "2.1"
+constant server_version = "2.2"
 
 # ============================================================================
 # Configuration — override before use
@@ -151,7 +151,7 @@ function receive_content(sock)
         end
         return state.get_result()
     catch e
-        log("receive_content exception: " + e.what)
+        log("receive_content exception: " + e.what())
         return null
     end
 end
@@ -197,7 +197,7 @@ function receive_content_s(sock, timeout)
         end
         return {null, state.get_result()}
     catch e
-        log("receive_content_s exception: " + e.what)
+        log("receive_content_s exception: " + e.what())
         return {state_codes.code_500, null}
     end
 end
@@ -333,6 +333,8 @@ class http_session
     var response_state = null
     # for multi-node setup
     var response = null
+    # Master-side dispatch retry counter (not serialized).
+    var dispatch_attempts = 0
     function send_response(code, data, type)
         var content_len = to_string(data.size)
         var resp = new string
@@ -933,30 +935,35 @@ function master_response_worker(self)
     end
 end
 
+# Scan the slave list once: retire dead nodes (recycling their rank), rotate
+# a ready node to the back of the list and return it, or null if none ready.
+# The caller is responsible for marking the returned node busy (state = 1).
+function master_pick_slave(self)
+    link slist = self->server->slave_list
+    for it = slist.begin, it != slist.end, null
+        var n = it.data
+        if n->state == -1
+            self->server->deprecated_rank.push_back(n->rank)
+            it = slist.erase(it)
+            continue
+        end
+        if n->state == 0
+            slist.erase(it)
+            slist.push_back(n)
+            return n
+        end
+        it.next()
+    end
+    return null
+end
+
 # Send queued requests to available slaves; heartbeat idle slaves.
 function master_dispatch_worker(self)
-    link slist = self->server->slave_list
     loop
         if self->server->stopped
             return
         end
-        var node = null
-        for it = slist.begin, it != slist.end, null
-            var n = it.data
-            if n->state == -1
-                self->server->deprecated_rank.push_back(n->rank)
-                it = slist.erase(it)
-                continue
-            end
-            if n->state == 0
-                slist.erase(it)
-                slist.push_back(n)
-                node = n
-                break
-            else
-                it.next()
-            end
-        end
+        var node = master_pick_slave(self)
         if node == null
             log("Waiting for available slave worker")
             runtime.delay(100)
@@ -993,30 +1000,75 @@ function master_dispatch_worker(self)
                 end
             end
         else
-            # Departure queue not empty, send request
+            # Departure queue not empty, send request. A slave can die
+            # mid-flight (e.g. its keep-alive expired during a scheduling
+            # stall and it reconnected as a fresh node) — re-dispatch
+            # idempotent requests to another slave instead of failing them.
+            # Non-idempotent methods are never re-dispatched: the dead slave
+            # may already have executed the handler.
             node->state = 1
             link session = conn->request_queue[conn->request_idx++]
-            send_content(node->sock, session.serialize())
-            if session.content_length != null && session.content_length > 0
-                var body_state = async.write(node->sock, session.post_data)
-                if !body_state.wait()
-                    log("Failed to send request body: " + body_state.get_error())
+            loop
+                var error_code = null, response = null
+                if !send_content(node->sock, session.serialize())
+                    error_code = state_codes.code_502
                 end
-            end
-            log("Request dispatched to worker rank " + node->rank + ", waiting for response...")
-            var (error_code, response) = receive_content_s(node->sock, timeout)
-            if error_code == null
-                log("Read response success for worker rank " + node->rank)
-                session.response = response
-                node->last_conn_time = runtime.time()
-                node->state = 0
-            else
+                if error_code == null && session.content_length != null && session.content_length > 0
+                    var body_state = async.write(node->sock, session.post_data)
+                    if !body_state.wait()
+                        log("Failed to send request body: " + body_state.get_error())
+                        error_code = state_codes.code_502
+                    end
+                end
+                if error_code == null
+                    log("Request dispatched to worker rank " + node->rank + ", waiting for response...")
+                    (error_code, response) = receive_content_s(node->sock, timeout)
+                end
+                if error_code == null
+                    log("Read response success for worker rank " + node->rank)
+                    session.response = response
+                    node->last_conn_time = runtime.time()
+                    node->state = 0
+                    break
+                end
+                # Node is dead: retire it so master_spawn_worker can accept
+                # a fresh connection under the recycled rank.
                 log("Read response failed for worker rank " + node->rank)
-                session.response = compose_response(error_code)
                 if !node->sock.safe_shutdown()
                     log("safe_shutdown returned false — async jobs may still be pending")
                 end
                 node->state = -1
+                var retriable = session.method == "GET" || session.method == "HEAD" || session.method == "OPTIONS"
+                if !retriable || ++session.dispatch_attempts > self->server->master_dispatch_retry
+                    session.response = compose_response(error_code)
+                    break
+                end
+                log("Re-dispatching " + session.method + " " + session.url + " (attempt " + session.dispatch_attempts + ")")
+                # Wait (bounded) for another ready slave — a dead slave
+                # typically reconnects within a few poll cycles. Budget one
+                # death-detection period plus one handshake.
+                node = null
+                var wait_start = runtime.time()
+                var wait_budget = self->server->slave_keep_alive_timeout + self->server->slave_spawn_timeout
+                while node == null
+                    if self->server->stopped || runtime.time() - wait_start >= wait_budget
+                        break
+                    end
+                    node = master_pick_slave(self)
+                    if node == null
+                        runtime.delay(10)
+                        fiber.yield()
+                    end
+                end
+                if node == null
+                    session.response = compose_response(error_code)
+                    break
+                end
+                node->state = 1
+                timeout = node->last_conn_time + self->server->slave_keep_alive_timeout - runtime.time()
+                if timeout <= 0
+                    timeout = self->server->slave_keep_alive_timeout
+                end
             end
         end
         fiber.yield()
@@ -1323,7 +1375,7 @@ class http_client
             sock.set_opt_no_delay(true)
             return true
         catch e
-            log("HTTP connect error: " + e.what)
+            log("HTTP connect error: " + e.what())
             close()
             return false
         end
@@ -1363,7 +1415,7 @@ class http_client
                     end
                 end
             catch e
-                log("HTTP read_until error: " + e.what)
+                log("HTTP read_until error: " + e.what())
                 return null
             end
             if pending.size > max_size
@@ -1411,7 +1463,7 @@ class http_client
                 out.append(chunk)
                 need -= chunk.size
             catch e
-                log("HTTP read_exact error: " + e.what)
+                log("HTTP read_exact error: " + e.what())
                 return null
             end
         end
@@ -1568,7 +1620,7 @@ class http_client
                             end
                             body_buf.append(chunk)
                         catch e
-                            log("HTTP read body error: " + e.what)
+                            log("HTTP read body error: " + e.what())
                             return null
                         end
                     end
@@ -1639,7 +1691,7 @@ class http_client
                 return null
             end
         catch e
-            log("HTTP write error: " + e.what)
+            log("HTTP write error: " + e.what())
             close()
             return null
         end
@@ -1766,7 +1818,7 @@ class openai_client extends http_client
         try
             return json.to_var(json.from_string(raw))
         catch e
-            log("OpenAI JSON parse error: " + e.what)
+            log("OpenAI JSON parse error: " + e.what())
             return null
         end
     end
@@ -1819,6 +1871,9 @@ class http_server
     var multi_process = false
     var is_master = true
     var master_worker_count = 4
+    # Max re-dispatch attempts for idempotent requests when a slave dies
+    # mid-flight (0 disables re-dispatch).
+    var master_dispatch_retry = 2
     var master_acceptor = null
     var conn_list = new list
     var slave_list = new list
@@ -1933,6 +1988,12 @@ class http_server
                 master_worker_count = 1
             end
         end
+        if conf.exist("master_dispatch_retry")
+            master_dispatch_retry = conf["master_dispatch_retry"] as integer
+            if master_dispatch_retry < 0
+                master_dispatch_retry = 0
+            end
+        end
         if conf.exist("max_connections")
             max_connections = conf["max_connections"] as integer
             if max_connections < 1
@@ -2024,7 +2085,7 @@ class http_server
                     resp = client.http_request(session.method, url, req_headers, "")
                 end
             catch e
-                log("bind_proxy request error: " + e.what)
+                log("bind_proxy request error: " + e.what())
                 resp = null
             end
             if resp == null

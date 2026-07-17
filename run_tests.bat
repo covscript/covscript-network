@@ -57,6 +57,26 @@ echo --- tests\test_http_compliance.csc ---
 %CS% %IMPORT_FLAGS% tests\test_http_compliance.csc
 if errorlevel 1 exit /b 1
 
+echo.
+echo --- tests\test_error_paths.csc ---
+%CS% %IMPORT_FLAGS% tests\test_error_paths.csc
+if errorlevel 1 exit /b 1
+
+echo.
+echo --- tests\test_stress_keepalive.csc ---
+%CS% %IMPORT_FLAGS% tests\test_stress_keepalive.csc
+if errorlevel 1 exit /b 1
+
+echo.
+echo --- tests\test_stress_concurrent.csc ---
+%CS% %IMPORT_FLAGS% tests\test_stress_concurrent.csc
+if errorlevel 1 exit /b 1
+
+echo.
+echo --- tests\test_stress_master_slave.csc ---
+%CS% %IMPORT_FLAGS% tests\test_stress_master_slave.csc
+if errorlevel 1 exit /b 1
+
 if not "%DEEPSEEK_API_KEY%"=="" (
     echo.
     echo --- tests\test_deepseek.csc ---

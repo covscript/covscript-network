@@ -285,6 +285,7 @@ jobs:
           cs tests/test_http_client.csc
           cs tests/test_http_server.csc
           cs tests/test_proxy.csc
+          cs tests/test_error_paths.csc
 
       # ------------------------------------------------------------------ #
       # 14. Run fiber + socket tests                                       #
@@ -325,7 +326,18 @@ jobs:
           cs tests/test_http_compliance.csc
 
       # ------------------------------------------------------------------ #
-      # 16c. Run TLS custom trust mode test (self-signed cert)             #
+      # 16c. Run stress tests (RST injection, stalls, slave churn)         #
+      # ------------------------------------------------------------------ #
+      - name: Run stress tests
+        shell: bash
+        run: |
+          set -e
+          cs tests/test_stress_keepalive.csc
+          cs tests/test_stress_concurrent.csc
+          cs tests/test_stress_master_slave.csc
+
+      # ------------------------------------------------------------------ #
+      # 16d. Run TLS custom trust mode test (self-signed cert)             #
       # ------------------------------------------------------------------ #
       - name: Run TLS custom trust mode test
         shell: bash
