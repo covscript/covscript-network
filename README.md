@@ -8,8 +8,8 @@ A high-performance network extension for the [Covariant Script](http://covscript
 
 | Package | Type | Version | Description |
 |---|---|---|---|
-| `network` | C++ Extension | `1.38.0_v6.5` | TCP/UDP sockets, TLS/SSL, async I/O, event loop |
-| `netutils` | CovScript | `2.2` | HTTP server/client framework with single-process, distributed master/slave, and OpenAI API modes |
+| `network` | C++ Extension | `1.38.0_v6.6` | TCP/UDP sockets, TLS/SSL, async I/O, event loop |
+| `netutils` | CovScript | `2.3` | HTTP server/client framework with single-process, distributed master/slave, and OpenAI API modes |
 | `argparse` | CovScript | `1.1` | Lightweight command-line argument parser |
 
 > **Note:** `netutils` and `argparse` are provided as both source (`.ecs`), compiled package (`.csp`), and bytecode module (`.csym`) — place them in your project's `imports/` directory.
@@ -85,6 +85,8 @@ All options can be overridden with `-D<option>=<value>`:
 | `NETWORK_SAFE_SHUTDOWN_TIMEOUT_MS` | `200` | Drain-loop deadline for UDP `safe_close` and TCP `safe_shutdown` |
 | `NETWORK_TLS_SHUTDOWN_TIMEOUT_MS` | `5000` | TLS close-notify timeout |
 | `NETWORK_THREAD_WORKER_POLL_MS` | `1` | Thread executor polling interval |
+| `NETWORK_WAIT_SLEEP_MS` | `1` | Sleep duration (ms) in `wait_impl` / drain loops between poll iterations |
+| `NETWORK_FAST_SPIN_COUNT` | `10` | Yield-without-sleep iterations in graduated wait before escalating to sleep |
 
 ---
 

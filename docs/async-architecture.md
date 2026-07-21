@@ -128,13 +128,15 @@ sequenceDiagram
     CNI->>Socket: begin_draining_exclusive()<br/>(先阻止新 I/O)
     loop while async_jobs > 0 (NETWORK_SAFE_SHUTDOWN_TIMEOUT_MS)
         CNI->>Asio: io.poll()
-        CNI->>Script: cs_runtime_yield()
+        CNI->>Script: cs_runtime_yield() (spins <= 10)
+    CNI->>Script: cs_runtime_sleep_for(1ms) (spins > 10)
     end
     opt TLS enabled
         CNI->>TLS: async_shutdown(strand-bound callback)
         loop close-notify 未完成且未超时
             CNI->>Asio: io.poll()
-            CNI->>Script: cs_runtime_yield()
+            CNI->>Script: cs_runtime_yield() (spins <= 10)
+    CNI->>Script: cs_runtime_sleep_for(1ms) (spins > 10)
         end
         alt close-notify 超时
             CNI->>Socket: cancel + close raw socket
@@ -412,13 +414,15 @@ sequenceDiagram
     Note over Sock: 新 I/O 被 exclusive_operation 拒绝
     loop async_jobs > 0 (NETWORK_SAFE_SHUTDOWN_TIMEOUT_MS)
         Script->>IO: io.poll()
-        Script->>Script: runtime.yield()
+        Script->>Script: cs_runtime_yield() (spins <= 10)
+    Script->>Script: cs_runtime_sleep_for(1ms) (spins > 10)
     end
     opt TLS enabled
         Sock->>IO: tls_stream.async_shutdown(strand)
         loop close-notify 未完成且未超时
             Script->>IO: io.poll()
-            Script->>Script: runtime.yield()
+            Script->>Script: cs_runtime_yield() (spins <= 10)
+    Script->>Script: cs_runtime_sleep_for(1ms) (spins > 10)
         end
         alt TLS timeout
             Sock->>Sock: cancel + close raw socket
@@ -431,7 +435,7 @@ sequenceDiagram
     Sock-->>Script: return success
 ```
 
-> **设计要点**：`close()` 和 `shutdown()` 通过 `scoped_exclusive_operation` 原子地占用 socket 独占权，防止 TOCTOU 窗口。普通 I/O 先预约 read/write 方向，再双检 `exclusive_operation`；同方向重叠直接拒绝，一读一写仍可全双工并行。TLS composed operation 的 handler 绑定到每个 socket 的 strand，多个 worker 不会并发访问同一 SSL stream。TCP `safe_shutdown()` 和 UDP `safe_close()` 的 drain 超时（默认 200ms）均通过 CMake 的 `NETWORK_SAFE_SHUTDOWN_TIMEOUT_MS` 调整。TLS close-notify 阶段的超时独立使用 `NETWORK_TLS_SHUTDOWN_TIMEOUT_MS`（默认 5000ms）。
+> **设计要点**：`close()` 和 `shutdown()` 通过 `scoped_exclusive_operation` 原子地占用 socket 独占权，防止 TOCTOU 窗口。普通 I/O 先预约 read/write 方向，再双检 `exclusive_operation`；同方向重叠直接拒绝，一读一写仍可全双工并行。TLS composed operation 的 handler 绑定到每个 socket 的 strand，多个 worker 不会并发访问同一 SSL stream。TCP `safe_shutdown()` 和 UDP `safe_close()` 的 drain 超时（默认 200ms）均通过 CMake 的 `NETWORK_SAFE_SHUTDOWN_TIMEOUT_MS` 调整。TLS close-notify 阶段的超时独立使用 `NETWORK_TLS_SHUTDOWN_TIMEOUT_MS`（默认 5000ms）。Drain 循环和 `wait_impl()` 使用分级等待：前 `NETWORK_FAST_SPIN_COUNT`（默认 10）次迭代使用 `cs_runtime_yield()`，之后升级为 `cs_runtime_sleep_for(NETWORK_WAIT_SLEEP_MS)`（默认 1ms）。
 
 ---
 
@@ -455,7 +459,7 @@ sequenceDiagram
 
     loop until state.has_done()
         SrvFiber->>CNI: async.poll_once()
-        SrvFiber->>SrvFiber: fiber.yield()
+        SrvFiber->>SrvFiber: fiber.sleep_for(FAST_POLL_MS)
         deactivate SrvFiber
         Main->>SrvFiber: server_fiber.resume()
         activate SrvFiber
@@ -504,8 +508,8 @@ UDP 的同步 `receive_from` / `send_to` 使用 `scoped_io_job`，`close` 使用
 
 | 方法 | 超时 | 行为 |
 |------|------|------|
-| `state.wait()` | 无（直到完成） | 循环 poll + yield |
-| `state.wait_for(ms)` | 自定义 | 循环 poll + yield |
+| `state.wait()` | 无（直到完成） | 循环 poll + 分级等待（yield × NETWORK_FAST_SPIN_COUNT，然后 sleep_for(NETWORK_WAIT_SLEEP_MS)） |
+| `state.wait_for(ms)` | 自定义 | 循环 poll + 分级等待（同上） |
 | `state.has_done()` | 无 | 非阻塞检查 |
 
 ### 生命周期管理
