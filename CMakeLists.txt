@@ -28,6 +28,10 @@ set(NETWORK_TLS_SHUTDOWN_TIMEOUT_MS 5000 CACHE STRING
     "TCP safe_shutdown TLS close-notify timeout in milliseconds")
 set(NETWORK_THREAD_WORKER_POLL_MS 1 CACHE STRING
     "thread_executor run_one_for polling interval in milliseconds")
+set(NETWORK_WAIT_SLEEP_MS 1 CACHE STRING
+    "Sleep duration in milliseconds for wait_impl / drain loops to avoid busy-waiting")
+set(NETWORK_FAST_SPIN_COUNT 10 CACHE STRING
+    "Number of fast-spin (yield without sleep) iterations in wait_impl before escalating to sleep")
 
 find_package(OpenSSL REQUIRED)
 
@@ -40,6 +44,8 @@ target_compile_definitions(network PRIVATE
     NETWORK_SAFE_SHUTDOWN_TIMEOUT_MS=${NETWORK_SAFE_SHUTDOWN_TIMEOUT_MS}
     NETWORK_TLS_SHUTDOWN_TIMEOUT_MS=${NETWORK_TLS_SHUTDOWN_TIMEOUT_MS}
     NETWORK_THREAD_WORKER_POLL_MS=${NETWORK_THREAD_WORKER_POLL_MS}
+    NETWORK_WAIT_SLEEP_MS=${NETWORK_WAIT_SLEEP_MS}
+    NETWORK_FAST_SPIN_COUNT=${NETWORK_FAST_SPIN_COUNT}
 )
 
 target_link_libraries(network covscript OpenSSL::SSL OpenSSL::Crypto)

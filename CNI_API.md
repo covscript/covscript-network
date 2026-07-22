@@ -111,7 +111,7 @@ sock.connect_ssl("localhost", {"trust_mode": "insecure"}.to_hash_map())
 | `send` | `(data: string) → int` | 发送数据（单次部分写入，返回实际写入字节数）。需完整发送时使用 `write` |
 | `write` | `(data: string)` | 发送数据（保证全部写入，阻塞直到完成） |
 | `shutdown` | `()` | 关闭套接字通信通道。与 `close()` 的区别：`shutdown()` 仅关闭通信，socket 保持打开且资源不释放；`close()` 释放所有资源 |
-| `safe_shutdown` | `() → boolean` | 安全关闭：协作式等待异步操作全部完成后关闭 TLS 和 TCP。成功返回 `true`；关闭过程中发生错误返回 `false`。在 fiber 环境中通过 `poll` + `yield` 协作等待，不阻塞 OS 线程 |
+| `safe_shutdown` | `() → boolean` | 安全关闭：协作式等待异步操作全部完成后关闭 TLS 和 TCP。成功返回 `true`；关闭过程中发生错误返回 `false`。在 fiber 环境中通过 `poll` + 分级等待（`yield` × N，然后 `sleep_for`）协作等待，不阻塞 OS 线程 |
 | `local_endpoint` | `() → endpoint` | 获取本地端点地址 |
 | `remote_endpoint` | `() → endpoint` | 获取远程端点地址 |
 
@@ -341,7 +341,7 @@ end
 1. **异步操作生命周期**：异步操作期间 socket 必须保持存活。创建 `work_guard` 可防止事件循环在所有异步操作完成前停止。
 2. **TLS 连接**：同步 `connect_ssl` 方法先建立 TCP 连接再执行 TLS 握手；异步 `async.connect_ssl` 仅执行 TLS 握手（socket 必须先建立 TCP 连接）。握手失败时 SSL 上下文会被自动清理。
 3. **`send` vs `write`**：`send` 执行单次写入并返回实际写入字节数，类似 BSD `send()`；`write` 保证全部写入，类似 POSIX `write()`。需要可靠传输时使用 `write`。
-4. **`shutdown` vs `close` vs `safe_shutdown`**：`shutdown` 关闭通信通道但不释放资源（socket 保持 `is_open()` 为 true）；`close` 立即关闭并释放 TLS 上下文（如有进行中的异步操作会抛出异常）；`safe_shutdown` 协作式等待所有异步操作完成后关闭 TLS 和 TCP。异步任务等待无超时；TLS close-notify 超时默认 5000ms（`NETWORK_TLS_SHUTDOWN_TIMEOUT_MS`）。在 fiber 环境中通过 `poll` + `yield` 协作等待，不阻塞 OS 线程；非 fiber 环境调用线程一直阻塞到关闭完成。推荐在异步场景中使用 `safe_shutdown`。
+4. **`shutdown` vs `close` vs `safe_shutdown`**：`shutdown` 关闭通信通道但不释放资源（socket 保持 `is_open()` 为 true）；`close` 立即关闭并释放 TLS 上下文（如有进行中的异步操作会抛出异常）；`safe_shutdown` 协作式等待所有异步操作完成后关闭 TLS 和 TCP。异步任务等待无超时；TLS close-notify 超时默认 5000ms（`NETWORK_TLS_SHUTDOWN_TIMEOUT_MS`）。在 fiber 环境中通过 `poll` + 分级等待（`yield` × N，然后 `sleep_for`）协作等待，不阻塞 OS 线程；非 fiber 环境调用线程一直阻塞到关闭完成。推荐在异步场景中使用 `safe_shutdown`。
 5. **信任报告**：建议使用 `sock.get_ssl_trust_report()`（每个 socket 独立），而非全局的 `get_last_global_ssl_trust_report()`（线程级别，可能被覆盖）。
 6. **线程安全**：同一 socket 不应并发混合同步和异步操作。异步 API 最多允许一个 pending read/receive 和一个 pending write/send；同方向重叠操作会被拒绝，读写可全双工并行。TLS 异步 handler 绑定到每个 socket 的 strand，可由多个 `async.thread_worker` 安全驱动。
 7. **netutils HTTP 客户端**：`netutils` 提供 `http_client` 类（`http_request` / `post` 方法）和 `openai_client` 子类。TLS 验证通过客户端实例的 `set_tls_options({"trust_mode": "auto"}.to_hash_map())` 控制，不再使用全局 `ssl_verify` 标志。详见 [NETUTILS.md](NETUTILS.md)。

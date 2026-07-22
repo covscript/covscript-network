@@ -1,6 +1,6 @@
 # CovScript NetUtils 协议文档
 
-版本：2.2
+版本：2.3
 
 作者：Covariant Script OSC
 
@@ -27,7 +27,7 @@
 ## 2. 基本常量与工具函数
 
 * `server_name = "CovScript-NetUtils"`
-* `server_version = "2.2"`
+* `server_version = "2.3"`
 
 与协议/实现相关的重要工具函数：
 
@@ -168,7 +168,7 @@ Master 分配 `rank`：先尝试使用 `deprecated_rank`（回收的编号），
 | 配置项                        |                                   含义 |   默认值  |
 | -------------------------- | -----------------------------------: | :----: |
 | `thread_count`             |                  底层 Asio I/O 线程数（不等于 handler 并发数） |   `4`  |
-| `worker_count`             |    单进程 HTTP 连接处理 fiber 数（控制可同时服务的活动/keep-alive 连接数） |  `64`  |
+| `worker_count`             |    单进程 HTTP 连接处理 fiber 数（控制可同时服务的活动/keep-alive 连接数） |  `32`  |
 | `max_keep_alive`           |                          每连接允许的最大请求数 |  `100` |
 | `keep_alive_timeout`       |                      保持连接的最大空闲时间（ms） | `5000` |
 | `max_body_size`            |                单个请求体的最大字节数 | `67108864` (64 MiB) |
@@ -240,17 +240,17 @@ Master 分配 `rank`：先尝试使用 `deprecated_rank`（回收的编号），
   转发时保留原始请求头，但会过滤 hop-by-hop 头（`Host`、`Connection`、`Content-Length`、`Transfer-Encoding`、`Keep-Alive`、`Proxy-*`、`TE`、`Trailer`、`Upgrade` 等由 `http_request` 内部管理，不透传）；同时**注入 `X-Forwarded-For: <客户端真实 IP>`**（客户端伪造的同名头会被丢弃后重写），后端据此可获得真实来源地址而非代理自身 IP。
 
 * `stop()`
-  优雅关闭服务器：停止所有 worker、释放 async_guard、关闭 acceptor。
+  优雅关闭服务器：标记所有 worker 退出、关闭 acceptor 和 Socket，通知所有纤程检查退出标志。资源释放（thread_pool、async_guard）在 `run()` 的事件循环退出后统一执行，避免从 handler 内调用 `stop()` 时纤程在 foreach 迭代中访问已释放的 `worker_list` 导致崩溃。可重复调用（重入安全）。
 
-* `run()`
-  启动事件循环（`listen` 或 `set_master` 后调用）。
+
+* `set_optimal_scheduling(policy : string)`
+  设置纤程调度策略，影响事件循环在恢复休眠 Worker 纤程时的反压行为。推荐在 `run()`/`poll()` 前调用，可选值：`"responsive"`（低延迟，适合轮询模式）、`"balanced"`（默认）、`"throughput"`、`"efficient"`。
 
 * `poll()`
-  启动服务（非阻塞），仅轮询一次。需循环调用才能使服务正常运行。
+  启动服务（非阻塞），仅轮询一次。需循环调用才能使服务正常运行。当所有 Worker 意外终止时会自动标记 `stopped` 并释放资源。
 
 * `run()`
-  启动服务（阻塞），适合守护进程模式。
-
+  启动服务（阻塞），适合守护进程模式。事件循环退出后自动释放 thread_pool、async_guard、worker_list。当所有 Worker 意外终止时会记录日志并退出。
 ---
 
 ## 9. 单进程（simple_worker）与多进程（master/slave）Worker 行为
@@ -263,7 +263,7 @@ Master 分配 `rank`：先尝试使用 `deprecated_rank`（回收的编号），
 
   * Accept Worker：接收新的客户端连接并把 `http_conn` 放入 `conn_list`。
   * Request Worker：从 `conn_list` 中挑选一个处于 `state == 0` 的 `http_conn`，读取 header 并把 `session` push 到 `request_queue`。
-  * Dispatch Worker：为空闲 Slave 分配 `conn->request_queue[conn->request_idx]` 并发送。
+  * Dispatch Worker：为空闲 Slave 分配 `conn->request_queue[conn->request_idx]` 并发送。当无可用 Slave 时，以 10 ms 间隔轮询并每秒记录一次日志。有待处理工作时使用 `fiber.yield()` 快速重新调度，否则使用 `fiber.sleep_for(FAST_POLL_MS)`。
   * Response Worker：负责把 Slave 返回的响应写回客户端 socket，并在必要时关闭连接与清理。
 
 * **slave_worker**（Slave）
@@ -375,7 +375,7 @@ slave.set_slave("127.0.0.1", 9000)
 * **POST Body 处理**：Master/Slave 之间传输 POST Body 时依赖 `content_length`，若客户端或中间链路错误导致长度不匹配，会引发阻塞或提前 EOF，要在应用层做好验证（如 Content-Length 校验）。
 * **版本兼容**：Master 与 Slave 的 `server_version` 必须一致，握手会校验版本号；当升级版本时请同时升级 Master/Slave。
 * **资源限制**：`max_connections` / `worker_count` / `master_worker_count` 应根据机器资源和负载曲线调整，避免出现大量 socket backlog 或内存耗尽。
-* **异常恢复**：Master 会在 Slave 出现错误或心跳失败时把该 Slave 标记为 `-1` 并尝试回收其 rank，以便后续新 Slave 使用；Slave 端在崩溃后会循环重连 Master（`slave_worker` 有短时 delay 重试）。
+* **异常恢复**：Master 会在 Slave 出现错误或心跳失败时把该 Slave 标记为 `-1` 并尝试回收其 rank，以便后续新 Slave 使用；Slave 端在崩溃后会循环重连 Master（`slave_worker` 使用 `fiber.sleep_for(ERROR_RECOVERY_MS)`（100 ms）重试）。
 
 ## 14. 常见问题与调优建议
 

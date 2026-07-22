@@ -32,16 +32,24 @@
 #include <regex>
 #include <array>
 
+#if COVSCRIPT_ABI_VERSION < 260701
+#error "CovScript SDK version 260701 or higher is required for this extension."
+#endif
+
+inline void cs_runtime_sleep_for(std::size_t ms)
+{
+	if (!cs::fiber::within())
+		std::this_thread::sleep_for(std::chrono::milliseconds(ms));
+	else
+		cs::fiber::sleep_for(ms);
+}
+
 inline void cs_runtime_yield()
 {
-#if COVSCRIPT_ABI_VERSION >= 250908
-	if (cs::current_process->fiber_stack.empty())
-		std::this_thread::sleep_for(std::chrono::milliseconds(1));
+	if (!cs::fiber::within())
+		cs_runtime_sleep_for(1);
 	else
 		cs::fiber::yield();
-#else
-	std::this_thread::sleep_for(std::chrono::milliseconds(1));
-#endif
 }
 
 namespace network_cs_ext {
@@ -832,6 +840,7 @@ namespace network_cs_ext {
 		bool wait_impl(const state_t &state, std::optional<std::chrono::milliseconds> timeout)
 		{
 			auto start = std::chrono::steady_clock::now();
+			int spins = 0;
 			while (true) {
 				get_global_settings().poll();
 				if (state->has_done.load(std::memory_order_acquire))
@@ -840,7 +849,17 @@ namespace network_cs_ext {
 					if (std::chrono::steady_clock::now() - start >= *timeout)
 						return state->has_done.load(std::memory_order_acquire) && !state->ec;
 				}
-				cs_runtime_yield();
+				// Graduated wait: fast-spin with yield() for sub-ms
+				// completions, then escalate to sleep_for() to avoid
+				// busy-waiting on longer operations.
+				// Keep spins bounded at NETWORK_FAST_SPIN_COUNT; once
+				// reached, the loop stays in sleep-based backoff.
+				if (spins <= NETWORK_FAST_SPIN_COUNT)
+					++spins;
+				if (spins <= NETWORK_FAST_SPIN_COUNT)
+					cs_runtime_yield();
+				else
+					cs_runtime_sleep_for(NETWORK_WAIT_SLEEP_MS);
 			}
 		}
 
@@ -1266,11 +1285,15 @@ bool network_cs_ext::tcp::socket::safe_shutdown(socket_t &sock)
 		sock->get_raw().cancel(ignored);
 		network_cs_ext::async::restart();
 		auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(NETWORK_SAFE_SHUTDOWN_TIMEOUT_MS);
+		int spins = 0;
 		while (sock->async_jobs.load(std::memory_order_acquire) > 0) {
 			if (std::chrono::steady_clock::now() >= deadline)
 				break;
 			network_cs_ext::async::get_global_settings().poll();
-			cs_runtime_yield();
+			if (++spins <= NETWORK_FAST_SPIN_COUNT)
+				cs_runtime_yield();
+			else
+				cs_runtime_sleep_for(NETWORK_WAIT_SLEEP_MS);
 		}
 		try {
 			sock->begin_draining_exclusive();
@@ -1297,13 +1320,17 @@ bool network_cs_ext::tcp::socket::safe_shutdown(socket_t &sock)
 		sock->get_raw().cancel(ignored);
 	}
 	auto drain_dl = std::chrono::steady_clock::now() + std::chrono::milliseconds(NETWORK_SAFE_SHUTDOWN_TIMEOUT_MS);
+	int spins = 0;
 	while (sock->async_jobs.load(std::memory_order_acquire) > 0) {
 		if (std::chrono::steady_clock::now() >= drain_dl) {
 			success = false;
 			break;
 		}
 		network_cs_ext::async::get_global_settings().poll();
-		cs_runtime_yield();
+		if (++spins <= NETWORK_FAST_SPIN_COUNT)
+			cs_runtime_yield();
+		else
+			cs_runtime_sleep_for(NETWORK_WAIT_SLEEP_MS);
 	}
 	if (!success)
 		return false;
@@ -1355,9 +1382,13 @@ bool network_cs_ext::tcp::socket::safe_shutdown(socket_t &sock)
 			else
 				state->done.store(true, std::memory_order_release);
 		}
+		int spins = 0;
 		while (!state->done.load(std::memory_order_acquire)) {
 			network_cs_ext::async::get_global_settings().poll();
-			cs_runtime_yield();
+			if (++spins <= NETWORK_FAST_SPIN_COUNT)
+				cs_runtime_yield();
+			else
+				cs_runtime_sleep_for(NETWORK_WAIT_SLEEP_MS);
 		}
 		if (state->timed_out || (state->ec && state->ec != asio::error::eof))
 			success = false;
@@ -1386,11 +1417,15 @@ bool network_cs_ext::udp::socket::safe_close(socket_t &sock)
 	// Spin until async_jobs drains or timeout expires.
 	auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(NETWORK_SAFE_SHUTDOWN_TIMEOUT_MS);
 	while (std::chrono::steady_clock::now() < deadline) {
+		int spins = 0;
 		while (sock->async_jobs.load(std::memory_order_acquire) > 0) {
 			if (std::chrono::steady_clock::now() >= deadline)
 				break;
 			network_cs_ext::async::get_global_settings().poll();
-			cs_runtime_yield();
+			if (++spins <= NETWORK_FAST_SPIN_COUNT)
+				cs_runtime_yield();
+			else
+				cs_runtime_sleep_for(NETWORK_WAIT_SLEEP_MS);
 		}
 		if (sock->async_jobs.load(std::memory_order_acquire) == 0)
 			break;

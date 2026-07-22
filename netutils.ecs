@@ -5,10 +5,10 @@ import network.*, regex
 import codec.json
 
 constant server_name = "CovScript-NetUtils"
-constant server_version = "2.2"
+constant server_version = "2.3"
 
 # ============================================================================
-# Configuration — override before use
+# Configuration -- override before use
 # ============================================================================
 
 constant http_client_read_chunk       = 8192       # bytes per client recv() call
@@ -22,6 +22,12 @@ constant default_https_port           = 443
 
 constant default_http_thread_count    = 4          # Asio I/O threads
 constant default_http_worker_count    = 32         # per-process HTTP handler fibers
+
+# Polling sleep durations for worker fibers (milliseconds).
+# These replace bare fiber.yield() to provide graduated backpressure.
+constant IDLE_POLL_MS       = 10    # Worker idle -- no work available
+constant FAST_POLL_MS       = 1     # Fast poll -- waiting for in-flight response
+constant ERROR_RECOVERY_MS  = 100   # Backoff after slave connect/handshake failure
 
 # ============================================================================
 # Utilities
@@ -587,7 +593,7 @@ function call_http_handler(session, server)
             end
         end
         if !candidates.empty()
-            # Sort by length descending — longest prefix wins
+            # Sort by length descending -- longest prefix wins
             var changed = true
             while changed
                 changed = false
@@ -712,14 +718,14 @@ function simple_worker(self)
                 break
             end
             last_request_time = runtime.time()
-            # Keep-Alive check — force_close guards against handlers that
+            # Keep-Alive check -- force_close guards against handlers that
             # overwrite session.connection after the limit was reached
             if !sock.is_open() || force_close || session.connection == "close"
                 break
             end
         end
         if !sock.safe_shutdown()
-            log("safe_shutdown returned false — async jobs may still be pending")
+            log("safe_shutdown returned false -- async jobs may still be pending")
         end
     end
 end
@@ -803,7 +809,7 @@ function master_accept_worker(self)
             return
         end
         if self->server->conn_list.size >= self->server->max_connections
-            fiber.yield()
+            fiber.sleep_for(IDLE_POLL_MS)
             continue
         end
         log("Accepting new HTTP request..")
@@ -845,7 +851,7 @@ function master_request_worker(self)
             it.next()
         end
         if conn == null
-            fiber.yield()
+            fiber.sleep_for(IDLE_POLL_MS)
             continue
         end
         conn->state = 1
@@ -853,12 +859,12 @@ function master_request_worker(self)
         var session = read_http_header(sock, conn->read_state, conn->last_request_time + self->server->keep_alive_timeout, self->server->max_body_size)
         if session == null
             if !sock.safe_shutdown()
-                log("safe_shutdown returned false — async jobs may still be pending")
+                log("safe_shutdown returned false -- async jobs may still be pending")
             end
             conn->state = -1
             continue
         end
-        # Check keep-alive — read_http_header already enforces the timeout;
+        # Check keep-alive -- read_http_header already enforces the timeout;
         # only the per-connection request counter needs checking here.
         if ++conn->request_count >= self->server->max_keep_alive
             log("Keep-alive exceeded max request count.")
@@ -883,7 +889,7 @@ function master_response_worker(self)
             return
         end
         if clist.empty()
-            fiber.yield()
+            fiber.sleep_for(IDLE_POLL_MS)
             continue
         end
         var conn = null
@@ -894,7 +900,7 @@ function master_response_worker(self)
             end
         end
         if conn == null
-            fiber.yield()
+            fiber.sleep_for(IDLE_POLL_MS)
             continue
         end
         while !conn->request_queue.empty()
@@ -922,13 +928,13 @@ function master_response_worker(self)
                 # not eat into the client's idle allowance.
                 conn->last_request_time = runtime.time()
             else
-                fiber.yield()
+                fiber.sleep_for(FAST_POLL_MS)
                 break
             end
         end
         if conn->request_queue.empty() && !conn->keep_alive
             if !conn->sock.safe_shutdown()
-                log("safe_shutdown returned false — async jobs may still be pending")
+                log("safe_shutdown returned false -- async jobs may still be pending")
             end
             conn->state = -1
         end
@@ -959,18 +965,28 @@ end
 
 # Send queued requests to available slaves; heartbeat idle slaves.
 function master_dispatch_worker(self)
+    var no_slave_start = 0
+    var no_slave_last_log = 0
     loop
         if self->server->stopped
             return
         end
         var node = master_pick_slave(self)
         if node == null
-            # Pure yield — runtime.delay would block the whole OS thread
-            # (all fibers), collapsing dispatch throughput whenever the
-            # slave pool is busy or empty.
-            fiber.yield()
+            if no_slave_start == 0
+                no_slave_start = runtime.time()
+                no_slave_last_log = 0
+            end
+            var elapsed = runtime.time() - no_slave_start
+            # Log once per second of accumulated wait (runtime.time() returns ms)
+            if elapsed >= no_slave_last_log + 1000
+                log("Waiting for available slave worker (" + to_string(elapsed / 1000) + " s)")
+                no_slave_last_log = elapsed
+            end
+            fiber.sleep_for(IDLE_POLL_MS)
             continue
         end
+        no_slave_start = 0
         var conn = null
         foreach it in self->server->conn_list
             if it->request_idx < it->request_queue.size
@@ -978,6 +994,7 @@ function master_dispatch_worker(self)
                 break
             end
         end
+        var had_work = conn != null
         var timeout = node->last_conn_time + self->server->slave_keep_alive_timeout - runtime.time()
         if timeout <= 0
             timeout = self->server->slave_keep_alive_timeout
@@ -995,7 +1012,7 @@ function master_dispatch_worker(self)
                 else
                     log("Heartbeat failed for worker rank " + node->rank)
                     if !node->sock.safe_shutdown()
-                        log("safe_shutdown returned false — async jobs may still be pending")
+                        log("safe_shutdown returned false -- async jobs may still be pending")
                     end
                     node->state = -1
                 end
@@ -1003,7 +1020,7 @@ function master_dispatch_worker(self)
         else
             # Departure queue not empty, send request. A slave can die
             # mid-flight (e.g. its keep-alive expired during a scheduling
-            # stall and it reconnected as a fresh node) — re-dispatch
+            # stall and it reconnected as a fresh node) -- re-dispatch
             # idempotent requests to another slave instead of failing them.
             # Non-idempotent methods are never re-dispatched: the dead slave
             # may already have executed the handler.
@@ -1036,7 +1053,7 @@ function master_dispatch_worker(self)
                 # a fresh connection under the recycled rank.
                 log("Read response failed for worker rank " + node->rank)
                 if !node->sock.safe_shutdown()
-                    log("safe_shutdown returned false — async jobs may still be pending")
+                    log("safe_shutdown returned false -- async jobs may still be pending")
                 end
                 node->state = -1
                 var retriable = session.method == "GET" || session.method == "HEAD" || session.method == "OPTIONS"
@@ -1045,7 +1062,7 @@ function master_dispatch_worker(self)
                     break
                 end
                 log("Re-dispatching " + session.method + " " + session.url + " (attempt " + session.dispatch_attempts + ")")
-                # Wait (bounded) for another ready slave — a dead slave
+                # Wait (bounded) for another ready slave -- a dead slave
                 # typically reconnects within a few poll cycles. Budget one
                 # death-detection period plus one handshake.
                 node = null
@@ -1057,8 +1074,8 @@ function master_dispatch_worker(self)
                     end
                     node = master_pick_slave(self)
                     if node == null
-                        # Pure yield (see the no-node path above)
-                        fiber.yield()
+                        # fiber.sleep_for(IDLE_POLL_MS) -- match the no-slave path above
+                        fiber.sleep_for(IDLE_POLL_MS)
                     end
                 end
                 if node == null
@@ -1072,7 +1089,14 @@ function master_dispatch_worker(self)
                 end
             end
         end
-        fiber.yield()
+        # Only sleep when there was no pending work at the top of the
+        # iteration; otherwise yield quickly so the next dispatch can
+        # start without a mandatory 1 ms delay capping throughput.
+        if had_work
+            fiber.yield()
+        else
+            fiber.sleep_for(FAST_POLL_MS)
+        end
     end
 end
 
@@ -1088,7 +1112,7 @@ function slave_worker(self)
         var state = async.connect(sock, self->server->master_endpoint)
         if !state.wait()
             log("Slave connect error: " + state.get_error())
-            runtime.delay(100)
+            fiber.sleep_for(ERROR_RECOVERY_MS)
             continue
         end
         sock.set_opt_no_delay(true)
@@ -1152,7 +1176,7 @@ function slave_worker(self)
             last_request_time = runtime.time()
         end
         # delay before error recovery
-        runtime.delay(100)
+        fiber.sleep_for(ERROR_RECOVERY_MS)
     end
 end
 
@@ -1202,7 +1226,7 @@ function url_decode(s)
                 out += char.from_ascii(byte)
                 i += 3
             else
-                # Invalid percent-encoding per RFC 3986 — keep literal
+                # Invalid percent-encoding per RFC 3986 -- keep literal
                 out += ch
                 i += 1
             end
@@ -1314,7 +1338,7 @@ class http_client
         if path == null || path.empty()
             path = "/"
         end
-        # Strip URL fragment (#...) per RFC 3986 §3.5
+        # Strip URL fragment (#...) per RFC 3986 sec.3.5
         var frag_pos = path.find("#", 0)
         if frag_pos != -1
             path = path.substr(0, frag_pos)
@@ -1563,7 +1587,7 @@ class http_client
         end
         var is_chunked = false
         if headers.exist("transfer-encoding")
-            # Parse comma-separated transfer-encodings per RFC 7230 §4.
+            # Parse comma-separated transfer-encodings per RFC 7230 sec.4.
             # "chunked" must be the final encoding.
             var te_value = headers["transfer-encoding"]
             var tokens = te_value.split({','})
@@ -1603,7 +1627,7 @@ class http_client
                         try
                             var state = async.read(sock, http_client_read_chunk)
                             if !_await(state)
-                                # EOF or error — drain partial data before breaking
+                                # EOF or error -- drain partial data before breaking
                                 if state.has_done()
                                     var partial = state.get_result()
                                     if partial != null && !partial.empty()
@@ -1697,8 +1721,8 @@ class http_client
             return null
         end
 
-        # Read response headers.  Per RFC 7231 §6.2, 1xx responses are interim
-        # (not final) — loop until we receive a final status code.
+        # Read response headers.  Per RFC 7231 sec.6.2, 1xx responses are interim
+        # (not final) -- loop until we receive a final status code.
         var meta = null
         var interim_count = 0
         loop
@@ -1717,7 +1741,7 @@ class http_client
             end
 
             var status_code = meta["status_code"]
-            # 1xx interim responses have no body (RFC 7230 §3.3).
+            # 1xx interim responses have no body (RFC 7230 sec.3.3).
             # Skip to the next response header block.
             if status_code >= 100 && status_code <= 199
                 if status_code == 101
@@ -1885,6 +1909,7 @@ class http_server
     var slave_keep_alive_timeout = 5000
     var master_endpoint = null
     var stopped = false
+    var event_loop_active = false   # true while run()/poll() is driving fibers
     # private functions
     function read_file(path)
         var time = runtime.time()
@@ -1908,6 +1933,33 @@ class http_server
         worker->co = fiber.create(func, worker)
         worker->co.resume()
         worker_list.push_back(worker)
+    end
+    # Resume every non-finished worker coroutine -- shared by poll(), run(),
+    # and stop().  Returns true when all workers have finished.
+    function resume_active_workers()
+        if worker_list == null
+            return true
+        end
+        var all_finished = true
+        foreach worker in worker_list
+            if !worker->co.is_finished()
+                worker->co.resume()
+            end
+            # Re-check after resume: the worker may have finished
+            # during the resume() call (e.g. it saw stopped=true and
+            # returned).  If we set all_finished=false before resume,
+            # we would return a stale value.
+            if !worker->co.is_finished()
+                all_finished = false
+            end
+        end
+        return all_finished
+    end
+    # Idempotent cleanup of async resources.  Safe to call multiple times.
+    function release_resources()
+        thread_pool = null
+        async_guard = null
+        worker_list = null
     end
     function init()
         if stopped
@@ -2128,6 +2180,15 @@ class http_server
         log("Listening on port: " + to_string(port))
         return this
     end
+    # Tune the fiber scheduler for the server's polling pattern.  The
+    # default "balanced" policy applies backpressure that can stall the
+    # event loop when it resumes sleeping workers.  Call this before
+    # run()/poll() -- recommended value is "responsive" for the polling
+    # pattern used by the server.
+    function set_optimal_scheduling(policy : string)
+        fiber.set_schedule_policy(policy)
+        return this
+    end
     function poll()
         if stopped
             return
@@ -2135,8 +2196,22 @@ class http_server
         if async_guard is null
             init()
         end
-        foreach worker in worker_list
-            worker->co.resume()
+        event_loop_active = true
+        var all_finished = resume_active_workers()
+        event_loop_active = false
+        async.poll()
+        # Mirror run(): when every worker terminates unexpectedly, perform
+        # full shutdown so acceptors and sockets are closed as well.
+        if all_finished
+            log("All workers have terminated unexpectedly -- shutting down")
+            stop()
+            return
+        end
+        # If stop() was called from a handler during resume_active_workers(),
+        # it deferred cleanup because event_loop_active was true.  Handle it
+        # now -- event_loop_active is false and the foreach is off-stack.
+        if stopped
+            release_resources()
         end
     end
     function run()
@@ -2144,19 +2219,32 @@ class http_server
             return
         end
         init()
+        event_loop_active = true
         loop
             if stopped
                 break
             end
-            foreach worker in worker_list
-                worker->co.resume()
+            var all_finished = resume_active_workers()
+            if all_finished
+                log("All workers have terminated unexpectedly -- shutting down")
+                stop()
+                break
             end
+            async.poll()
         end
+        event_loop_active = false
+        # Release async resources now that the event loop has exited.
+        release_resources()
     end
     function stop()
+        # Guard against re-entrant calls: a handler running during
+        # resume_active_workers() may call stop() a second time.
+        if stopped
+            return
+        end
         # Signal all workers to exit
         stopped = true
-        # Close acceptors — cancels pending async_accept, wakes blocked fibers
+        # Close acceptors -- cancels pending async_accept, wakes blocked fibers
         acceptor = null
         master_acceptor = null
         # Close all active client connections
@@ -2175,16 +2263,24 @@ class http_server
                 end
             end
         end
-        # Allow workers one more timeslice to see stopped flag and exit
-        if worker_list != null
-            foreach worker in worker_list
-                worker->co.resume()
-            end
+        # Allow workers one more timeslice to see stopped flag and exit.
+        # Skip resume_active_workers() when called from inside run()/poll()
+        # (re-entrant call): the outer event loop is already iterating
+        # worker_list, and resuming the currently-running fiber throws
+        # lang_error.  The outer loop will resume workers on the next
+        # iteration or exit and clean up.
+        if !event_loop_active
+            resume_active_workers()
         end
-        # Release async resources — threads first so ASIO post()
-        # in destructor succeeds (work_guard keeps io_context alive)
-        thread_pool = null
-        async_guard = null
-        worker_list = null
+        # Dispatch completion handlers so workers blocked in wait_impl()
+        # can observe the error codes from the socket/accept closures we
+        # triggered above and return from their blocking calls.
+        async.poll()
+        # Clean up resources.  When stop() is called from inside the event
+        # loop (re-entrant via a handler), defer destruction to run() so
+        # that worker_list is not freed while the outer foreach is on-stack.
+        if !event_loop_active
+            release_resources()
+        end
     end
 end
