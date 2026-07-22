@@ -2200,11 +2200,12 @@ class http_server
         var all_finished = resume_active_workers()
         event_loop_active = false
         async.poll()
-        # Mirror run(): when every worker terminates unexpectedly, mark the
-        # server as stopped so the caller can detect the shutdown.
+        # Mirror run(): when every worker terminates unexpectedly, perform
+        # full shutdown so acceptors and sockets are closed as well.
         if all_finished
             log("All workers have terminated unexpectedly -- shutting down")
-            stopped = true
+            stop()
+            return
         end
         # If stop() was called from a handler during resume_active_workers(),
         # it deferred cleanup because event_loop_active was true.  Handle it
@@ -2226,7 +2227,7 @@ class http_server
             var all_finished = resume_active_workers()
             if all_finished
                 log("All workers have terminated unexpectedly -- shutting down")
-                stopped = true
+                stop()
                 break
             end
             async.poll()

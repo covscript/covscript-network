@@ -852,8 +852,8 @@ namespace network_cs_ext {
 				// Graduated wait: fast-spin with yield() for sub-ms
 				// completions, then escalate to sleep_for() to avoid
 				// busy-waiting on longer operations.
-				// Cap spins to prevent signed overflow on extremely
-				// long-running waits (theoretical — ~24 days at 1 ms).
+				// Keep spins bounded at NETWORK_FAST_SPIN_COUNT; once
+				// reached, the loop stays in sleep-based backoff.
 				if (spins <= NETWORK_FAST_SPIN_COUNT)
 					++spins;
 				if (spins <= NETWORK_FAST_SPIN_COUNT)

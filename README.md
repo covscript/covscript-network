@@ -36,7 +36,7 @@ A high-performance network extension for the [Covariant Script](http://covscript
 
 | Dependency | Notes |
 |---|---|
-| [Covariant Script](http://covscript.org.cn) | Set `CS_DEV_PATH` to the SDK root |
+| [Covariant Script](http://covscript.org.cn) | Set `CS_DEV_PATH` to the SDK root (ABI version 260701 or higher) |
 | [OpenSSL](https://www.openssl.org/) | Runtime and development headers |
 | CMake ≥ 3.16 | Build system |
 | C++17 compiler | GCC, Clang, or MSVC |
