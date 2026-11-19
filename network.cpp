@@ -38,8 +38,20 @@
 #error "CovScript SDK version 260701 or higher is required for this extension."
 #endif
 
+// Each extension DLL statically links the SDK, so fiber_context::current()
+// is a per-DLL thread-local copy that never sees the host's fiber chain.
+// The host-routed current_process (dll.hpp accessor) exposes the real chain
+// via process->fiber_cxt; mirror it before querying fiber state so that
+// within()/yield()/sleep_for() operate on the host's running fiber.
+inline void cs_sync_fiber_context()
+{
+	if (cs::current_process != nullptr && cs::current_process->fiber_cxt != nullptr)
+		cs::fiber_context::current()->stack = cs::current_process->fiber_cxt->stack;
+}
+
 inline void cs_runtime_sleep_for(std::size_t ms)
 {
+	cs_sync_fiber_context();
 	if (!cs::fiber::within())
 		std::this_thread::sleep_for(std::chrono::milliseconds(ms));
 	else
@@ -48,6 +60,7 @@ inline void cs_runtime_sleep_for(std::size_t ms)
 
 inline void cs_runtime_yield()
 {
+	cs_sync_fiber_context();
 	if (!cs::fiber::within())
 		cs_runtime_sleep_for(1);
 	else
