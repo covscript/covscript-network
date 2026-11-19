@@ -8,9 +8,9 @@ A high-performance network extension for the [Covariant Script](http://covscript
 
 | Package | Type | Version | Description |
 |---|---|---|---|
-| `network` | C++ Extension | `1.38.0_v6.5` | TCP/UDP sockets, TLS/SSL, async I/O, event loop |
-| `netutils` | CovScript | `2.2` | HTTP server/client framework with single-process, distributed master/slave, and OpenAI API modes |
-| `argparse` | CovScript | `1.1` | Lightweight command-line argument parser |
+| `network` | C++ Extension | `1.38.0_v6.7` | TCP/UDP sockets, TLS/SSL, async I/O, event loop |
+| `netutils` | CovScript | `2.4` | HTTP server/client framework with single-process, distributed master/slave, and OpenAI API modes |
+| `argparse` | CovScript | `1.2` | Lightweight command-line argument parser |
 
 > **Note:** `netutils` and `argparse` are provided as both source (`.ecs`), compiled package (`.csp`), and bytecode module (`.csym`) — place them in your project's `imports/` directory.
 
@@ -22,7 +22,7 @@ A high-performance network extension for the [Covariant Script](http://covscript
 - **UDP Sockets** — unicast, broadcast, async send/receive with IPv4/IPv6 support
 - **TLS/SSL** — encrypted TCP with configurable trust modes (`auto`, `openssl`, `custom`, `insecure`) and detailed trust reporting
 - **Asynchronous I/O** — non-blocking `async` namespace with `poll`/`poll_once` event loop, `thread_worker`, `work_guard`, and fiber-cooperative patterns
-- **HTTP Server** (`netutils`) — multi-worker, configurable keep-alive, static file serving, custom route binding, and SQLite integration
+- **HTTP Server** (`netutils`) — multi-worker, configurable keep-alive, static file serving with an LRU cache and size cap, custom route binding (see `examples/http_server.ecs` for a SQLite-backed REST demo)
 - **HTTP Client** (`netutils`) — asynchronous HTTP/HTTPS client with TLS, timeouts, header parsing, and keep-alive
 - **OpenAI Client** (`netutils`) — OpenAI/DeepSeek API-compatible chat client built on the HTTP client
 - **Distributed Multi-Node** — master/slave architecture with TCP IPC for horizontal scaling of HTTP services
@@ -36,7 +36,7 @@ A high-performance network extension for the [Covariant Script](http://covscript
 
 | Dependency | Notes |
 |---|---|
-| [Covariant Script](http://covscript.org.cn) | Set `CS_DEV_PATH` to the SDK root |
+| [Covariant Script](http://covscript.org.cn) | Set `CS_DEV_PATH` to the SDK root (ABI version 260701 or higher) |
 | [OpenSSL](https://www.openssl.org/) | Runtime and development headers |
 | CMake ≥ 3.16 | Build system |
 | C++17 compiler | GCC, Clang, or MSVC |
@@ -85,10 +85,17 @@ All options can be overridden with `-D<option>=<value>`:
 | `NETWORK_SAFE_SHUTDOWN_TIMEOUT_MS` | `200` | Drain-loop deadline for UDP `safe_close` and TCP `safe_shutdown` |
 | `NETWORK_TLS_SHUTDOWN_TIMEOUT_MS` | `5000` | TLS close-notify timeout |
 | `NETWORK_THREAD_WORKER_POLL_MS` | `1` | Thread executor polling interval |
+| `NETWORK_WAIT_SLEEP_MS` | `1` | Sleep duration (ms) in `wait_impl` / drain loops between poll iterations |
+| `NETWORK_FAST_SPIN_COUNT` | `10` | Yield-without-sleep iterations in graduated wait before escalating to sleep |
 
 ---
 
 ## Quick Start
+
+> **Note:** `tcp.endpoint()` / `udp.endpoint()` accept **numeric IP addresses only**
+> (e.g. `"127.0.0.1"`, `"::1"`); use `tcp.resolve()` / `udp.resolve()` to resolve
+> host names. Also keep submodule imports before bare ones: `import network.tcp as tcp`
+> must precede `import network` (a language-level import-order quirk).
 
 ### TCP Echo (sync client + async accept)
 
@@ -132,8 +139,11 @@ import network.async as async
 
 var guard = new async.work_guard
 
+# endpoint() takes numeric IPs only -- resolve host names first
+var endpoints = tcp.resolve("example.com", "80")
+
 var sock = new tcp.socket
-var connect_state = async.connect(sock, tcp.endpoint("example.com", 80))
+var connect_state = async.connect(sock, endpoints[0])
 connect_state.wait_for(5000)
 
 var write_state = async.write(sock, "GET / HTTP/1.1\r\nHost: example.com\r\n\r\n")
@@ -151,12 +161,16 @@ sock.close()
 ```ruby
 import network.tcp as tcp
 
-var sock = new tcp.socket
-var options = {"trust_mode": "auto"}.to_hash_map()
+var endpoints = tcp.resolve("example.com", "443")
 
+var sock = new tcp.socket
+# connect the TCP transport first, then upgrade it with TLS
+sock.connect(endpoints[0])
+var options = {"trust_mode": "auto"}.to_hash_map()
 sock.connect_ssl("example.com", options)
-sock.write("GET / HTTP/1.1\r\nHost: example.com\r\n\r\n")
-system.out.println(sock.read(4096))
+
+sock.write("GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n")
+system.out.println(sock.receive(4096))
 sock.close()
 ```
 
@@ -209,12 +223,12 @@ The [examples/](examples/) directory contains complete applications:
 ### `network.tcp`
 
 - **Types (construct with `new`):** `socket`, `acceptor(endpoint)` — factory function, not a type
-- **Endpoints:** `endpoint(host, port)`, `endpoint_v4(port)`, `endpoint_v6(port)`
-- **DNS:** `resolve(host, service)`
+- **Endpoints:** `endpoint(ip, port)` — numeric IPs only, `endpoint_v4(port)`, `endpoint_v6(port)`
+- **DNS:** `resolve(host, service)` — resolves host names into an endpoint array
 - **Socket methods:** `connect`, `connect_ssl`, `accept`, `send`, `receive`, `read`, `write`
 - **Lifecycle:** `close`, `is_open`, `is_ssl`, `shutdown`, `safe_shutdown`
 - **Options:** `set_opt_reuse_address`, `set_opt_no_delay`, `set_opt_keep_alive`
-- **Info:** `available`, `local_endpoint`, `remote_endpoint`, `get_ssl_trust_report`
+- **Info:** `available` (returns 0 for TLS sockets), `peer_closed`, `local_endpoint`, `remote_endpoint`, `get_ssl_trust_report`
 - **Endpoint methods:** `address()`, `port()`, `is_v4()`, `is_v6()`
 
 > **`send` vs `write`:** `send(data)` returns bytes actually sent (may be partial). `write(data)` blocks until all data is sent.
@@ -234,7 +248,7 @@ The [examples/](examples/) directory contains complete applications:
 
 - **Types (construct with `new`):** `state`, `work_guard`, `thread_worker`
 - **Operations (return state):** `accept(sock, acceptor)`, `connect(sock, ep)`, `connect_ssl(sock, host, opts)`, `read(sock, size)`, `write(sock, data)`, `receive_from(sock, size)`, `send_to(sock, data, ep)`
-- **In-place operation:** `read_until(sock, state, pattern)` — reuses an existing state object
+- **In-place operations:** `read_until(sock, state, pattern)` and `read_until_limited(sock, state, pattern, max_bytes)` — reuse an existing state object; the limited variant caps buffered growth and fails with a "size limit exceeded" error instead of buffering without bound
 - **Event loop:** `poll()`, `poll_once()`, `stopped()`, `restart()`
 
 #### Async State Methods

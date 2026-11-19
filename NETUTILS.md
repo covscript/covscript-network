@@ -1,6 +1,6 @@
 # CovScript NetUtils 协议文档
 
-版本：2.2
+版本：2.4
 
 作者：Covariant Script OSC
 
@@ -27,7 +27,7 @@
 ## 2. 基本常量与工具函数
 
 * `server_name = "CovScript-NetUtils"`
-* `server_version = "2.2"`
+* `server_version = "2.4"`
 
 与协议/实现相关的重要工具函数：
 
@@ -168,7 +168,7 @@ Master 分配 `rank`：先尝试使用 `deprecated_rank`（回收的编号），
 | 配置项                        |                                   含义 |   默认值  |
 | -------------------------- | -----------------------------------: | :----: |
 | `thread_count`             |                  底层 Asio I/O 线程数（不等于 handler 并发数） |   `4`  |
-| `worker_count`             |    单进程 HTTP 连接处理 fiber 数（控制可同时服务的活动/keep-alive 连接数） |  `64`  |
+| `worker_count`             |    单进程 HTTP 连接处理 fiber 数（控制可同时服务的活动/keep-alive 连接数） |  `32`  |
 | `max_keep_alive`           |                          每连接允许的最大请求数 |  `100` |
 | `keep_alive_timeout`       |                      保持连接的最大空闲时间（ms） | `5000` |
 | `max_body_size`            |                单个请求体的最大字节数 | `67108864` (64 MiB) |
@@ -178,6 +178,8 @@ Master 分配 `rank`：先尝试使用 `deprecated_rank`（回收的编号），
 | `heartbeat_interval`       |              Master 对 Slave 心跳间隔（ms） | `1000` |
 | `slave_spawn_timeout`      |                     Slave 握手超时时间（ms） | `1000` |
 | `slave_keep_alive_timeout` | Master 与 Slave 之间的 keep-alive 超时（ms） | `5000` |
+| `max_static_file_size`   |                静态文件服务的单文件大小上限（超出返回 413） | `16777216` (16 MiB) |
+| `file_cache_max_entries` |                静态文件 LRU 缓存的最大条目数 |  `64`  |
 
 控制逻辑：
 
@@ -215,7 +217,7 @@ Master 分配 `rank`：先尝试使用 `deprecated_rank`（回收的编号），
   设置静态文件根目录（并 normalize），返回 `this` 以链式调用。
 
 * `set_config(conf : hash_map)`
-  通过 `hash_map` 设置多个配置项，通常将 JSON 配置文件读取后传至这里。可识别的键包括 `"thread_count"`、`"worker_count"`、`"wwwroot"`、`"max_keep_alive"`、`"keep_alive_timeout"`、`"max_body_size"`、`"max_connections"`、`"heartbeat_interval"`、`"slave_spawn_timeout"`、`"slave_keep_alive_timeout"`、`"multi_process"`、`"master_worker_count"`，返回 `this`。
+  通过 `hash_map` 设置多个配置项，通常将 JSON 配置文件读取后传至这里。可识别的键包括 `"thread_count"`、`"worker_count"`、`"wwwroot"`、`"max_keep_alive"`、`"keep_alive_timeout"`、`"max_body_size"`、`"max_static_file_size"`、`"file_cache_max_entries"`、`"max_connections"`、`"heartbeat_interval"`、`"slave_spawn_timeout"`、`"slave_keep_alive_timeout"`、`"master_worker_count"`、`"master_dispatch_retry"`，返回 `this`。多进程模式由 `set_master`/`set_slave` 启用，不通过此处的键配置。
 
 * `bind_page(url : string, path : string)`
   将某 URL 绑定到 `wwwroot/path`，当请求到该 URL 时返回该文件内容。
@@ -235,22 +237,22 @@ Master 分配 `rank`：先尝试使用 `deprecated_rank`（回收的编号），
 * `listen(port : integer)`
   启动单进程模式，并在本地监听 `port`。
 
-* `bind_proxy(prefix : string, target : string, timeout_ms : number)`
+* `bind_proxy(prefix : string, target : string, timeout_ms : integer)`
   将 `prefix` 开头的 URL 代理转发到 `target`（如 `"http://127.0.0.1:3000"`）。
   转发时保留原始请求头，但会过滤 hop-by-hop 头（`Host`、`Connection`、`Content-Length`、`Transfer-Encoding`、`Keep-Alive`、`Proxy-*`、`TE`、`Trailer`、`Upgrade` 等由 `http_request` 内部管理，不透传）；同时**注入 `X-Forwarded-For: <客户端真实 IP>`**（客户端伪造的同名头会被丢弃后重写），后端据此可获得真实来源地址而非代理自身 IP。
 
 * `stop()`
-  优雅关闭服务器：停止所有 worker、释放 async_guard、关闭 acceptor。
+  优雅关闭服务器：标记所有 worker 退出、关闭 acceptor 和 Socket，通知所有纤程检查退出标志。资源释放（thread_pool、async_guard）在 `run()` 的事件循环退出后统一执行，避免从 handler 内调用 `stop()` 时纤程在 foreach 迭代中访问已释放的 `worker_list` 导致崩溃。可重复调用（重入安全）。
 
-* `run()`
-  启动事件循环（`listen` 或 `set_master` 后调用）。
+
+* `set_optimal_scheduling(policy : string)`
+  设置纤程调度策略，影响事件循环在恢复休眠 Worker 纤程时的反压行为。推荐在 `run()`/`poll()` 前调用，可选值：`"responsive"`（低延迟，适合轮询模式）、`"balanced"`（默认）、`"throughput"`、`"efficient"`。
 
 * `poll()`
-  启动服务（非阻塞），仅轮询一次。需循环调用才能使服务正常运行。
+  启动服务（非阻塞），仅轮询一次。需循环调用才能使服务正常运行。当所有 Worker 意外终止时会自动标记 `stopped` 并释放资源。
 
 * `run()`
-  启动服务（阻塞），适合守护进程模式。
-
+  启动服务（阻塞），适合守护进程模式。事件循环退出后自动释放 thread_pool、async_guard、worker_list。当所有 Worker 意外终止时会记录日志并退出。
 ---
 
 ## 9. 单进程（simple_worker）与多进程（master/slave）Worker 行为
@@ -263,7 +265,7 @@ Master 分配 `rank`：先尝试使用 `deprecated_rank`（回收的编号），
 
   * Accept Worker：接收新的客户端连接并把 `http_conn` 放入 `conn_list`。
   * Request Worker：从 `conn_list` 中挑选一个处于 `state == 0` 的 `http_conn`，读取 header 并把 `session` push 到 `request_queue`。
-  * Dispatch Worker：为空闲 Slave 分配 `conn->request_queue[conn->request_idx]` 并发送。
+  * Dispatch Worker：为空闲 Slave 分配 `conn->request_queue[conn->request_idx]` 并发送。当无可用 Slave 时，以 10 ms 间隔轮询并每秒记录一次日志。有待处理工作时使用 `fiber.yield()` 快速重新调度，否则使用 `fiber.sleep_for(FAST_POLL_MS)`。
   * Response Worker：负责把 Slave 返回的响应写回客户端 socket，并在必要时关闭连接与清理。
 
 * **slave_worker**（Slave）
@@ -308,7 +310,7 @@ Master 分配 `rank`：先尝试使用 `deprecated_rank`（回收的编号），
 * `set_timeout_ms(ms)` — 设置每个异步 I/O 操作的超时（毫秒），`null` 表示无超时。
 * `set_tls_options(options)` — 设置 TLS 选项（`{"trust_mode": "auto"}` 等）。
 * `parse_url(url)` — 解析 URL，返回 `{scheme, host, port, path}.to_hash_map()`。
-* `connect_target(target)` — 解析目标并建立 TCP/TLS 连接，首次调用时创建内部 `async.work_guard` 以保持 io_context 存活。
+* `connect_target(target)` — 接收 `parse_url` 返回的 `hash_map`（非 URL 字符串）并建立 TCP/TLS 连接，首次调用时创建内部 `async.work_guard` 以保持 io_context 存活。
 * `http_request(method, url, headers, body)` — 发起 HTTP 请求，返回 `{status_code, headers, body}.to_hash_map()` 或 `null`。
 * `post(url, headers, body)` — POST 快捷方法，等价于 `http_request("POST", ...)`。
 * `close()` — 关闭底层 socket（`safe_shutdown`）。
@@ -318,13 +320,14 @@ Master 分配 `rank`：先尝试使用 `deprecated_rank`（回收的编号），
 兼容 OpenAI / DeepSeek 等 Chat Completions API 的客户端：
 
 * `set_api_key(key)` / `set_base(url)` / `set_model(name)` — 配置认证、endpoint、模型。
+* `request(endpoint, payload)` — 对任意 API 端点（如 `/models`、`/embeddings`）发起通用请求，`chat()` 即基于此实现。
 * `message(role, content)` — 创建 `{role, content}.to_hash_map()` 消息。
 * `chat(messages)` — 调用 `/chat/completions`，返回 JSON 解析后的 `hash_map` 或 `null`。
 * `chat_text(messages)` — 调用 `chat()` 并提取 `response.choices[0].message.content`。
 
 默认值：`api_base = "https://api.openai.com/v1"`，`model = "gpt-4o-mini"`。
 
-* `local_addr()`：使用 UDP connect 到 `8.8.8.8:53` 来探测本机公网/本地出口地址（不发送数据，只用 socket local endpoint）。
+* `local_addr()`：使用 UDP connect 到 `8.8.8.8:53` 来探测本机公网/本地出口地址（不发送数据，只用 socket local endpoint）。无可用路由（隔离网络/无默认网关）时回退返回 `127.0.0.1`。
 
 ---
 
@@ -375,7 +378,7 @@ slave.set_slave("127.0.0.1", 9000)
 * **POST Body 处理**：Master/Slave 之间传输 POST Body 时依赖 `content_length`，若客户端或中间链路错误导致长度不匹配，会引发阻塞或提前 EOF，要在应用层做好验证（如 Content-Length 校验）。
 * **版本兼容**：Master 与 Slave 的 `server_version` 必须一致，握手会校验版本号；当升级版本时请同时升级 Master/Slave。
 * **资源限制**：`max_connections` / `worker_count` / `master_worker_count` 应根据机器资源和负载曲线调整，避免出现大量 socket backlog 或内存耗尽。
-* **异常恢复**：Master 会在 Slave 出现错误或心跳失败时把该 Slave 标记为 `-1` 并尝试回收其 rank，以便后续新 Slave 使用；Slave 端在崩溃后会循环重连 Master（`slave_worker` 有短时 delay 重试）。
+* **异常恢复**：Master 会在 Slave 出现错误或心跳失败时把该 Slave 标记为 `-1` 并尝试回收其 rank，以便后续新 Slave 使用；Slave 端在崩溃后会循环重连 Master（`slave_worker` 使用 `fiber.sleep_for(ERROR_RECOVERY_MS)`（100 ms）重试）。
 
 ## 14. 常见问题与调优建议
 
@@ -387,7 +390,7 @@ slave.set_slave("127.0.0.1", 9000)
 
 * **性能调优建议**
 
-  * `worker_count` 控制可同时服务的活动/keep-alive 连接数量，默认为 64。高并发部署仍应根据内存、keep-alive 时间和后端延迟调整。不建议无限制调高——每个 worker fiber 持有 accept 操作的异步状态。
+  * `worker_count` 控制可同时服务的活动/keep-alive 连接数量，默认为 32。高并发部署仍应根据内存、keep-alive 时间和后端延迟调整。不建议无限制调高——每个 worker fiber 持有 accept 操作的异步状态。
   * Master 模式下可以单独调整 `master_worker_count` 以改善 Master 对高并发连接的处理能力。同时，`max_connections` 也需要相应更改，防止大量连接排队的情况。
   * 由于 NetUtils 依赖 Master 节点进行分发，过多的 Slave 节点也会增加系统资源和调度的开销，一般可以取 2~8。
   * 调整 `max_keep_alive`、`keep_alive_timeout` 平衡连接复用与资源占用。

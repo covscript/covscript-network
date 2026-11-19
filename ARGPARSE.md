@@ -95,7 +95,7 @@ parser.set_defaults("output", "out.txt")
 parser.add_option("--verbose", true, false, "Enable verbose output")
 parser.set_option_alias("--verbose", "-v")
 
-parser.add_option("--port", false, true, "Port number")
+parser.add_option("--port", false, false, "Port number")
 parser.set_defaults("--port", 8080)
 parser.set_option_alias("--port", "-p")
 

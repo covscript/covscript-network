@@ -110,6 +110,12 @@ function echo_handler(srv, session)
     session.send_response("200 OK", body, "text/plain")
 end
 
+# Responds with a body containing the literal text "Connection: keep-alive"
+# to verify master-side header rewriting cannot corrupt response bodies.
+function literal_handler(srv, session)
+    session.send_response("200 OK", "marker Connection: keep-alive end", "text/plain")
+end
+
 # ============================================================
 # M01 -- Multi-process POST
 # ============================================================
@@ -361,6 +367,54 @@ check("M05-04: handler called", g_called)
 
 client5.close()
 s5.stop(); m5.stop(); s5 = null; m5 = null
+
+# ============================================================
+# M06 -- Keep-alive header rewrite must not corrupt the body
+# ============================================================
+# When a connection's keep-alive is disabled, the master rewrites the
+# Connection header in the slave's response. That rewrite must be scoped
+# to the header section: bodies containing the literal text
+# "Connection: keep-alive" (proxy/echo endpoints) must pass through
+# untouched.
+section("M06: header rewrite does not corrupt body")
+
+g_called = false; g_path = ""; g_body = ""
+
+var http6 = alloc_port()
+var slave6 = alloc_port()
+system.out.println("M06 HTTP=" + to_string(http6) + " Slave=" + to_string(slave6))
+
+var m6 = new netutils.http_server
+m6.set_config({"thread_count": 2, "worker_count": 2, "max_keep_alive": 2}.to_hash_map())
+m6.bind_func("/text", literal_handler)
+m6.set_master(slave6)
+m6.listen(http6)
+
+var s6 = new netutils.http_server
+s6.set_config({"thread_count": 2, "worker_count": 2}.to_hash_map())
+s6.bind_func("/text", literal_handler)
+s6.set_slave("127.0.0.1", slave6)
+
+drive_both_cycles(m6, s6, 20)
+
+var client6 = new tcp.socket
+client6.connect(tcp.endpoint("127.0.0.1", http6))
+check("M06-01: client connected", client6.is_open())
+# Connection: close disables keep-alive on this connection, which triggers
+# the master-side header rewrite path.
+client6.write("GET /text HTTP/1.1\r\nHost: 127.0.0.1:" + to_string(http6) + "\r\nConnection: close\r\n\r\n")
+
+if !drive_until_data(client6, m6, s6, 5000)
+    check("M06-02: response received (timed out)", false)
+else
+    var r6 = drain_response(client6, "marker", m6, s6, 2000)
+    check("M06-02: response received", !r6.empty())
+    check("M06-03: body literal preserved", r6.find("marker Connection: keep-alive end", 0) != -1)
+    check("M06-04: connection closed in header", r6.find("Connection: close", 0) != -1)
+end
+
+client6.close()
+s6.stop(); m6.stop(); s6 = null; m6 = null
 
 # ============================================================
 # Results

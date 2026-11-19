@@ -231,7 +231,7 @@ server = null
 check("S05-01: server resources released", server == null)
 
 # ============================================================
-# S06 -- Default worker_count is 64
+# S06 -- Default worker_count matches the configured constant
 # ============================================================
 section("S06: default worker_count")
 
@@ -255,7 +255,7 @@ if srv7_port == 0
 else
     var srv7 = new netutils.http_server
     srv7.set_config({"thread_count": 2}.to_hash_map())
-    # Use default worker_count (64) — must handle 8 concurrent connections
+    # Use default worker_count (32) — must handle 8 concurrent connections
 
     var srv7_call_count = 0
     function srv7_handler(srv, session)
@@ -300,8 +300,97 @@ else
     foreach s in sockets
         s.close()
     end
+    # Graceful stop() (closes acceptors/connections, joins the event loop)
+    # then release references so threads exit before process shutdown.
+    srv7.stop()
     srv7.acceptor = null
+    srv7.async_guard = null
+    srv7.thread_pool = null
+    srv7.worker_list = null
     srv7 = null
+end
+
+# ============================================================
+# S08 -- static file cache limits: oversized file -> 413
+# ============================================================
+section("S08: static file size limit")
+
+# Serve the repo's own csbuild/ directory: network.json (~229B) fits under
+# the 250-byte cap, netutils.json (~314B) exceeds it.
+var srv8_port = find_free_port()
+if srv8_port == 0
+    check("S08-00: find free port", false)
+else
+    var srv8 = new netutils.http_server
+    srv8.set_config({"thread_count": 1, "worker_count": 1, "wwwroot": "csbuild", "max_static_file_size": 250, "file_cache_max_entries": 2}.to_hash_map())
+    check_eq("S08-01: max_static_file_size configured", srv8.max_static_file_size, 250)
+    check_eq("S08-02: file_cache_max_entries configured", srv8.file_cache_max_entries, 2)
+    srv8.listen(srv8_port)
+
+    var i8 = 0
+    while i8 < 10
+        srv8.poll()
+        async.poll_once()
+        i8 += 1
+    end
+
+    # Local request helper: drive srv8 itself (the shared drive_server()
+    # helper is bound to the earlier "server" variable, released in S05).
+    function srv8_get(path)
+        var c = new tcp.socket
+        c.connect(tcp.endpoint("127.0.0.1", srv8_port))
+        c.write("GET " + path + " HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
+        var resp = ""
+        var start = runtime.time()
+        while runtime.time() - start < 5000
+            var n = c.available()
+            if n > 0
+                resp += c.receive(n)
+                if resp.find("\r\n\r\n", 0) != -1
+                    # Headers in; drain the rest briefly for the body.
+                    var t2 = runtime.time()
+                    while runtime.time() - t2 < 300
+                        var m = c.available()
+                        if m > 0
+                            resp += c.receive(m)
+                        else
+                            runtime.delay(5)
+                        end
+                        srv8.poll()
+                        async.poll_once()
+                    end
+                    break
+                end
+            end
+            srv8.poll()
+            async.poll_once()
+            runtime.delay(5)
+        end
+        c.close()
+        return resp
+    end
+
+    # Oversized file -> 413
+    var r8a = srv8_get("/netutils.json")
+    check("S08-03: oversized static file rejected with 413", r8a.find("413", 0) != -1)
+
+    # Small file -> 200 with content
+    var r8b = srv8_get("/network.json")
+    check("S08-04: file under the cap served with 200", r8b.find("200 OK", 0) != -1)
+    check("S08-05: served body has expected content", r8b.find("network", 0) != -1)
+
+    # Missing file still 404
+    var r8c = srv8_get("/missing.json")
+    check("S08-06: missing file still 404", r8c.find("404", 0) != -1)
+
+    # Graceful stop() (closes acceptors/connections, joins the event loop)
+    # then release references so threads exit before process shutdown.
+    srv8.stop()
+    srv8.acceptor = null
+    srv8.async_guard = null
+    srv8.thread_pool = null
+    srv8.worker_list = null
+    srv8 = null
 end
 
 # Results

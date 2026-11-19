@@ -258,36 +258,60 @@ namespace cs_impl {
 			}
 
 #ifdef _WIN32
+			// Decoded certificates from the Windows system certificate stores,
+			// enumerated ONCE per process. Each TLS connection up-refs these
+			// into its own context instead of re-walking the stores and
+			// re-decoding every certificate on every handshake.
+			struct windows_cert_cache {
+				std::vector<X509 *> certs;   // owned; intentionally leaked at process exit
+				std::vector<std::string> loaded_sources;
+				std::vector<std::string> failed_sources;  // pre-formatted "src (reason)"
+
+				windows_cert_cache()
+				{
+					// Load from multiple Windows system certificate stores to cover
+					// enterprise and platform-managed chains.
+					const char *stores[] = {"ROOT", "CA", "AuthRoot"};
+					for (const auto *store_name : stores) {
+						HCERTSTORE hStore = CertOpenSystemStoreA(0, store_name);
+						if (!hStore) {
+							failed_sources.push_back(std::string("windows:") + store_name +
+							                         " (failed to open " + store_name + " cert store)");
+							continue;
+						}
+						PCCERT_CONTEXT pCert = nullptr;
+						std::size_t decoded = 0;
+						while ((pCert = CertEnumCertificatesInStore(hStore, pCert)) != nullptr) {
+							const unsigned char *enc = pCert->pbCertEncoded;
+							X509 *x509 = d2i_X509(nullptr, &enc, static_cast<long>(pCert->cbCertEncoded));
+							if (x509) {
+								certs.push_back(x509);
+								++decoded;
+							}
+						}
+						if (decoded > 0)
+							loaded_sources.push_back(std::string("windows:") + store_name);
+						else
+							failed_sources.push_back(std::string("windows:") + store_name +
+							                         " (no certificates decoded from " + store_name + " store)");
+						CertCloseStore(hStore, 0);
+					}
+				}
+			};
+
 			static void load_windows_root_certs(asio::ssl::context &ctx, trust_load_report &report)
 			{
-				// Load from multiple Windows system certificate stores to cover
-				// enterprise and platform-managed chains.
-				const char *stores[] = {"ROOT", "CA", "AuthRoot"};
-				for (const auto *store_name : stores) {
-					HCERTSTORE hStore = CertOpenSystemStoreA(0, store_name);
-					if (!hStore) {
-						report.mark_failed(std::string("windows:") + store_name,
-						                   "failed to open " + std::string(store_name) + " cert store");
-						continue;
-					}
-					PCCERT_CONTEXT pCert = nullptr;
-					bool loaded_any = false;
-					while ((pCert = CertEnumCertificatesInStore(hStore, pCert)) != nullptr) {
-						const unsigned char *enc = pCert->pbCertEncoded;
-						X509 *x509 = d2i_X509(nullptr, &enc, static_cast<long>(pCert->cbCertEncoded));
-						if (x509) {
-							if (X509_STORE_add_cert(SSL_CTX_get_cert_store(ctx.native_handle()), x509))
-								loaded_any = true;
-							X509_free(x509);
-						}
-					}
-					if (loaded_any)
-						report.mark_loaded(std::string("windows:") + store_name);
-					else
-						report.mark_failed(std::string("windows:") + store_name,
-						                   "no certificates decoded from " + std::string(store_name) + " store");
-					CertCloseStore(hStore, 0);
-				}
+				// Magic-static init is thread-safe (C++11+). The cache is never
+				// destroyed: freeing X509s during static destruction could race
+				// OpenSSL's own atexit cleanup; the OS reclaims them on exit.
+				static const windows_cert_cache *cache = new windows_cert_cache();
+				X509_STORE *store = SSL_CTX_get_cert_store(ctx.native_handle());
+				for (X509 *cert : cache->certs)
+					X509_STORE_add_cert(store, cert);  // increments the cert refcount
+				for (const auto &src : cache->loaded_sources)
+					report.mark_loaded(src);
+				for (const auto &src : cache->failed_sources)
+					report.failed_sources.push_back(src);
 			}
 #endif
 

@@ -20,6 +20,7 @@ for %%t in (
     tests\test_utils.csc
     tests\test_tcp_sync.csc
     tests\test_udp.csc
+    tests\test_ipv6.csc
     tests\test_http_roundtrip.csc
     tests\test_http_client.csc
     tests\test_http_server.csc

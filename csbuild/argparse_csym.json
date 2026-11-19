@@ -3,7 +3,7 @@
     "Name": "argparse.csym",
     "Info": "Argument Parser cSYM Module",
     "Author": "CovScript Organization",
-    "Version": "1.1",
+    "Version": "1.2",
     "Target": "argparse.csym",
     "Dependencies": [
         "argparse"

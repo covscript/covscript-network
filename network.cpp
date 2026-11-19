@@ -25,23 +25,46 @@
 #include <network.hpp>
 #include <chrono>
 #include <optional>
+#include <cctype>
 #include <cstdio>
+#include <functional>
 #include <thread>
 #include <memory>
 #include <mutex>
 #include <regex>
 #include <array>
 
+#if COVSCRIPT_ABI_VERSION < 260701
+#error "CovScript SDK version 260701 or higher is required for this extension."
+#endif
+
+// Each extension DLL statically links the SDK, so fiber_context::current()
+// is a per-DLL thread-local copy that never sees the host's fiber chain.
+// The host-routed current_process (dll.hpp accessor) exposes the real chain
+// via process->fiber_cxt; mirror it before querying fiber state so that
+// within()/yield()/sleep_for() operate on the host's running fiber.
+inline void cs_sync_fiber_context()
+{
+	if (cs::current_process != nullptr && cs::current_process->fiber_cxt != nullptr)
+		cs::fiber_context::current()->stack = cs::current_process->fiber_cxt->stack;
+}
+
+inline void cs_runtime_sleep_for(std::size_t ms)
+{
+	cs_sync_fiber_context();
+	if (!cs::fiber::within())
+		std::this_thread::sleep_for(std::chrono::milliseconds(ms));
+	else
+		cs::fiber::sleep_for(ms);
+}
+
 inline void cs_runtime_yield()
 {
-#if COVSCRIPT_ABI_VERSION >= 250908
-	if (cs::current_process->fiber_stack.empty())
-		std::this_thread::sleep_for(std::chrono::milliseconds(1));
+	cs_sync_fiber_context();
+	if (!cs::fiber::within())
+		cs_runtime_sleep_for(1);
 	else
 		cs::fiber::yield();
-#else
-	std::this_thread::sleep_for(std::chrono::milliseconds(1));
-#endif
 }
 
 namespace network_cs_ext {
@@ -154,6 +177,11 @@ namespace network_cs_ext {
 	{
 		if (s.size() != NETWORK_FIXED_HEX_SIZE)
 			throw cs::lang_error("Invalid byte string size, must be " + std::to_string(NETWORK_FIXED_HEX_SIZE) + ".");
+		// std::stoull would accept a leading sign ("-" wraps modulo 2^64) or
+		// skip leading whitespace; require a hex digit so the framing helpers
+		// stay symmetric with to_fixed_hex, which rejects negative numbers.
+		if (s.empty() || !std::isxdigit(static_cast<unsigned char>(s.front())))
+			throw cs::lang_error("Invalid hex string: must begin with a hexadecimal digit (signs and whitespace are not allowed).");
 		std::size_t idx = 0;
 		unsigned long long val = 0;
 		try {
@@ -169,7 +197,12 @@ namespace network_cs_ext {
 
 	string host_name()
 	{
-		return asio::ip::host_name();
+		try {
+			return asio::ip::host_name();
+		}
+		catch (const std::exception &e) {
+			throw lang_error(e.what());
+		}
 	}
 
 	string get_last_global_ssl_trust_report()
@@ -198,8 +231,13 @@ namespace network_cs_ext {
 		{
 			if (port < 0 || port > NETWORK_MAX_PORT)
 				throw lang_error("Port number must be in range [0, " + std::to_string(NETWORK_MAX_PORT) + "].");
-			else
+			try {
 				return var::make<endpoint_t>(cs_impl::network::tcp::endpoint(host, static_cast<unsigned short>(port)));
+			}
+			catch (const std::exception &e) {
+				throw lang_error("Invalid IP address \"" + host + "\": " + e.what() +
+				                 " endpoint() accepts numeric addresses only; use resolve() to resolve host names.");
+			}
 		}
 
 		var endpoint_v4(number port)
@@ -298,17 +336,32 @@ namespace network_cs_ext {
 
 			void set_opt_reuse_address(socket_t &sock, bool value)
 			{
-				sock->set_option(asio::ip::tcp::socket::reuse_address(value));
+				try {
+					sock->set_option(asio::ip::tcp::socket::reuse_address(value));
+				}
+				catch (const std::exception &e) {
+					throw lang_error(e.what());
+				}
 			}
 
 			void set_opt_no_delay(socket_t &sock, bool value)
 			{
-				sock->set_option(asio::ip::tcp::no_delay(value));
+				try {
+					sock->set_option(asio::ip::tcp::no_delay(value));
+				}
+				catch (const std::exception &e) {
+					throw lang_error(e.what());
+				}
 			}
 
 			void set_opt_keep_alive(socket_t &sock, bool value)
 			{
-				sock->set_option(asio::socket_base::keep_alive(value));
+				try {
+					sock->set_option(asio::socket_base::keep_alive(value));
+				}
+				catch (const std::exception &e) {
+					throw lang_error(e.what());
+				}
 			}
 
 			number available(socket_t &sock)
@@ -435,8 +488,13 @@ namespace network_cs_ext {
 		{
 			if (port < 0 || port > NETWORK_MAX_PORT)
 				throw lang_error("Port number must be in range [0, " + std::to_string(NETWORK_MAX_PORT) + "].");
-			else
+			try {
 				return var::make<endpoint_t>(cs_impl::network::udp::endpoint(host, static_cast<unsigned short>(port)));
+			}
+			catch (const std::exception &e) {
+				throw lang_error("Invalid IP address \"" + host + "\": " + e.what() +
+				                 " endpoint() accepts numeric addresses only; use resolve() to resolve host names.");
+			}
 		}
 
 		var endpoint_v4(number port)
@@ -540,12 +598,22 @@ namespace network_cs_ext {
 
 			void set_opt_reuse_address(socket_t &sock, bool value)
 			{
-				sock->set_option(asio::ip::udp::socket::reuse_address(value));
+				try {
+					sock->set_option(asio::ip::udp::socket::reuse_address(value));
+				}
+				catch (const std::exception &e) {
+					throw lang_error(e.what());
+				}
 			}
 
 			void set_opt_broadcast(socket_t &sock, bool value)
 			{
-				sock->set_option(asio::socket_base::broadcast(value));
+				try {
+					sock->set_option(asio::socket_base::broadcast(value));
+				}
+				catch (const std::exception &e) {
+					throw lang_error(e.what());
+				}
 			}
 
 			number available(socket_t &sock)
@@ -832,6 +900,7 @@ namespace network_cs_ext {
 		bool wait_impl(const state_t &state, std::optional<std::chrono::milliseconds> timeout)
 		{
 			auto start = std::chrono::steady_clock::now();
+			int spins = 0;
 			while (true) {
 				get_global_settings().poll();
 				if (state->has_done.load(std::memory_order_acquire))
@@ -840,7 +909,17 @@ namespace network_cs_ext {
 					if (std::chrono::steady_clock::now() - start >= *timeout)
 						return state->has_done.load(std::memory_order_acquire) && !state->ec;
 				}
-				cs_runtime_yield();
+				// Graduated wait: fast-spin with yield() for sub-ms
+				// completions, then escalate to sleep_for() to avoid
+				// busy-waiting on longer operations.
+				// Keep spins bounded at NETWORK_FAST_SPIN_COUNT; once
+				// reached, the loop stays in sleep-based backoff.
+				if (spins <= NETWORK_FAST_SPIN_COUNT)
+					++spins;
+				if (spins <= NETWORK_FAST_SPIN_COUNT)
+					cs_runtime_yield();
+				else
+					cs_runtime_sleep_for(NETWORK_WAIT_SLEEP_MS);
 			}
 		}
 
@@ -857,18 +936,7 @@ namespace network_cs_ext {
 		static namespace_t async_ext = make_shared_namespace<name_space>();
 
 		template <typename BeginOperation>
-		void begin_tcp_async_io(BeginOperation &&begin_operation)
-		{
-			try {
-				begin_operation();
-			}
-			catch (const std::exception &e) {
-				throw cs::lang_error(e.what());
-			}
-		}
-
-		template <typename BeginOperation>
-		void begin_udp_async_io(BeginOperation &&begin_operation)
+		void begin_async_io(BeginOperation &&begin_operation)
 		{
 			try {
 				begin_operation();
@@ -892,7 +960,7 @@ namespace network_cs_ext {
 		{
 			state_t state = std::make_shared<state_type>();
 			state->init = true;
-			begin_tcp_async_io([&sock] { sock->begin_async_connect(); });
+			begin_async_io([&sock] { sock->begin_async_connect(); });
 			try {
 				acceptor->async_accept(sock->get_raw(), [sock, state](const asio::error_code &ec) {
 					state->ec = ec;
@@ -911,7 +979,7 @@ namespace network_cs_ext {
 		{
 			state_t state = std::make_shared<state_type>();
 			state->init = true;
-			begin_tcp_async_io([&sock] { sock->begin_async_connect(); });
+			begin_async_io([&sock] { sock->begin_async_connect(); });
 			try {
 				sock->get_raw().async_connect(ep, [sock, state](const asio::error_code &ec) {
 					state->ec = ec;
@@ -961,7 +1029,7 @@ namespace network_cs_ext {
 		{
 			if (state->init && !state->has_done.load(std::memory_order_acquire))
 				throw cs::lang_error("Last asynchronous operation have not done yet.");
-			begin_tcp_async_io([&sock] { sock->begin_async_read(); });
+			begin_async_io([&sock] { sock->begin_async_read(); });
 			const bool previous_init = state->init;
 			const bool previous_is_read = state->is_read;
 			const bool previous_has_done = state->has_done.load(std::memory_order_relaxed);
@@ -995,13 +1063,136 @@ namespace network_cs_ext {
 			}
 		}
 
+		// Custom error domain so read_until_limited size-limit violations
+		// surface a meaningful message through state.get_error().
+		enum class network_error { read_until_limit_exceeded = 1 };
+
+		class network_error_category : public asio::error_category {
+		public:
+			const char *name() const noexcept override
+			{
+				return "cs.network";
+			}
+			std::string message(int ev) const override
+			{
+				if (ev == static_cast<int>(network_error::read_until_limit_exceeded))
+					return "read_until size limit exceeded";
+				return "unknown network error";
+			}
+		};
+
+		asio::error_code make_network_error(network_error err)
+		{
+			static const network_error_category category;
+			return asio::error_code(static_cast<int>(err), category);
+		}
+
+		// Bounded variant of read_until. Instead of asio::async_read_until
+		// (which buffers without limit until the pattern arrives), this reads
+		// incrementally and fails with network_error::read_until_limit_exceeded
+		// once max_bytes are buffered without a match. Completion semantics
+		// otherwise match read_until: bytes_transferred covers up to and
+		// including the pattern, and any bytes after the pattern remain in the
+		// buffer for get_buffer()/available().
+		//
+		// Completion is ALWAYS dispatched through the event loop (posted), even
+		// when the pattern is already buffered -- never synchronously. This
+		// preserves the per-operation yield rhythm of asio::async_read_until,
+		// which the fiber-based servers in netutils rely on to interleave
+		// connection handling between requests.
+		struct read_until_op : std::enable_shared_from_this<read_until_op> {
+			tcp::socket_t sock;
+			state_t state;
+			std::string pattern;
+			std::size_t max_bytes = 0;
+
+			void finish(const asio::error_code &ec, std::size_t bytes)
+			{
+				state->bytes_transferred = bytes;
+				state->ec = ec;
+				sock->end_async_read();
+				state->has_done.store(true, std::memory_order_release);
+			}
+			void finish_deferred(const asio::error_code &ec, std::size_t bytes)
+			{
+				auto self = shared_from_this();
+				asio::post(cs_impl::network::get_io_context(),
+				           [self, ec, bytes] { self->finish(ec, bytes); });
+			}
+			void run()
+			{
+				// Search the currently buffered data for the pattern.
+				std::string content(asio::buffers_begin(state->buffer.data()),
+				                    asio::buffers_end(state->buffer.data()));
+				std::size_t pos = content.find(pattern);
+				if (pos != std::string::npos) {
+					finish_deferred(asio::error_code(), pos + pattern.size());
+					return;
+				}
+				if (state->buffer.size() >= max_bytes) {
+					finish_deferred(make_network_error(network_error::read_until_limit_exceeded), 0);
+					return;
+				}
+				std::size_t room = max_bytes - state->buffer.size();
+				std::size_t to_read = (std::min)(std::size_t(8192), room);
+				auto self = shared_from_this();
+				auto on_read = [self](const asio::error_code &ec, std::size_t bytes) {
+					self->state->buffer.commit(bytes);
+					if (ec) {
+						self->finish(ec, 0);
+						return;
+					}
+					self->run();
+				};
+				if (sock->is_ssl())
+					sock->get_tls_raw().async_read_some(state->buffer.prepare(to_read),
+					                                    asio::bind_executor(sock->get_tls_strand(), on_read));
+				else
+					sock->get_raw().async_read_some(state->buffer.prepare(to_read), on_read);
+			}
+		};
+
+		void read_until_limited(tcp::socket_t &sock, state_t &state, const std::string &pattern, number max_bytes_var)
+		{
+			auto max_bytes = checked_io_buffer_size(max_bytes_var);
+			if (pattern.empty())
+				throw cs::lang_error("read_until_limited pattern must not be empty.");
+			if (state->init && !state->has_done.load(std::memory_order_acquire))
+				throw cs::lang_error("Last asynchronous operation have not done yet.");
+			begin_async_io([&sock] { sock->begin_async_read(); });
+			const bool previous_init = state->init;
+			const bool previous_is_read = state->is_read;
+			const bool previous_has_done = state->has_done.load(std::memory_order_relaxed);
+			const asio::error_code previous_ec = state->ec;
+			state->init = true;
+			state->is_read = true;
+			state->has_done = false;
+			state->ec.clear();
+			try {
+				auto op = std::make_shared<read_until_op>();
+				op->sock = sock;
+				op->state = state;
+				op->pattern = pattern;
+				op->max_bytes = max_bytes;
+				op->run();
+			}
+			catch (...) {
+				sock->end_async_read();
+				state->init = previous_init;
+				state->is_read = previous_is_read;
+				state->ec = previous_ec;
+				state->has_done.store(previous_has_done, std::memory_order_release);
+				throw;
+			}
+		}
+
 		state_t read(tcp::socket_t &sock, number requested_size)
 		{
 			auto n = checked_io_buffer_size(requested_size);
 			state_t state = std::make_shared<state_type>();
 			state->init = true;
 			state->is_read = true;
-			begin_tcp_async_io([&sock] { sock->begin_async_read(); });
+			begin_async_io([&sock] { sock->begin_async_read(); });
 			try {
 				auto on_done = [sock, state](const asio::error_code &ec, std::size_t bytes) {
 					state->buffer.commit(bytes);
@@ -1027,7 +1218,7 @@ namespace network_cs_ext {
 		{
 			state_t state = std::make_shared<state_type>();
 			state->init = true;
-			begin_tcp_async_io([&sock] { sock->begin_async_write(); });
+			begin_async_io([&sock] { sock->begin_async_write(); });
 			try {
 				std::ostream os(&state->buffer);
 				os.exceptions(std::ostream::badbit | std::ostream::failbit);
@@ -1058,7 +1249,7 @@ namespace network_cs_ext {
 			state->init = true;
 			state->is_udp = true;
 			state->is_read = true;
-			begin_udp_async_io([&sock] { sock->begin_async_receive(); });
+			begin_async_io([&sock] { sock->begin_async_receive(); });
 			try {
 				sock->get_raw().async_receive_from(state->buffer.prepare(n), state->udp_endpoint,
 				[sock, state](const asio::error_code &ec, std::size_t bytes) {
@@ -1082,7 +1273,7 @@ namespace network_cs_ext {
 			state->init = true;
 			state->is_udp = true;
 			state->udp_endpoint = ep;
-			begin_udp_async_io([&sock] { sock->begin_async_send(); });
+			begin_async_io([&sock] { sock->begin_async_send(); });
 			// Pass streambuf data() directly as ConstBufferSequence to avoid
 			// truncation when the streambuf spans multiple internal blocks.
 			try {
@@ -1173,6 +1364,7 @@ namespace network_cs_ext {
 		.add_var("connect", make_cni(async::connect))
 		.add_var("connect_ssl", make_cni(async::connect_ssl))
 		.add_var("read_until", make_cni(async::read_until))
+		.add_var("read_until_limited", make_cni(async::read_until_limited))
 		.add_var("read", make_cni(async::read))
 		.add_var("write", make_cni(async::write))
 		.add_var("receive_from", make_cni(async::receive_from))
@@ -1266,11 +1458,15 @@ bool network_cs_ext::tcp::socket::safe_shutdown(socket_t &sock)
 		sock->get_raw().cancel(ignored);
 		network_cs_ext::async::restart();
 		auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(NETWORK_SAFE_SHUTDOWN_TIMEOUT_MS);
+		int spins = 0;
 		while (sock->async_jobs.load(std::memory_order_acquire) > 0) {
 			if (std::chrono::steady_clock::now() >= deadline)
 				break;
 			network_cs_ext::async::get_global_settings().poll();
-			cs_runtime_yield();
+			if (++spins <= NETWORK_FAST_SPIN_COUNT)
+				cs_runtime_yield();
+			else
+				cs_runtime_sleep_for(NETWORK_WAIT_SLEEP_MS);
 		}
 		try {
 			sock->begin_draining_exclusive();
@@ -1297,13 +1493,17 @@ bool network_cs_ext::tcp::socket::safe_shutdown(socket_t &sock)
 		sock->get_raw().cancel(ignored);
 	}
 	auto drain_dl = std::chrono::steady_clock::now() + std::chrono::milliseconds(NETWORK_SAFE_SHUTDOWN_TIMEOUT_MS);
+	int spins = 0;
 	while (sock->async_jobs.load(std::memory_order_acquire) > 0) {
 		if (std::chrono::steady_clock::now() >= drain_dl) {
 			success = false;
 			break;
 		}
 		network_cs_ext::async::get_global_settings().poll();
-		cs_runtime_yield();
+		if (++spins <= NETWORK_FAST_SPIN_COUNT)
+			cs_runtime_yield();
+		else
+			cs_runtime_sleep_for(NETWORK_WAIT_SLEEP_MS);
 	}
 	if (!success)
 		return false;
@@ -1355,9 +1555,13 @@ bool network_cs_ext::tcp::socket::safe_shutdown(socket_t &sock)
 			else
 				state->done.store(true, std::memory_order_release);
 		}
+		int spins = 0;
 		while (!state->done.load(std::memory_order_acquire)) {
 			network_cs_ext::async::get_global_settings().poll();
-			cs_runtime_yield();
+			if (++spins <= NETWORK_FAST_SPIN_COUNT)
+				cs_runtime_yield();
+			else
+				cs_runtime_sleep_for(NETWORK_WAIT_SLEEP_MS);
 		}
 		if (state->timed_out || (state->ec && state->ec != asio::error::eof))
 			success = false;
@@ -1383,14 +1587,25 @@ bool network_cs_ext::udp::socket::safe_close(socket_t &sock)
 {
 	if (!sock->get_raw().is_open())
 		return true;
+	// Cancel pending operations (e.g. receive_from, which never completes on
+	// its own without an incoming datagram) so their completion handlers fire
+	// and async_jobs can drain, mirroring TCP safe_shutdown.
+	{
+		asio::error_code ignored;
+		sock->get_raw().cancel(ignored);
+	}
 	// Spin until async_jobs drains or timeout expires.
 	auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(NETWORK_SAFE_SHUTDOWN_TIMEOUT_MS);
 	while (std::chrono::steady_clock::now() < deadline) {
+		int spins = 0;
 		while (sock->async_jobs.load(std::memory_order_acquire) > 0) {
 			if (std::chrono::steady_clock::now() >= deadline)
 				break;
 			network_cs_ext::async::get_global_settings().poll();
-			cs_runtime_yield();
+			if (++spins <= NETWORK_FAST_SPIN_COUNT)
+				cs_runtime_yield();
+			else
+				cs_runtime_sleep_for(NETWORK_WAIT_SLEEP_MS);
 		}
 		if (sock->async_jobs.load(std::memory_order_acquire) == 0)
 			break;

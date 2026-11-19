@@ -30,7 +30,7 @@ TLS 连接通过 `ssl_options` 配置信任行为。`ssl_options` 是一个 `has
 
 | 模式 | 说明 |
 |------|------|
-| `"auto"` | 自动检测：先尝试 OpenSSL 默认路径，再尝试环境变量，最后回退到平台特定路径（Windows ROOT 证书库 / Linux 常见 CA 路径 / macOS Homebrew 路径） |
+| `"auto"` | 自动检测：先尝试 OpenSSL 默认路径，再尝试环境变量，最后回退到平台特定路径（Windows 系统证书库 ROOT/CA/AuthRoot / Linux 常见 CA 路径 / macOS Homebrew 路径）。Windows 证书库全进程只枚举一次，后续连接复用缓存 |
 | `"openssl"` | 仅使用 OpenSSL 默认验证路径 + 环境变量 |
 | `"custom"` | 自定义 CA：需要同时提供 `ca_file` 或 `ca_path` |
 | `"insecure"` | 跳过所有证书验证（**仅用于测试，生产环境禁止使用**） |
@@ -80,7 +80,7 @@ sock.connect_ssl("localhost", {"trust_mode": "insecure"}.to_hash_map())
 |------|------|--------|------|
 | `tcp.socket` | `() → socket` | `tcp_socket` | 创建 TCP 套接字 |
 | `tcp.acceptor` | `(ep: endpoint) → acceptor` | `tcp_acceptor` | 创建 TCP 监听器，绑定到指定端点 |
-| `tcp.endpoint` | `(host: string, port: int) → endpoint` | `tcp_endpoint` | 通过主机名和端口创建端点 |
+| `tcp.endpoint` | `(ip: string, port: int) → endpoint` | `tcp_endpoint` | 通过**数字 IP 地址**（如 `"127.0.0.1"`、`"::1"`）和端口创建端点。传入主机名会抛出可捕获异常；解析主机名请用 `tcp.resolve` |
 | `tcp.endpoint_v4` | `(port: int) → endpoint` | `tcp_endpoint` | 创建 IPv4 通配端点（`0.0.0.0:port`） |
 | `tcp.endpoint_v6` | `(port: int) → endpoint` | `tcp_endpoint` | 创建 IPv6 通配端点（`[::]:port`） |
 | `tcp.resolve` | `(host: string, service: string) → array` | `array<endpoint>` | DNS 解析，返回端点列表 |
@@ -104,14 +104,14 @@ sock.connect_ssl("localhost", {"trust_mode": "insecure"}.to_hash_map())
 | `set_opt_reuse_address` | `(value: boolean)` | 设置 `SO_REUSEADDR` 选项 |
 | `set_opt_no_delay` | `(value: boolean)` | 设置 `TCP_NODELAY` 选项（禁用 Nagle 算法） |
 | `set_opt_keep_alive` | `(value: boolean)` | 设置 `SO_KEEPALIVE` 选项 |
-| `available` | `() → int` | 可读取的字节数（非阻塞） |
+| `available` | `() → int` | 可读取的字节数（非阻塞）。TLS 套接字恒返回 `0`：底层只能看到密文字节数，对解密流没有意义，需要判断数据到达时请直接读取 |
 | `peer_closed` | `() → boolean` | 对端是否已关闭连接（非阻塞、非破坏性，使用 1 字节 `MSG_PEEK` 探测）。空闲但存活返回 `false`；收到 FIN 或连接已失效返回 `true`。有异步读挂起时返回 `false`（该读操作自身会暴露 EOF）。TLS 套接字上探测的是底层传输而非解密流 |
 | `receive` | `(max: int) → string` | 读取最多 `max` 字节。阻塞直到至少 1 字节可读 |
 | `read` | `(size: int) → string` | 读取恰好 `size` 字节。阻塞直到全部读完 |
 | `send` | `(data: string) → int` | 发送数据（单次部分写入，返回实际写入字节数）。需完整发送时使用 `write` |
 | `write` | `(data: string)` | 发送数据（保证全部写入，阻塞直到完成） |
 | `shutdown` | `()` | 关闭套接字通信通道。与 `close()` 的区别：`shutdown()` 仅关闭通信，socket 保持打开且资源不释放；`close()` 释放所有资源 |
-| `safe_shutdown` | `() → boolean` | 安全关闭：协作式等待异步操作全部完成后关闭 TLS 和 TCP。成功返回 `true`；关闭过程中发生错误返回 `false`。在 fiber 环境中通过 `poll` + `yield` 协作等待，不阻塞 OS 线程 |
+| `safe_shutdown` | `() → boolean` | 安全关闭：协作式等待异步操作全部完成后关闭 TLS 和 TCP。成功返回 `true`；关闭过程中发生错误返回 `false`。在 fiber 环境中通过 `poll` + 分级等待（`yield` × N，然后 `sleep_for`）协作等待，不阻塞 OS 线程 |
 | `local_endpoint` | `() → endpoint` | 获取本地端点地址 |
 | `remote_endpoint` | `() → endpoint` | 获取远程端点地址 |
 
@@ -143,7 +143,7 @@ sock.connect_ssl("localhost", {"trust_mode": "insecure"}.to_hash_map())
 | 函数 | 签名 | 返回值 | 说明 |
 |------|------|--------|------|
 | `udp.socket` | `() → socket` | `udp_socket` | 创建 UDP 套接字 |
-| `udp.endpoint` | `(host: string, port: int) → endpoint` | `udp_endpoint` | 通过主机名和端口创建端点 |
+| `udp.endpoint` | `(ip: string, port: int) → endpoint` | `udp_endpoint` | 通过**数字 IP 地址**和端口创建端点。传入主机名会抛出可捕获异常；解析主机名请用 `udp.resolve` |
 | `udp.endpoint_v4` | `(port: int) → endpoint` | `udp_endpoint` | 创建 IPv4 通配端点 |
 | `udp.endpoint_v6` | `(port: int) → endpoint` | `udp_endpoint` | 创建 IPv6 通配端点 |
 | `udp.endpoint_broadcast` | `(port: int) → endpoint` | `udp_endpoint` | 创建 IPv4 广播端点 |
@@ -158,7 +158,7 @@ sock.connect_ssl("localhost", {"trust_mode": "insecure"}.to_hash_map())
 | `bind` | `(ep: endpoint)` | 绑定到指定端点 |
 | `connect` | `(ep: endpoint)` | 连接到指定端点（设置默认目标） |
 | `close` | `()` | 关闭套接字。若存在进行中的 I/O 会抛出异常（提示使用 `safe_close()`） |
-| `safe_close` | `() → boolean` | 安全关闭：等待异步操作完成（默认最多 200ms，可在构建时配置）后独占关闭；超时或独占竞争失败返回 `false` |
+| `safe_close` | `() → boolean` | 安全关闭：先取消进行中的异步操作（如挂起的 `receive_from`，其完成处理器会以取消错误触发），等待异步操作排空（默认最多 200ms，可在构建时配置）后关闭；排空超时返回 `false`。这保证挂起接收的套接字总能被关闭，而不会泄漏 |
 | `is_open` | `() → boolean` | 套接字是否打开 |
 | `set_opt_reuse_address` | `(value: boolean)` | 设置 `SO_REUSEADDR` |
 | `set_opt_broadcast` | `(value: boolean)` | 设置 `SO_BROADCAST` |
@@ -210,7 +210,8 @@ sock.connect_ssl("localhost", {"trust_mode": "insecure"}.to_hash_map())
 | `async.connect` | `(sock: tcp_socket, ep: endpoint) → state` | `state` | 异步建立 TCP 连接 |
 | `async.connect_ssl` | `(sock: tcp_socket, host: string, options: var) → state` | `state` | 异步 TLS 握手（socket 必须先建立 TCP 连接） |
 | `async.read` | `(sock: tcp_socket, n: int) → state` | `state` | 异步读取恰好 `n` 字节 |
-| `async.read_until` | `(sock: tcp_socket, state: state, pattern: string)` | - | 异步读取直到匹配 `pattern`。**可重入**：`state` 参数可复用 |
+| `async.read_until` | `(sock: tcp_socket, state: state, pattern: string)` | - | 异步读取直到匹配 `pattern`。**可重入**：`state` 参数可复用。对不发送 `pattern` 的对端，缓冲区会持续增长——处理不可信输入时请改用 `read_until_limited` |
+| `async.read_until_limited` | `(sock: tcp_socket, state: state, pattern: string, max_bytes: int)` | - | `read_until` 的有界版本：缓冲达到 `max_bytes` 仍未匹配时以 "read_until size limit exceeded" 错误完成（`get_error()` 可取），防止内存无限增长。匹配/超限/EOF 语义及 `state` 复用方式与 `read_until` 一致 |
 | `async.write` | `(sock: tcp_socket, data: string) → state` | `state` | 异步写入全部数据 |
 
 ### 异步 UDP 操作
@@ -341,7 +342,7 @@ end
 1. **异步操作生命周期**：异步操作期间 socket 必须保持存活。创建 `work_guard` 可防止事件循环在所有异步操作完成前停止。
 2. **TLS 连接**：同步 `connect_ssl` 方法先建立 TCP 连接再执行 TLS 握手；异步 `async.connect_ssl` 仅执行 TLS 握手（socket 必须先建立 TCP 连接）。握手失败时 SSL 上下文会被自动清理。
 3. **`send` vs `write`**：`send` 执行单次写入并返回实际写入字节数，类似 BSD `send()`；`write` 保证全部写入，类似 POSIX `write()`。需要可靠传输时使用 `write`。
-4. **`shutdown` vs `close` vs `safe_shutdown`**：`shutdown` 关闭通信通道但不释放资源（socket 保持 `is_open()` 为 true）；`close` 立即关闭并释放 TLS 上下文（如有进行中的异步操作会抛出异常）；`safe_shutdown` 协作式等待所有异步操作完成后关闭 TLS 和 TCP。异步任务等待无超时；TLS close-notify 超时默认 5000ms（`NETWORK_TLS_SHUTDOWN_TIMEOUT_MS`）。在 fiber 环境中通过 `poll` + `yield` 协作等待，不阻塞 OS 线程；非 fiber 环境调用线程一直阻塞到关闭完成。推荐在异步场景中使用 `safe_shutdown`。
+4. **`shutdown` vs `close` vs `safe_shutdown`**：`shutdown` 关闭通信通道但不释放资源（socket 保持 `is_open()` 为 true）；`close` 立即关闭并释放 TLS 上下文（如有进行中的异步操作会抛出异常）；`safe_shutdown` 协作式等待所有异步操作完成后关闭 TLS 和 TCP。异步任务等待无超时；TLS close-notify 超时默认 5000ms（`NETWORK_TLS_SHUTDOWN_TIMEOUT_MS`）。在 fiber 环境中通过 `poll` + 分级等待（`yield` × N，然后 `sleep_for`）协作等待，不阻塞 OS 线程；非 fiber 环境调用线程一直阻塞到关闭完成。推荐在异步场景中使用 `safe_shutdown`。
 5. **信任报告**：建议使用 `sock.get_ssl_trust_report()`（每个 socket 独立），而非全局的 `get_last_global_ssl_trust_report()`（线程级别，可能被覆盖）。
 6. **线程安全**：同一 socket 不应并发混合同步和异步操作。异步 API 最多允许一个 pending read/receive 和一个 pending write/send；同方向重叠操作会被拒绝，读写可全双工并行。TLS 异步 handler 绑定到每个 socket 的 strand，可由多个 `async.thread_worker` 安全驱动。
 7. **netutils HTTP 客户端**：`netutils` 提供 `http_client` 类（`http_request` / `post` 方法）和 `openai_client` 子类。TLS 验证通过客户端实例的 `set_tls_options({"trust_mode": "auto"}.to_hash_map())` 控制，不再使用全局 `ssl_verify` 标志。详见 [NETUTILS.md](NETUTILS.md)。

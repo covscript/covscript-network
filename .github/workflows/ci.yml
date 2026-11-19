@@ -273,6 +273,7 @@ jobs:
         run: |
           set -e
           cs tests/test_udp.csc
+          cs tests/test_ipv6.csc
 
       # ------------------------------------------------------------------ #
       # 13. Run HTTP client + server tests                                 #
