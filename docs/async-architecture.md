@@ -521,4 +521,4 @@ UDP 的同步 `receive_from` / `send_to` 使用 `scoped_io_job`，`close` 使用
 | `poll()` / `poll_once()` | 单线程模式的手动事件驱动 |
 | `restart()` | 重启已停止的 io_context (需 `thread_executors==0`) |
 | `safe_shutdown()` | TCP: 先原子设置 draining-exclusive 阻止新 I/O，再协作式等待 async_jobs 清零后关闭（drain 超时 `NETWORK_SAFE_SHUTDOWN_TIMEOUT_MS`，默认 200ms）。TLS close-notify 超时默认 5000ms（`NETWORK_TLS_SHUTDOWN_TIMEOUT_MS`） |
-| `safe_close()` | UDP: 等待 async_jobs=0 后关闭（默认 200ms 超时，通过 `NETWORK_SAFE_SHUTDOWN_TIMEOUT_MS` 配置） |
+| `safe_close()` | UDP: 先 `cancel()` 进行中的异步操作（如挂起的 `receive_from` 以取消错误完成），再等待 async_jobs=0 后关闭（默认 200ms 超时，通过 `NETWORK_SAFE_SHUTDOWN_TIMEOUT_MS` 配置）。这保证挂起接收的套接字总能被关闭 |

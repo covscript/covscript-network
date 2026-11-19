@@ -5,7 +5,7 @@ import network.*, regex
 import codec.json
 
 constant server_name = "CovScript-NetUtils"
-constant server_version = "2.3"
+constant server_version = "2.4"
 
 # ============================================================================
 # Configuration -- override before use
@@ -15,6 +15,8 @@ constant http_client_read_chunk       = 8192       # bytes per client recv() cal
 constant http_max_header_line_size    = 8192       # single header line
 constant http_max_header_size         = 65536      # total header block
 constant http_max_body_size           = 67108864   # buffered body limit (64 MiB)
+constant http_max_static_file_size    = 16777216   # max static file size served/cached (16 MiB)
+constant http_file_cache_max_entries  = 64         # LRU cap for the static file cache
 
 constant framing_hex_size             = 16         # must match C++ NETWORK_FIXED_HEX_SIZE
 constant default_http_port            = 80
@@ -214,6 +216,22 @@ function read_file(path)
     while ifs.good()
         # Read 256KB per iteration
         data.append(runtime.await(ifs.read, 262144))
+    end
+    return move(data)
+end
+
+# Bounded variant of read_file: returns null instead of buffering more than
+# max_size bytes, protecting long-running servers from oversized files in
+# wwwroot. The check is per-chunk (no stat API dependency), so transient
+# over-reads are limited to one 256KB chunk past the cap.
+function read_file_limited(path, max_size)
+    var ifs = iostream.fstream(path, iostream.openmode.bin_in)
+    var data = new string
+    while ifs.good()
+        data.append(runtime.await(ifs.read, 262144))
+        if data.size > max_size
+            return null
+        end
     end
     return move(data)
 end
@@ -474,15 +492,29 @@ function read_http_header(sock, state, keep_alive_timeout, max_body_size)
             error_code = state_codes.code_408
             break
         end
-        async.read_until(sock, state, "\r\n")
+        # Bounded at the CNI level: read_until_limited caps the ASIO streambuf
+        # at http_max_header_line_size so a client sending bytes without CRLF
+        # cannot grow memory unboundedly; the size checks below remain as
+        # defense in depth.
+        async.read_until_limited(sock, state, "\r\n", http_max_header_line_size)
         if !state.wait_for(timeout)
             if state.has_done()
                 if state.eof()
                     log("Read request header: End of file")
                     error_code = state_codes.code_eof
                 else
-                    log("Read request header error: " + state.get_error())
-                    error_code = state_codes.code_500
+                    var read_error = state.get_error()
+                    # The CNI-level size cap fired: a line longer than
+                    # http_max_header_line_size without CRLF. Report it as
+                    # 431 (matching the post-read check below) so the wire
+                    # format stays stable.
+                    if read_error != null && read_error.find("size limit", 0) != -1
+                        log("Read request header error: Header limit exceeded.")
+                        error_code = state_codes.code_431
+                    else
+                        log("Read request header error: " + read_error)
+                        error_code = state_codes.code_500
+                    end
                 end
             else
                 log("Read request header error: Keep-alive timeout.")
@@ -508,6 +540,23 @@ function read_http_header(sock, state, keep_alive_timeout, max_body_size)
         error_code = state_codes.code_400
     end
     if error_code != null
+        # Lingering-close discipline: rejecting a request while unread
+        # request bytes are still queued (e.g. the read_until_limited size
+        # cap stopped reading early) would make the subsequent close send
+        # RST instead of FIN, and the peer may discard the error response
+        # we are about to transmit. Drain the queued bytes first.
+        try
+            var drain_pass = 0
+            while drain_pass < 16 && sock.available() > 0
+                var junk = sock.receive(sock.available())
+                if junk == null || junk.empty()
+                    break
+                end
+                drain_pass += 1
+            end
+        catch e
+            # Socket already gone; nothing left to drain.
+        end
         if error_code != state_codes.code_eof
             send_error_response(sock, error_code)
         end
@@ -626,7 +675,13 @@ function call_http_handler(session, server)
                     end
                     if system.path.is_file(full_path) && system.file.can_read(full_path)
                         log("Serving file: " + full_path)
-                        session.send_response(state_codes.code_200, server->read_file(full_path), get_mime(full_path))
+                        var file_data = server->read_file(full_path)
+                        if file_data == null
+                            log("Static file too large: " + full_path)
+                            error_code = state_codes.code_413
+                        else
+                            session.send_response(state_codes.code_200, file_data, get_mime(full_path))
+                        end
                     else
                         if system.file.exist(full_path)
                             error_code = state_codes.code_403
@@ -911,8 +966,16 @@ function master_response_worker(self)
                 # header to prevent a mismatch between the response and
                 # the actual connection lifecycle.
                 if !conn->keep_alive
-                    session.response = regex.replace(keep_alive_replace_reg,
-                        session.response, "Connection: close")
+                    # Rewrite the Connection header ONLY in the header section.
+                    # Replacing over the whole response would corrupt bodies
+                    # that happen to contain "Connection: keep-alive" (e.g.
+                    # proxy or echo endpoints).
+                    var sep = session.response.find("\r\n\r\n", 0)
+                    if sep != -1
+                        session.response = regex.replace(keep_alive_replace_reg,
+                            session.response.substr(0, sep), "Connection: close") +
+                            session.response.substr(sep, session.response.size - sep)
+                    end
                 end
                 var response_state = async.write(conn->sock, session.response)
                 if !response_state.wait()
@@ -1246,7 +1309,7 @@ function parse_http_args(input)
         qs = input.substr(qpos + 1, input.size)
     end
     var result = new hash_map
-    if qs == "" || qs == null
+    if qs == null || qs == ""
         return result
     end
     var parts = qs.split({'&'})
@@ -1419,7 +1482,7 @@ class http_client
             end
             try
                 var state = new async.state
-                async.read_until(sock, state, delim)
+                async.read_until_limited(sock, state, delim, max_size)
                 if !_await(state)
                     return null
                 end
@@ -1870,11 +1933,18 @@ class openai_client extends http_client
 end
 
 function local_addr()
-    var sock = new udp.socket
-    sock.connect(udp.endpoint("8.8.8.8", 53))
-    var addr = sock.local_endpoint().address()
-    sock.close()
-    return addr
+    # UDP connect sends no packets; it only lets the OS pick the local
+    # outbound address for the route to 8.8.8.8. On hosts without such a
+    # route (air-gapped, no default gateway) fall back to loopback.
+    try
+        var sock = new udp.socket
+        sock.connect(udp.endpoint("8.8.8.8", 53))
+        var addr = sock.local_endpoint().address()
+        sock.close()
+        return addr
+    catch e
+        return "127.0.0.1"
+    end
 end
 
 # HTTP/1.1 server -- single-process (coroutine pool) or master/slave.
@@ -1892,6 +1962,9 @@ class http_server
     var max_body_size = http_max_body_size
     var mtime_map = new hash_map
     var content_map = new hash_map
+    var cache_order = new list    # LRU order of cached paths (front = oldest)
+    var max_static_file_size = http_max_static_file_size
+    var file_cache_max_entries = http_file_cache_max_entries
     # multi-process support
     var multi_process = false
     var is_master = true
@@ -1911,20 +1984,47 @@ class http_server
     var stopped = false
     var event_loop_active = false   # true while run()/poll() is driving fibers
     # private functions
-    function read_file(path)
-        var time = runtime.time()
-        if mtime_map.exist(path)
-            var last_mtime = mtime_map[path]
-            var current_mtime = system.file.mtime(path)
-            if current_mtime == last_mtime && content_map.exist(path)
-                return content_map[path]
+    # Move path to the most-recently-used end of cache_order (deduplicating
+    # any stale occurrence). Linear scan; the cache is small (capped).
+    function touch_cache(path)
+        for it = cache_order.begin, it != cache_order.end, null
+            if it.data == path
+                cache_order.erase(it)
+                break
             end
+            it.next()
+        end
+        cache_order.push_back(path)
+    end
+    # mtime-validated LRU file cache with an entry cap and a per-file size
+    # limit. Returns null when the file exceeds max_static_file_size.
+    function read_file(path)
+        var current_mtime = system.file.mtime(path)
+        if mtime_map.exist(path) && mtime_map[path] == current_mtime && content_map.exist(path)
+            touch_cache(path)
+            return content_map[path]
+        end
+        var data = global.read_file_limited(path, max_static_file_size)
+        if data == null
+            return null
+        end
+        if mtime_map.exist(path)
             mtime_map[path] = current_mtime
         else
-            mtime_map.insert(path, system.file.mtime(path))
+            mtime_map.insert(path, current_mtime)
         end
-        var data = global.read_file(path)
-        content_map.insert(path, data)
+        # Bracket assignment overwrites; insert does too, but assignment is
+        # the unambiguous form (this previously used insert on the update
+        # path, which coupled correctness to insert-overwrite semantics).
+        content_map[path] = data
+        touch_cache(path)
+        # Evict least-recently-used entries past the cap
+        while cache_order.size > file_cache_max_entries
+            var victim = cache_order.front
+            cache_order.pop_front()
+            mtime_map.erase(victim)
+            content_map.erase(victim)
+        end
         return data
     end
     function add_worker(func)
@@ -2077,19 +2177,41 @@ class http_server
                 max_body_size = 1
             end
         end
+        if conf.exist("max_static_file_size")
+            max_static_file_size = conf["max_static_file_size"] as integer
+            if max_static_file_size < 1
+                max_static_file_size = 1
+            end
+        end
+        if conf.exist("file_cache_max_entries")
+            file_cache_max_entries = conf["file_cache_max_entries"] as integer
+            if file_cache_max_entries < 1
+                file_cache_max_entries = 1
+            end
+        end
         return this
     end
     function bind_page(url : string, path : string)
         var normalized_path = path_normalize((wwwroot_path != null ? wwwroot_path + "/" + path : path))
         url_map.insert(url, [normalized_path](server, session){
-            session.send_response(state_codes.code_200, server.read_file(normalized_path), get_mime(normalized_path))
+            var data = server.read_file(normalized_path)
+            if data == null
+                session.send_response(state_codes.code_413, "File too large.", "text/plain")
+            else
+                session.send_response(state_codes.code_200, data, get_mime(normalized_path))
+            end
         })
         return this
     end
     function bind_code(state_code : string, path : string)
         var normalized_path = path_normalize((wwwroot_path != null ? wwwroot_path + "/" + path : path))
         url_map.insert(state_code, [normalized_path, state_code](server, session){
-            session.send_response(state_code, server.read_file(normalized_path), get_mime(normalized_path))
+            var data = server.read_file(normalized_path)
+            if data == null
+                session.send_response(state_code, "Error.", "text/plain")
+            else
+                session.send_response(state_code, data, get_mime(normalized_path))
+            end
         })
         return this
     end

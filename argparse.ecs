@@ -48,7 +48,7 @@ class ArgumentParser
         this.set_option_alias("--help", "-h")
     end
     function add_argument(key: string, required: boolean, help_text: string)
-        if key.find("-", 0) == 0
+        if key.find("-", 0) != -1
             throw runtime.exception("ArgumentParser: arguments can not contains \"-\"")
         end
         args_arr.push_back(gcnew KeyStore{key, null, null, required, help_text})

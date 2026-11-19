@@ -79,6 +79,33 @@ catch e
 end
 check("U04-02: from_fixed_hex throws on long input", threw)
 
+# std::stoull would accept a leading sign ("-" wraps modulo 2^64); the
+# framing helpers must stay symmetric with to_fixed_hex, which rejects
+# negative numbers.
+threw = false
+try
+    network.from_fixed_hex("-000000000000001")
+catch e
+    threw = true
+end
+check("U04-03: from_fixed_hex throws on negative sign", threw)
+
+threw = false
+try
+    network.from_fixed_hex("+000000000000001")
+catch e
+    threw = true
+end
+check("U04-04: from_fixed_hex throws on plus sign", threw)
+
+threw = false
+try
+    network.from_fixed_hex(" 00000000000000F")
+catch e
+    threw = true
+end
+check("U04-05: from_fixed_hex throws on leading whitespace", threw)
+
 section("U05: resolve hostname")
 
 var results = network.tcp.resolve("localhost", "80")
@@ -117,6 +144,47 @@ catch e
     threw6 = true
 end
 check("U06-04: endpoint_v6 port > 65535 rejected", threw6)
+
+section("U07: endpoint address validation")
+
+# endpoint() accepts numeric addresses only; host names must go through
+# resolve(). The failure must be a catchable language error whose message
+# points at resolve().
+var err7 = null
+try
+    network.tcp.endpoint("localhost", 80)
+catch e
+    err7 = e.what
+end
+check("U07-01: tcp endpoint host name throws catchable error", err7 != null)
+check("U07-02: error message suggests resolve()", err7 != null && err7.find("resolve", 0) != -1)
+
+err7 = null
+try
+    network.udp.endpoint("localhost", 80)
+catch e
+    err7 = e.what
+end
+check("U07-03: udp endpoint host name throws catchable error", err7 != null)
+
+# Numeric addresses keep working
+var ok7 = false
+try
+    var ep7 = network.tcp.endpoint("127.0.0.1", 80)
+    ok7 = ep7.address() == "127.0.0.1" && ep7.port() == 80
+catch e
+    ok7 = false
+end
+check("U07-04: tcp endpoint numeric address accepted", ok7)
+
+var ok7v6 = false
+try
+    var ep7v6 = network.tcp.endpoint("::1", 80)
+    ok7v6 = ep7v6.is_v6()
+catch e
+    ok7v6 = false
+end
+check("U07-05: tcp endpoint IPv6 numeric address accepted", ok7v6)
 
 system.out.println("")
 system.out.println("=== Results ===")

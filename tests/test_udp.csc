@@ -3,6 +3,7 @@ import network.async as async
 
 var _pass = 0
 var _fail = 0
+var _skip = 0
 var _section = ""
 
 function section(name)
@@ -36,17 +37,23 @@ function check_true(label, v)
     check(label, v == true)
 end
 
+function skip(label, reason)
+    _skip += 1
+    system.out.println("[SKIP] " + _section + " | " + label + " -- " + reason)
+end
+
 section("U01: UDP sync loopback")
 
-var port = 13000
+# Bind to port 0 so the OS assigns ephemeral ports -- avoids collisions
+# when multiple test runs or CI jobs share a machine.
 var sock_a = new udp.socket
 var sock_b = new udp.socket
 
 try
     sock_a.open_v4()
     sock_b.open_v4()
-    sock_a.bind(udp.endpoint_v4(port))
-    sock_b.bind(udp.endpoint_v4(port + 1))
+    sock_a.bind(udp.endpoint_v4(0))
+    sock_b.bind(udp.endpoint_v4(0))
     check("U01-01: sockets opened and bound", true)
 catch e
     check("U01-01: sockets opened and bound", false)
@@ -54,15 +61,19 @@ catch e
     system.exit(1)
 end
 
+var port_a = sock_a.local_endpoint().port()
+var port_b = sock_b.local_endpoint().port()
+check("U01-02: OS assigned nonzero ports", port_a != 0 && port_b != 0)
+
 var msg = "UDP loopback test message"
-sock_a.send_to(msg, udp.endpoint("127.0.0.1", port + 1))
+sock_a.send_to(msg, udp.endpoint("127.0.0.1", port_b))
 
 var ep_from = udp.endpoint_v4(0)
 var received = sock_b.receive_from(msg.size, ep_from)
-check_eq("U01-02: received message", received, msg)
-check_eq("U01-03: received length", received.size, msg.size)
-check("U01-04: sender is_v4", ep_from.is_v4())
-check_eq("U01-05: sender port matches A", ep_from.port(), port)
+check_eq("U01-03: received message", received, msg)
+check_eq("U01-04: received length", received.size, msg.size)
+check("U01-05: sender is_v4", ep_from.is_v4())
+check_eq("U01-06: sender port matches A", ep_from.port(), port_a)
 
 sock_a.close()
 sock_b.close()
@@ -86,21 +97,22 @@ check_eq("U02-08: broadcast port", ep3.port(), 8888)
 section("U03: UDP async")
 
 var guard = new async.work_guard
-var port3 = 13002
 var sock_c = new udp.socket
 var sock_d = new udp.socket
 
 sock_c.open_v4()
 sock_d.open_v4()
-sock_c.bind(udp.endpoint_v4(port3))
-sock_d.bind(udp.endpoint_v4(port3 + 1))
+sock_c.bind(udp.endpoint_v4(0))
+sock_d.bind(udp.endpoint_v4(0))
+var port_c = sock_c.local_endpoint().port()
+var port_d = sock_d.local_endpoint().port()
 
 var recv_state = async.receive_from(sock_c, 100)
 
-var send_state = async.send_to(sock_d, "async-udp-test", udp.endpoint("127.0.0.1", port3))
+var send_state = async.send_to(sock_d, "async-udp-test", udp.endpoint("127.0.0.1", port_c))
 var second_send_rejected = false
 try
-    async.send_to(sock_d, "duplicate", udp.endpoint("127.0.0.1", port3))
+    async.send_to(sock_d, "duplicate", udp.endpoint("127.0.0.1", port_c))
 catch e
     second_send_rejected = true
 end
@@ -113,7 +125,7 @@ if recv_state.wait_for(3000)
 
     var sender_ep = recv_state.get_endpoint()
     check("U03-04: sender endpoint is_v4", sender_ep.is_v4())
-    check_eq("U03-05: sender port", sender_ep.port(), port3 + 1)
+    check_eq("U03-05: sender port", sender_ep.port(), port_d)
 else
     check("U03-02: async receive completed", false)
     system.out.println("  Receive timed out")
@@ -128,14 +140,14 @@ end
 sock_c.close()
 sock_d.close()
 
-section("U04: safe_close rejects pending receive")
+section("U04: safe_close cancels pending receive")
 
+# safe_close() cancels pending async operations (mirroring TCP safe_shutdown)
+# so a UDP socket with an outstanding receive_from can always be closed
+# instead of leaking open until a datagram happens to arrive.
 var sock_e = new udp.socket
-var sock_f = new udp.socket
 sock_e.open_v4()
-sock_f.open_v4()
-sock_e.bind(udp.endpoint_v4(port3 + 2))
-sock_f.bind(udp.endpoint_v4(port3 + 3))
+sock_e.bind(udp.endpoint_v4(0))
 
 var pending_receive = async.receive_from(sock_e, 100)
 var second_receive_rejected = false
@@ -145,6 +157,7 @@ catch e
     second_receive_rejected = true
 end
 check("U04-01: second pending receive rejected", second_receive_rejected)
+
 var close_rejected = false
 try
     sock_e.close()
@@ -152,14 +165,11 @@ catch e
     close_rejected = true
 end
 check("U04-02: close rejected while receive pending", close_rejected)
-check("U04-03: safe_close reports pending receive", sock_e.safe_close() == false)
-check("U04-04: socket remains open after rejected close", sock_e.is_open())
 
-sock_f.send_to("release", udp.endpoint("127.0.0.1", port3 + 2))
-check("U04-05: pending receive completes", pending_receive.wait_for(3000))
-check("U04-06: safe_close succeeds after receive", sock_e.safe_close())
-check("U04-07: socket closed after safe_close", !sock_e.is_open())
-sock_f.close()
+check_true("U04-03: safe_close cancels pending receive and closes", sock_e.safe_close())
+check("U04-04: socket closed after safe_close", !sock_e.is_open())
+check("U04-05: pending receive marked done after cancel", pending_receive.has_done())
+check_not_null("U04-06: pending receive reports cancellation error", pending_receive.get_error())
 
 section("U05: socket options")
 
@@ -197,10 +207,61 @@ catch e
 end
 check("U07-02: oversized async receive rejected", oversized_receive_rejected)
 
+section("U08: broadcast send")
+
+# Sending to the broadcast endpoint must succeed with SO_BROADCAST set.
+# Actual delivery of broadcast datagrams depends on the platform/network
+# (containers and some CI runners drop them), so the receive leg skips
+# when nothing arrives.
+var bcast_rx = new udp.socket
+var bcast_tx = new udp.socket
+bcast_rx.open_v4()
+bcast_rx.set_opt_reuse_address(true)
+bcast_rx.bind(udp.endpoint_v4(0))
+var bcast_port = bcast_rx.local_endpoint().port()
+
+bcast_tx.open_v4()
+bcast_tx.set_opt_broadcast(true)
+
+var bcast_send_ok = true
+var bcast_send_error = ""
+try
+    bcast_tx.send_to("bcast-probe", udp.endpoint_broadcast(bcast_port))
+catch e
+    bcast_send_ok = false
+    bcast_send_error = e.what
+end
+check("U08-01: broadcast send with SO_BROADCAST does not throw", bcast_send_ok)
+if !bcast_send_ok
+    system.out.println("  Error: " + bcast_send_error)
+end
+
+var bcast_state = async.receive_from(bcast_rx, 64)
+if bcast_state.wait_for(1000)
+    check_eq("U08-02: broadcast datagram received", bcast_state.get_result(), "bcast-probe")
+else
+    skip("U08-02: broadcast datagram received", "no broadcast delivery on this platform")
+end
+
+var nobroadcast_rejected = false
+var no_bcast_sock = new udp.socket
+no_bcast_sock.open_v4()
+try
+    # Without SO_BROADCAST the OS must reject the broadcast send
+    no_bcast_sock.send_to("x", udp.endpoint_broadcast(bcast_port))
+catch e
+    nobroadcast_rejected = true
+end
+check("U08-03: broadcast send without SO_BROADCAST rejected", nobroadcast_rejected)
+no_bcast_sock.close()
+bcast_rx.close()
+bcast_tx.close()
+
 system.out.println("")
 system.out.println("=== Results ===")
 system.out.println("PASS: " + _pass)
 system.out.println("FAIL: " + _fail)
+system.out.println("SKIP: " + _skip)
 if _fail > 0
     system.exit(1)
 end

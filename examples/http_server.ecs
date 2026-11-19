@@ -56,18 +56,21 @@ var server = (new netutils.http_server)
     .set_config(config)
     .bind_code(netutils.state_codes.code_404, "404.html")
     .bind_func("/get", [](server, session){
-        # DB query
+        # DB query -- only proceed to the statement when the method check
+        # passes; the else branch must not fall through into exec() (that
+        # would run the statement with stale bindings and send a second
+        # response).
         if session.method != "POST"
             var args = netutils.parse_http_args(session.args)
             get_stmt.bind(0, args.id)
+            var result = get_stmt.exec()
+            if result.size != 1
+                session.send_response(netutils.state_codes.code_403, "Record not existed.", "text/plain")
+            else
+                session.send_response(netutils.state_codes.code_200, result[0][1].data, "text/plain")
+            end
         else
             session.send_response(netutils.state_codes.code_403, "Please use GET method.", "text/plain")
-        end
-        var result = get_stmt.exec()
-        if result.size != 1
-            session.send_response(netutils.state_codes.code_403, "Record not existed.", "text/plain")
-        else
-            session.send_response(netutils.state_codes.code_200, result[0][1].data, "text/plain")
         end
     })
     .bind_func("/set", [](server, session){
@@ -76,11 +79,11 @@ var server = (new netutils.http_server)
             var args = netutils.parse_http_args(session.args)
             set_stmt.bind(0, args.id)
             set_stmt.bind(1, args.val)
+            var result = set_stmt.just_exec()
+            session.send_response(netutils.state_codes.code_200, "OK", "text/plain")
         else
             session.send_response(netutils.state_codes.code_403, "Please use GET method.", "text/plain")
         end
-        var result = set_stmt.just_exec()
-        session.send_response(netutils.state_codes.code_200, "OK", "text/plain")
     })
     .bind_func("/block", [](server, session){
         # Test for block API

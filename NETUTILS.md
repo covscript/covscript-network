@@ -1,6 +1,6 @@
 # CovScript NetUtils 协议文档
 
-版本：2.3
+版本：2.4
 
 作者：Covariant Script OSC
 
@@ -27,7 +27,7 @@
 ## 2. 基本常量与工具函数
 
 * `server_name = "CovScript-NetUtils"`
-* `server_version = "2.3"`
+* `server_version = "2.4"`
 
 与协议/实现相关的重要工具函数：
 
@@ -178,6 +178,8 @@ Master 分配 `rank`：先尝试使用 `deprecated_rank`（回收的编号），
 | `heartbeat_interval`       |              Master 对 Slave 心跳间隔（ms） | `1000` |
 | `slave_spawn_timeout`      |                     Slave 握手超时时间（ms） | `1000` |
 | `slave_keep_alive_timeout` | Master 与 Slave 之间的 keep-alive 超时（ms） | `5000` |
+| `max_static_file_size`   |                静态文件服务的单文件大小上限（超出返回 413） | `16777216` (16 MiB) |
+| `file_cache_max_entries` |                静态文件 LRU 缓存的最大条目数 |  `64`  |
 
 控制逻辑：
 
@@ -215,7 +217,7 @@ Master 分配 `rank`：先尝试使用 `deprecated_rank`（回收的编号），
   设置静态文件根目录（并 normalize），返回 `this` 以链式调用。
 
 * `set_config(conf : hash_map)`
-  通过 `hash_map` 设置多个配置项，通常将 JSON 配置文件读取后传至这里。可识别的键包括 `"thread_count"`、`"worker_count"`、`"wwwroot"`、`"max_keep_alive"`、`"keep_alive_timeout"`、`"max_body_size"`、`"max_connections"`、`"heartbeat_interval"`、`"slave_spawn_timeout"`、`"slave_keep_alive_timeout"`、`"multi_process"`、`"master_worker_count"`，返回 `this`。
+  通过 `hash_map` 设置多个配置项，通常将 JSON 配置文件读取后传至这里。可识别的键包括 `"thread_count"`、`"worker_count"`、`"wwwroot"`、`"max_keep_alive"`、`"keep_alive_timeout"`、`"max_body_size"`、`"max_static_file_size"`、`"file_cache_max_entries"`、`"max_connections"`、`"heartbeat_interval"`、`"slave_spawn_timeout"`、`"slave_keep_alive_timeout"`、`"master_worker_count"`、`"master_dispatch_retry"`，返回 `this`。多进程模式由 `set_master`/`set_slave` 启用，不通过此处的键配置。
 
 * `bind_page(url : string, path : string)`
   将某 URL 绑定到 `wwwroot/path`，当请求到该 URL 时返回该文件内容。
@@ -235,7 +237,7 @@ Master 分配 `rank`：先尝试使用 `deprecated_rank`（回收的编号），
 * `listen(port : integer)`
   启动单进程模式，并在本地监听 `port`。
 
-* `bind_proxy(prefix : string, target : string, timeout_ms : number)`
+* `bind_proxy(prefix : string, target : string, timeout_ms : integer)`
   将 `prefix` 开头的 URL 代理转发到 `target`（如 `"http://127.0.0.1:3000"`）。
   转发时保留原始请求头，但会过滤 hop-by-hop 头（`Host`、`Connection`、`Content-Length`、`Transfer-Encoding`、`Keep-Alive`、`Proxy-*`、`TE`、`Trailer`、`Upgrade` 等由 `http_request` 内部管理，不透传）；同时**注入 `X-Forwarded-For: <客户端真实 IP>`**（客户端伪造的同名头会被丢弃后重写），后端据此可获得真实来源地址而非代理自身 IP。
 
@@ -308,7 +310,7 @@ Master 分配 `rank`：先尝试使用 `deprecated_rank`（回收的编号），
 * `set_timeout_ms(ms)` — 设置每个异步 I/O 操作的超时（毫秒），`null` 表示无超时。
 * `set_tls_options(options)` — 设置 TLS 选项（`{"trust_mode": "auto"}` 等）。
 * `parse_url(url)` — 解析 URL，返回 `{scheme, host, port, path}.to_hash_map()`。
-* `connect_target(target)` — 解析目标并建立 TCP/TLS 连接，首次调用时创建内部 `async.work_guard` 以保持 io_context 存活。
+* `connect_target(target)` — 接收 `parse_url` 返回的 `hash_map`（非 URL 字符串）并建立 TCP/TLS 连接，首次调用时创建内部 `async.work_guard` 以保持 io_context 存活。
 * `http_request(method, url, headers, body)` — 发起 HTTP 请求，返回 `{status_code, headers, body}.to_hash_map()` 或 `null`。
 * `post(url, headers, body)` — POST 快捷方法，等价于 `http_request("POST", ...)`。
 * `close()` — 关闭底层 socket（`safe_shutdown`）。
@@ -318,13 +320,14 @@ Master 分配 `rank`：先尝试使用 `deprecated_rank`（回收的编号），
 兼容 OpenAI / DeepSeek 等 Chat Completions API 的客户端：
 
 * `set_api_key(key)` / `set_base(url)` / `set_model(name)` — 配置认证、endpoint、模型。
+* `request(endpoint, payload)` — 对任意 API 端点（如 `/models`、`/embeddings`）发起通用请求，`chat()` 即基于此实现。
 * `message(role, content)` — 创建 `{role, content}.to_hash_map()` 消息。
 * `chat(messages)` — 调用 `/chat/completions`，返回 JSON 解析后的 `hash_map` 或 `null`。
 * `chat_text(messages)` — 调用 `chat()` 并提取 `response.choices[0].message.content`。
 
 默认值：`api_base = "https://api.openai.com/v1"`，`model = "gpt-4o-mini"`。
 
-* `local_addr()`：使用 UDP connect 到 `8.8.8.8:53` 来探测本机公网/本地出口地址（不发送数据，只用 socket local endpoint）。
+* `local_addr()`：使用 UDP connect 到 `8.8.8.8:53` 来探测本机公网/本地出口地址（不发送数据，只用 socket local endpoint）。无可用路由（隔离网络/无默认网关）时回退返回 `127.0.0.1`。
 
 ---
 
@@ -387,7 +390,7 @@ slave.set_slave("127.0.0.1", 9000)
 
 * **性能调优建议**
 
-  * `worker_count` 控制可同时服务的活动/keep-alive 连接数量，默认为 64。高并发部署仍应根据内存、keep-alive 时间和后端延迟调整。不建议无限制调高——每个 worker fiber 持有 accept 操作的异步状态。
+  * `worker_count` 控制可同时服务的活动/keep-alive 连接数量，默认为 32。高并发部署仍应根据内存、keep-alive 时间和后端延迟调整。不建议无限制调高——每个 worker fiber 持有 accept 操作的异步状态。
   * Master 模式下可以单独调整 `master_worker_count` 以改善 Master 对高并发连接的处理能力。同时，`max_connections` 也需要相应更改，防止大量连接排队的情况。
   * 由于 NetUtils 依赖 Master 节点进行分发，过多的 Slave 节点也会增加系统资源和调度的开销，一般可以取 2~8。
   * 调整 `max_keep_alive`、`keep_alive_timeout` 平衡连接复用与资源占用。
